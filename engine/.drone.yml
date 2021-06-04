@@ -112,8 +112,6 @@ services:
   - image: trufflesuite/ganache-cli:latest
     name: ganache
     ports: [8545]
-    command:
-      - "ganache-cli --mnemonic chainflip"
 
 steps:
   - name: run-tests
