@@ -112,6 +112,8 @@ services:
   - image: trufflesuite/ganache-cli:latest
     name: ganache
     ports: [8545]
+    entrypoint:
+      - ganache-cli --mnemonic chainflip
     # commands:
       # kill the main process then restart with the chainflip mnemonic... a bit hacky
       # - node /app/ganache-core.docker.cli.js --mnemonic chainflip
