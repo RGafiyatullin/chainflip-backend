@@ -13,6 +13,7 @@ targets = ['x86_64-unknown-linux-gnu']
 [dependencies]
 # Internal deps
 cf-traits = { path = '../../traits', default-features = false }
+state-chain-event-derive = { path = '../../event-derive', default-features = false }
 codec = { package = "parity-scale-codec", version = "2.0.0", default-features = false }
 frame-support = { version = "3.0.0", default-features = false }
 frame-system = { version = "3.0.0", default-features = false }
