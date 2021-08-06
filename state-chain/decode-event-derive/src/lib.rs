@@ -75,7 +75,7 @@ pub fn decode_event(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
                             impl #impl_generics ::decode_event::DecodeEvent for #enum_name #ty_generics {
                                 // Cannot import substrate_xt into state_chain, so cannot have raw_event as parameter
-                                fn try_decode<I : ::codec::Input>(variant : &str, data : &mut I) -> core::result::Result<core::option::Option<Self>, ::codec::Error> {
+                                fn decode_event<I : ::codec::Input>(variant : &str, data : &mut I) -> core::result::Result<core::option::Option<Self>, ::codec::Error> {
                                     #(#variant_structs)*
 
                                     Ok(match variant {
