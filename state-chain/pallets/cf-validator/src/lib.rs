@@ -53,6 +53,7 @@ extern crate assert_matches;
 mod benchmarking;
 
 use cf_traits::{Auction, AuctionPhase, EpochInfo};
+use decode_event;
 use frame_support::pallet_prelude::*;
 use frame_support::sp_runtime::traits::{Saturating, Zero};
 pub use pallet::*;
@@ -123,13 +124,14 @@ pub mod pallet {
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
+	#[derive(decode_event::DecodeEvent)]
 	pub enum Event<T: Config> {
 		/// A new epoch has started \[epoch_index\]
-		NewEpoch(T::EpochIndex),
+		NewEpoch{epoch_index : T::EpochIndex},
 		/// The number of blocks has changed for our epoch \[from, to\]
-		EpochDurationChanged(T::BlockNumber, T::BlockNumber),
+		EpochDurationChanged{from : T::BlockNumber, to : T::BlockNumber},
 		/// A new epoch has been forced
-		ForceRotationRequested(),
+		ForceRotationRequested{},
 	}
 
 	#[pallet::error]

@@ -100,22 +100,22 @@ fn staked_amount_is_added_and_subtracted() {
 		assert_eq!(PendingClaims::<Test>::get(BOB).unwrap().amount, CLAIM_B);
 
 		assert_event_stack!(
-			Event::pallet_cf_staking(crate::Event::ClaimSigRequested(BOB, _payload)),
+			Event::pallet_cf_staking(crate::Event::ClaimSigRequested{who : BOB, msg_hash : _payload}),
 			_, // claim debited from BOB
-			Event::pallet_cf_staking(crate::Event::ClaimSigRequested(ALICE, _payload)),
+			Event::pallet_cf_staking(crate::Event::ClaimSigRequested{who : ALICE, msg_hash : _payload}),
 			_, // claim debited from ALICE
-			Event::pallet_cf_staking(crate::Event::Staked(BOB, staked, total)) => {
+			Event::pallet_cf_staking(crate::Event::Staked{who : BOB, stake_added : staked, total_stake : total}) => {
 				assert_eq!(staked, STAKE_B);
 				assert_eq!(total, STAKE_B);
 			},
 			_, // stake credited to BOB
 			Event::frame_system(frame_system::Event::NewAccount(BOB)),
-			Event::pallet_cf_staking(crate::Event::Staked(ALICE, staked, total)) => {
+			Event::pallet_cf_staking(crate::Event::Staked{who : ALICE, stake_added : staked, total_stake : total}) => {
 				assert_eq!(staked, STAKE_A2);
 				assert_eq!(total, STAKE_A1 + STAKE_A2);
 			},
 			_, // stake credited to ALICE
-			Event::pallet_cf_staking(crate::Event::Staked(ALICE, staked, total)) => {
+			Event::pallet_cf_staking(crate::Event::Staked{who : ALICE, stake_added : staked, total_stake : total}) => {
 				assert_eq!(staked, STAKE_A1);
 				assert_eq!(total, STAKE_A1);
 			},
@@ -151,9 +151,9 @@ fn claiming_unclaimable_is_err() {
 		// Make sure storage hasn't been touched.
 		assert_eq!(Flip::total_balance_of(&ALICE), STAKE);
 
-		assert_event_stack!(Event::pallet_cf_staking(crate::Event::Staked(
-			ALICE, STAKE, STAKE
-		)));
+		assert_event_stack!(Event::pallet_cf_staking(crate::Event::Staked{
+			who : ALICE, stake_added : STAKE, total_stake : STAKE
+		}));
 	});
 }
 
@@ -244,13 +244,13 @@ fn staked_and_claimed_events_must_match() {
 		assert!(!frame_system::Pallet::<Test>::account_exists(&ALICE));
 
 		assert_event_stack!(
-			Event::pallet_cf_staking(crate::Event::ClaimSettled(ALICE, claimed_amount)) => {
+			Event::pallet_cf_staking(crate::Event::ClaimSettled{who : ALICE, amount : claimed_amount}) => {
 				assert_eq!(claimed_amount, STAKE);
 			},
 			Event::frame_system(frame_system::Event::KilledAccount(ALICE)),
-			Event::pallet_cf_staking(crate::Event::ClaimSigRequested(ALICE, _payload)),
+			Event::pallet_cf_staking(crate::Event::ClaimSigRequested{who : ALICE, msg_hash : _payload}),
 			_, // Claim debited from account
-			Event::pallet_cf_staking(crate::Event::Staked(ALICE, added, total)) => {
+			Event::pallet_cf_staking(crate::Event::Staked{who : ALICE, stake_added : added, total_stake : total}) => {
 				assert_eq!(added, STAKE);
 				assert_eq!(total, STAKE);
 			},
@@ -314,7 +314,7 @@ fn signature_is_inserted() {
 		assert_eq!(claim.nonce, START_TIME.as_nanos() as u64);
 
 		assert_event_stack!(
-			Event::pallet_cf_staking(crate::Event::ClaimSigRequested(ALICE, msg_hash)) => {
+			Event::pallet_cf_staking(crate::Event::ClaimSigRequested{who : ALICE, msg_hash}) => {
 				// Insert a signature.
 				assert_ok!(Staking::post_claim_signature(
 					Origin::root(),
@@ -325,7 +325,7 @@ fn signature_is_inserted() {
 		);
 
 		assert_event_stack!(Event::pallet_cf_staking(
-			crate::Event::ClaimSignatureIssued(..)
+			crate::Event::ClaimSignatureIssued{..}
 		));
 
 		// Check storage for the signature.
@@ -420,8 +420,8 @@ fn test_retirement() {
 		);
 
 		assert_event_stack!(
-			Event::pallet_cf_staking(crate::Event::AccountActivated(_)),
-			Event::pallet_cf_staking(crate::Event::AccountRetired(_))
+			Event::pallet_cf_staking(crate::Event::AccountActivated{..}),
+			Event::pallet_cf_staking(crate::Event::AccountRetired{..})
 		);
 	});
 }
@@ -495,7 +495,7 @@ fn claim_expiry() {
 				STAKE,
 				0
 			)),
-			Event::pallet_cf_staking(crate::Event::ClaimExpired(ALICE, _, STAKE))
+			Event::pallet_cf_staking(crate::Event::ClaimExpired{who : ALICE, nonce : _, flip_balance : STAKE})
 		);
 
 		// Tick forward again and expire.
@@ -511,7 +511,7 @@ fn claim_expiry() {
 				STAKE,
 				0
 			)),
-			Event::pallet_cf_staking(crate::Event::ClaimExpired(BOB, _, STAKE))
+			Event::pallet_cf_staking(crate::Event::ClaimExpired{who : BOB, nonce : _, flip_balance : STAKE})
 		);
 	});
 }
@@ -550,9 +550,9 @@ fn test_claim_all() {
 
 		// We should have a claim for the full staked amount minus the bond.
 		assert_event_stack!(
-			Event::pallet_cf_staking(crate::Event::ClaimSigRequested(ALICE, _)),
+			Event::pallet_cf_staking(crate::Event::ClaimSigRequested{who : ALICE, msg_hash : _}),
 			_, // claim debited from ALICE
-			Event::pallet_cf_staking(crate::Event::Staked(ALICE, STAKE, STAKE)),
+			Event::pallet_cf_staking(crate::Event::Staked{who : ALICE, stake_added : STAKE, total_stake : STAKE}),
 			_ // stake credited to ALICE
 		);
 	});
@@ -637,9 +637,9 @@ fn test_check_withdrawal_address() {
 		let stake_attempt = stake_attempts.get(0);
 		assert_eq!(stake_attempt.unwrap().0, DIFFERENT_ETH_ADDR);
 		assert_eq!(stake_attempt.unwrap().1, STAKE);
-		assert_event_stack!(Event::pallet_cf_staking(crate::Event::FailedStakeAttempt(
+		assert_event_stack!(Event::pallet_cf_staking(crate::Event::FailedStakeAttempt{
 			..
-		)));
+		}));
 		// Case: User stakes again with the same address
 		assert!(
 			Pallet::<Test>::check_withdrawal_address(&ALICE, Some(ETH_DUMMY_ADDR), STAKE).is_ok()
@@ -678,7 +678,7 @@ fn stake_with_provided_withdrawal_only_on_first_attempt() {
 		// Stake some FLIP with no withdrawal address
 		assert_ok!(Staking::staked(Origin::root(), ALICE, STAKE, None, TX_HASH));
 		// Expect an Staked event to be fired
-		assert_event_stack!(Event::pallet_cf_staking(crate::Event::Staked(..)));
+		assert_event_stack!(Event::pallet_cf_staking(crate::Event::Staked{..}));
 		// Stake some FLIP again with an provided withdrawal address
 		assert_ok!(Staking::staked(
 			Origin::root(),
@@ -688,8 +688,8 @@ fn stake_with_provided_withdrawal_only_on_first_attempt() {
 			TX_HASH
 		));
 		// Expect an failed stake event to be fired but no stake event
-		assert_event_stack!(Event::pallet_cf_staking(crate::Event::FailedStakeAttempt(
+		assert_event_stack!(Event::pallet_cf_staking(crate::Event::FailedStakeAttempt{
 			..
-		)));
+		}));
 	});
 }

@@ -14,6 +14,7 @@ targets = ['x86_64-unknown-linux-gnu']
 # Internal deps
 pallet-cf-auction = { path = '../cf-auction', default-features = false }
 cf-traits = { path = '../../traits', default-features = false }
+decode-event = { path = '../../decode-event', default-features = false }
 serde = { version = "1.0.101", default-features = false, features = ["derive"] }
 codec = { package = "parity-scale-codec", version = "2.0.0", default-features = false }
 frame-support = { version = "3.0.0", default-features = false }

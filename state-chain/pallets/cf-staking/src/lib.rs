@@ -44,6 +44,7 @@ mod mock;
 mod tests;
 
 use cf_traits::{BidderProvider, EpochInfo, StakeTransfer};
+use decode_event;
 use core::time::Duration;
 use frame_support::{
 	debug,
@@ -182,41 +183,42 @@ pub mod pallet {
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
+	#[derive(decode_event::DecodeEvent)]
 	pub enum Event<T: Config> {
 		/// A validator has staked some FLIP on the Ethereum chain. [validator_id, stake_added, total_stake]
-		Staked(AccountId<T>, FlipBalance<T>, FlipBalance<T>),
+		Staked{who : AccountId<T>, stake_added : FlipBalance<T>, total_stake : FlipBalance<T>},
 
 		/// A validator has claimed their FLIP on the Ethereum chain. [validator_id, claimed_amount]
-		ClaimSettled(AccountId<T>, FlipBalance<T>),
+		ClaimSettled{who : AccountId<T>, amount : FlipBalance<T>},
 
 		/// The staked amount should be refunded to the provided Ethereum address. [node_id, refund_amount, address]
-		StakeRefund(AccountId<T>, FlipBalance<T>, EthereumAddress),
+		StakeRefund{who : AccountId<T>, amount : FlipBalance<T>, eth_address : EthereumAddress},
 
 		/// A claim request has been validated and needs to be signed. [node_id, msg_hash]
-		ClaimSigRequested(AccountId<T>, U256),
+		ClaimSigRequested{who : AccountId<T>, msg_hash : U256},
 
 		/// A claim signature has been issued by the signer module. [msg_hash, nonce, sig, node_id, amount, eth_addr, expiry_time]
-		ClaimSignatureIssued(
-			U256,
-			T::Nonce,
-			AggKeySignature,
-			AccountId<T>,
-			FlipBalance<T>,
-			EthereumAddress,
-			Duration,
-		),
+		ClaimSignatureIssued{
+			msg_hash : U256,
+			nonce : T::Nonce,
+			signature : AggKeySignature,
+			who : AccountId<T>,
+			amount : FlipBalance<T>,
+			eth_address : EthereumAddress,
+			expiry : Duration,
+		},
 
 		/// An account has retired and will no longer take part in auctions. [who]
-		AccountRetired(AccountId<T>),
+		AccountRetired{who : AccountId<T>},
 
 		/// A previously retired account  has been re-activated. [who]
-		AccountActivated(AccountId<T>),
+		AccountActivated{who : AccountId<T>},
 
 		/// A claim has expired without being redeemed. [who, nonce, amount]
-		ClaimExpired(AccountId<T>, T::Nonce, FlipBalance<T>),
+		ClaimExpired{who : AccountId<T>, nonce : T::Nonce, flip_balance : FlipBalance<T>},
 
 		/// A stake attempt has failed. [who, address, amount]
-		FailedStakeAttempt(AccountId<T>, EthereumAddress, FlipBalance<T>),
+		FailedStakeAttempt{who : AccountId<T>, eth_address : EthereumAddress, amount : FlipBalance<T>},
 	}
 
 	#[pallet::error]
@@ -366,7 +368,7 @@ pub mod pallet {
 				})
 			}
 
-			Self::deposit_event(Event::ClaimSettled(account_id, claimed_amount));
+			Self::deposit_event(Event::ClaimSettled{who : account_id, amount : claimed_amount});
 
 			Ok(().into())
 		}
@@ -412,15 +414,15 @@ pub mod pallet {
 
 			PendingClaims::<T>::insert(&account_id, claim_details.clone());
 
-			Self::deposit_event(Event::ClaimSignatureIssued(
+			Self::deposit_event(Event::ClaimSignatureIssued{
 				msg_hash,
-				claim_details.nonce,
+				nonce : claim_details.nonce,
 				signature,
-				account_id,
-				claim_details.amount,
-				claim_details.address,
-				claim_details.expiry,
-			));
+				who : account_id,
+				amount : claim_details.amount,
+				eth_address : claim_details.address,
+				expiry : claim_details.expiry,
+			});
 
 			Ok(().into())
 		}
@@ -500,11 +502,11 @@ impl<T: Config> Pallet<T> {
 		FailedStakeAttempts::<T>::mutate(&account_id, |staking_attempts| {
 			staking_attempts.push((withdrawal_address, amount));
 		});
-		Self::deposit_event(Event::FailedStakeAttempt(
-			account_id.clone(),
-			withdrawal_address,
+		Self::deposit_event(Event::FailedStakeAttempt{
+			who : account_id.clone(),
+			eth_address : withdrawal_address,
 			amount,
-		));
+		});
 		Err(Error::<T>::WithdrawalAddressRestricted)?
 	}
 
@@ -553,7 +555,7 @@ impl<T: Config> Pallet<T> {
 		// Staking implicitly activates the account. Ignore the error.
 		let _ = AccountRetired::<T>::mutate(&account_id, |retired| *retired = false);
 
-		Self::deposit_event(Event::Staked(account_id.clone(), amount, new_total));
+		Self::deposit_event(Event::Staked{who : account_id.clone(), stake_added : amount, total_stake : new_total});
 	}
 
 	fn do_claim(
@@ -612,7 +614,7 @@ impl<T: Config> Pallet<T> {
 				PendingClaims::<T>::insert(account_id, details);
 
 				// Emit the event requesting that the CFE generate the claim voucher.
-				Self::deposit_event(Event::<T>::ClaimSigRequested(account_id.clone(), msg_hash));
+				Self::deposit_event(Event::<T>::ClaimSigRequested{who : account_id.clone(), msg_hash});
 
 				Ok(())
 			}
@@ -639,7 +641,7 @@ impl<T: Config> Pallet<T> {
 						Err(Error::AlreadyRetired)?;
 					}
 					*retired = true;
-					Self::deposit_event(Event::AccountRetired(account_id.clone()));
+					Self::deposit_event(Event::AccountRetired{who : account_id.clone()});
 					Ok(())
 				}
 				None => Err(Error::UnknownAccount)?,
@@ -704,7 +706,7 @@ impl<T: Config> Pallet<T> {
 						Err(Error::AlreadyActive)?;
 					}
 					*retired = false;
-					Self::deposit_event(Event::AccountActivated(account_id.clone()));
+					Self::deposit_event(Event::AccountActivated{who : account_id.clone()});
 					Ok(())
 				}
 				None => Err(Error::UnknownAccount)?,
@@ -766,11 +768,11 @@ impl<T: Config> Pallet<T> {
 		for (_, account_id) in to_expire {
 			if let Some(pending_claim) = PendingClaims::<T>::take(account_id) {
 				// Notify that the claim has expired.
-				Self::deposit_event(Event::<T>::ClaimExpired(
-					account_id.clone(),
-					pending_claim.nonce,
-					pending_claim.amount,
-				));
+				Self::deposit_event(Event::<T>::ClaimExpired{
+					who : account_id.clone(),
+					nonce : pending_claim.nonce,
+					flip_balance : pending_claim.amount,
+				});
 
 				// Re-credit the account
 				T::Flip::revert_claim(&account_id, pending_claim.amount);

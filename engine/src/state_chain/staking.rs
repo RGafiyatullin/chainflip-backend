@@ -187,7 +187,7 @@ mod tests {
         let msg_hash = MsgHash::from([21u8; 32]);
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::ClaimSigRequested(who.clone(), msg_hash).into();
+            pallet_cf_staking::Event::<SCRuntime>::ClaimSigRequested{who : who.clone(), msg_hash}.into();
 
         let encoded_claim_sig_requested = event.encode();
 
@@ -213,7 +213,7 @@ mod tests {
         let who = AccountKeyring::Alice.to_account_id();
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::Staked(who.clone(), 100u128, 150u128).into();
+            pallet_cf_staking::Event::<SCRuntime>::Staked{who : who.clone(), stake_added : 100u128, total_stake : 150u128}.into();
 
         let encoded_staked = event.encode();
 
@@ -238,7 +238,7 @@ mod tests {
         let who = AccountKeyring::Alice.to_account_id();
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::ClaimSettled(who.clone(), 150u128).into();
+            pallet_cf_staking::Event::<SCRuntime>::ClaimSettled{who : who.clone(), amount : 150u128}.into();
 
         let encoded_claimed = event.encode();
 
@@ -262,7 +262,7 @@ mod tests {
         let who = AccountKeyring::Alice.to_account_id();
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::StakeRefund(who.clone(), 150u128, ETH_ADDRESS)
+            pallet_cf_staking::Event::<SCRuntime>::StakeRefund{who : who.clone(), amount : 150u128, eth_address : ETH_ADDRESS}
                 .into();
 
         let encoded_stake_refund = event.encode();
@@ -292,15 +292,15 @@ mod tests {
         let expiry = Duration::from_secs(1);
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::ClaimSignatureIssued(
+            pallet_cf_staking::Event::<SCRuntime>::ClaimSignatureIssued{
                 msg_hash,
-                1u64,
-                sig.clone(),
-                who.clone(),
-                150u128,
-                ETH_ADDRESS,
+                nonce : 1u64,
+                signature : sig.clone(),
+                who : who.clone(),
+                amount : 150u128,
+                eth_address : ETH_ADDRESS,
                 expiry,
-            )
+            }
             .into();
 
         let encoded_claim_sig_issued = event.encode();
@@ -332,7 +332,7 @@ mod tests {
         let who = AccountKeyring::Alice.to_account_id();
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::AccountRetired(who.clone()).into();
+            pallet_cf_staking::Event::<SCRuntime>::AccountRetired{who : who.clone()}.into();
 
         let encoded_account_retired = event.encode();
 
@@ -355,7 +355,7 @@ mod tests {
         let who = AccountKeyring::Alice.to_account_id();
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::AccountActivated(who.clone()).into();
+            pallet_cf_staking::Event::<SCRuntime>::AccountActivated{who : who.clone()}.into();
 
         let encoded_account_activated = event.encode();
 
@@ -383,7 +383,7 @@ mod tests {
         let flip_balance = 1000u128;
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::ClaimExpired(who.clone(), nonce, flip_balance)
+            pallet_cf_staking::Event::<SCRuntime>::ClaimExpired{who : who.clone(), nonce, flip_balance}
                 .into();
 
         let encoded_account_retired = event.encode();

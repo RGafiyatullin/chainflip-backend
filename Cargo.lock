@@ -4994,6 +4994,7 @@ name = "pallet-cf-staking"
 version = "0.1.0"
 dependencies = [
  "cf-traits",
+ "decode-event",
  "ethabi 13.0.0",
  "ethereum-types",
  "frame-support",
@@ -5015,6 +5016,7 @@ version = "0.0.1"
 dependencies = [
  "assert_matches",
  "cf-traits",
+ "decode-event",
  "frame-benchmarking",
  "frame-support",
  "frame-system",

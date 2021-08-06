@@ -179,7 +179,7 @@ mod tests {
         let who = AccountKeyring::Alice.to_account_id();
 
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_staking::Event::<SCRuntime>::ClaimSettled(who.clone(), 150u128).into();
+            pallet_cf_staking::Event::<SCRuntime>::ClaimSettled{who : who.clone(), amount : 150u128}.into();
 
         let encoded_claimed = event.encode();
 
