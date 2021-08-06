@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn auction_started_decoding() {
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_auction::Event::<SCRuntime>::AuctionStarted(1).into();
+            pallet_cf_auction::Event::<SCRuntime>::AuctionStarted{auction_index : 1}.into();
 
         let encoded_auction_started = event.encode();
         // the first 2 bytes are (module_index, event_variant_index), these can be stripped
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn auction_confirmed_decoding() {
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_auction::Event::<SCRuntime>::AuctionConfirmed(1).into();
+            pallet_cf_auction::Event::<SCRuntime>::AuctionConfirmed{auction_index : 1}.into();
 
         let encoded_auction_confirmed = event.encode();
         // the first 2 bytes are (module_index, event_variant_index), these can be stripped
@@ -130,7 +130,7 @@ mod tests {
     fn auction_range_changed_decoding() {
         // AuctionRangeChanged(AuctionRange, AuctionRange)
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_auction::Event::<SCRuntime>::AuctionRangeChanged((0, 1), (0, 2)).into();
+            pallet_cf_auction::Event::<SCRuntime>::AuctionRangeChanged{old : (0, 1), range : (0, 2)}.into();
 
         let encoded_auction_range_changed = event.encode();
         // the first 2 bytes are (module_index, event_variant_index), these can be stripped
@@ -157,7 +157,7 @@ mod tests {
 
         let validator_ids = vec![alice.clone(), bob.clone()];
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_auction::Event::<SCRuntime>::AuctionCompleted(1, validator_ids).into();
+            pallet_cf_auction::Event::<SCRuntime>::AuctionCompleted{auction_index : 1, validators : validator_ids}.into();
 
         let encoded_auction_completed = event.encode();
         // the first 2 bytes are (module_index, event_variant_index), these can be stripped
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn auction_aborted_decoding() {
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_auction::Event::<SCRuntime>::AuctionAborted(1).into();
+            pallet_cf_auction::Event::<SCRuntime>::AuctionAborted{auction_index : 1}.into();
 
         let encoded_auction_aborted = event.encode();
         // the first 2 bytes are (module_index, event_variant_index), these can be stripped
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn awaiting_bidders() {
         let event: <SCRuntime as Config>::Event =
-            pallet_cf_auction::Event::<SCRuntime>::AwaitingBidders.into();
+            pallet_cf_auction::Event::<SCRuntime>::AwaitingBidders{}.into();
 
         let awaiting_bidders_encoded = event.encode();
         // the first 2 bytes are (module_index, event_variant_index), these can be stripped

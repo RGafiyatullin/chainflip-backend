@@ -40,7 +40,7 @@ mod test {
 			);
 			assert_eq!(
 				last_event(),
-				mock::Event::pallet_cf_auction(crate::Event::AuctionCompleted(0, vec![MAX_BID.0, JOE_BID.0, LOW_BID.0])),
+				mock::Event::pallet_cf_auction(crate::Event::AuctionCompleted{auction_index : 0, validators : vec![MAX_BID.0, JOE_BID.0, LOW_BID.0]}),
 			);
 			// Just leaves us to confirm this auction, if we try to process this we will get an error
 			// until is confirmed
@@ -75,10 +75,10 @@ mod test {
 			// Confirm we have an event
 			assert_eq!(
 				last_event(),
-				mock::Event::pallet_cf_auction(crate::Event::AuctionRangeChanged(
-					(MIN_AUCTION_SIZE, MAX_AUCTION_SIZE),
-					(2, 100)
-				)),
+				mock::Event::pallet_cf_auction(crate::Event::AuctionRangeChanged{
+					old : (MIN_AUCTION_SIZE, MAX_AUCTION_SIZE),
+					range : (2, 100)
+				}),
 			);
 			//
 			// We throw up an error if we try to set it to the current

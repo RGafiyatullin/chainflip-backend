@@ -113,19 +113,19 @@ pub mod pallet {
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
-	pub enum Event<T: Config> {
-		/// An auction phase has started \[auction_index\]
-		AuctionStarted(T::AuctionIndex),
-		/// An auction has a set of winners \[auction_index, winners\]
-		AuctionCompleted(T::AuctionIndex, Vec<T::ValidatorId>),
-		/// The auction has been confirmed off-chain \[auction_index\]
-		AuctionConfirmed(T::AuctionIndex),
-		/// Awaiting bidders for the auction
-		AwaitingBidders,
-		/// The auction range upper limit has changed \[before, after\]
-		AuctionRangeChanged(AuctionRange, AuctionRange),
-		/// The auction was aborted \[auction_index\]
-		AuctionAborted(T::AuctionIndex),
+	pub enum Event<T : Config> {
+		#[doc = "An auction phase has started [auction_index]"]
+		AuctionStarted{auction_index : T::AuctionIndex},
+		#[doc = "An auction has a set of winners [auction_index, winners]"]
+		AuctionCompleted{auction_index : T::AuctionIndex, validators : Vec<T::ValidatorId>},
+		#[doc = "The auction has been confirmed off-chain [auction_index]"]
+		AuctionConfirmed{auction_index : T::AuctionIndex},
+		#[doc = "Awaiting bidders for the auction"]
+		AwaitingBidders{},
+		#[doc = "The auction range upper limit has changed [before, after]"]
+		AuctionRangeChanged{old : AuctionRange, range : AuctionRange},
+		#[doc = "The auction was aborted [auction_index]"]
+		AuctionAborted{auction_index : T::AuctionIndex}
 	}
 
 	#[pallet::error]
@@ -143,7 +143,7 @@ pub mod pallet {
 		#[pallet::weight(10_000)]
 		pub(super) fn confirm_auction(
 			origin: OriginFor<T>,
-			index: T::AuctionIndex,
+			auction_index: T::AuctionIndex,
 		) -> DispatchResultWithPostInfo {
 			T::EnsureWitnessed::ensure_origin(origin)?;
 			ensure!(
@@ -151,11 +151,11 @@ pub mod pallet {
 				Error::<T>::InvalidAuction
 			);
 			ensure!(
-				index == CurrentAuctionIndex::<T>::get(),
+				auction_index == CurrentAuctionIndex::<T>::get(),
 				Error::<T>::InvalidAuction
 			);
 			Self::set_awaiting_confirmation(true);
-			Self::deposit_event(Event::AuctionConfirmed(index));
+			Self::deposit_event(Event::AuctionConfirmed{auction_index});
 			Ok(().into())
 		}
 
@@ -171,7 +171,7 @@ pub mod pallet {
 
 			match Self::set_auction_range(range) {
 				Ok(old) => {
-					Self::deposit_event(Event::AuctionRangeChanged(old, range));
+					Self::deposit_event(Event::AuctionRangeChanged{old, range});
 					Ok(().into())
 				}
 				Err(_) => Err(Error::<T>::InvalidRange.into()),
@@ -289,7 +289,7 @@ impl<T: Config> Auction for Pallet<T> {
 
 				<CurrentAuctionIndex<T>>::mutate(|idx| *idx + One::one());
 
-				Self::deposit_event(Event::AuctionStarted(<CurrentAuctionIndex<T>>::get()));
+				Self::deposit_event(Event::AuctionStarted{auction_index : <CurrentAuctionIndex<T>>::get()});
 
 				Ok(phase)
 			}
@@ -310,10 +310,10 @@ impl<T: Config> Auction for Pallet<T> {
 							let phase = AuctionPhase::WinnersSelected(winners.clone(), *min_bid);
 							<CurrentPhase<T>>::put(phase.clone());
 
-							Self::deposit_event(Event::AuctionCompleted(
-								<CurrentAuctionIndex<T>>::get(),
-								winners,
-							));
+							Self::deposit_event(Event::AuctionCompleted{
+								auction_index : <CurrentAuctionIndex<T>>::get(),
+								validators : winners,
+							});
 
 							return Ok(phase);
 						}
@@ -332,7 +332,7 @@ impl<T: Config> Auction for Pallet<T> {
 
 				let phase = AuctionPhase::WaitingForBids(winners, min_bid);
 				<CurrentPhase<T>>::put(phase.clone());
-				Self::deposit_event(Event::AwaitingBidders);
+				Self::deposit_event(Event::AwaitingBidders{});
 
 				Ok(phase)
 			}
@@ -342,6 +342,8 @@ impl<T: Config> Auction for Pallet<T> {
 	fn abort() {
 		<CurrentPhase<T>>::put(AuctionPhase::default());
 		<AuctionToConfirm<T>>::kill();
-		Self::deposit_event(Event::AuctionAborted(<CurrentAuctionIndex<T>>::get()));
+		Self::deposit_event(Event::AuctionAborted{
+			auction_index : <CurrentAuctionIndex<T>>::get()
+		});
 	}
 }
