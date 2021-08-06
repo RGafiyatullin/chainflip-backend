@@ -1503,6 +1503,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "decode-event"
+version = "0.1.0"
+dependencies = [
+ "decode-event-derive",
+ "parity-scale-codec",
+]
+
+[[package]]
+name = "decode-event-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4925,6 +4942,7 @@ version = "0.0.1"
 dependencies = [
  "assert_matches",
  "cf-traits",
+ "decode-event",
  "frame-support",
  "frame-system",
  "log 0.4.14",
@@ -4934,7 +4952,6 @@ dependencies = [
  "sp-io",
  "sp-runtime",
  "sp-std",
- "state-chain-event-derive",
 ]
 
 [[package]]
@@ -8668,15 +8685,6 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
-
-[[package]]
-name = "state-chain-event-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "state-chain-node"

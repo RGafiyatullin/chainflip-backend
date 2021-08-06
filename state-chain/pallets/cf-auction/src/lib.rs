@@ -43,6 +43,7 @@ extern crate assert_matches;
 use cf_traits::{
 	Auction, AuctionConfirmation, AuctionError, AuctionPhase, AuctionRange, BidderProvider,
 };
+use decode_event;
 use frame_support::pallet_prelude::*;
 use frame_support::sp_std::mem;
 use frame_support::traits::ValidatorRegistration;
@@ -50,8 +51,6 @@ pub use pallet::*;
 use sp_runtime::traits::{AtLeast32BitUnsigned, One, Zero};
 use sp_std::cmp::min;
 use sp_std::prelude::*;
-
-use state_chain_event_derive::PalletEvent;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -115,7 +114,7 @@ pub mod pallet {
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
-	#[derive(PalletEvent)]
+	#[derive(decode_event::DecodeEvent)]
 	pub enum Event<T : Config> {
 		#[doc = "An auction phase has started [auction_index]"]
 		AuctionStarted{auction_index : T::AuctionIndex},

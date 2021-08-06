@@ -1,0 +1,13 @@
+[package]
+authors = ['Chainflip Team <https://github.com/chainflip-io>']
+description = 'Crate containing the trait DecodeEvent associated with the DecodeEvent attribute'
+edition = '2018'
+homepage = 'https://chainflip.io'
+license = '<TODO>'
+name = 'decode-event'
+repository = 'https://github.com/chainflip-io/chainflip-backend'
+version = '0.1.0'
+
+[dependencies]
+decode-event-derive = { path = '../decode-event-derive', default-features = false }
+codec = { package = "parity-scale-codec", version = "2.0.0", default-features = false }

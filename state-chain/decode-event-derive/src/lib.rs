@@ -2,10 +2,10 @@ use proc_macro;
 use quote::quote;
 use syn::{self, parse_macro_input};
 
-const MACRO_NAME : &'static str = "PalletEvent";
+const MACRO_NAME : &'static str = "DecodeEvent";
 
-#[proc_macro_derive(PalletEvent)]
-pub fn pallet_event(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+#[proc_macro_derive(DecodeEvent)]
+pub fn decode_event(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = parse_macro_input!(input as syn::DeriveInput);
 
     match ast.data {
@@ -66,17 +66,16 @@ pub fn pallet_event(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                                 }
                             }
                         });
-                        let enum_name = syn::Ident::new("DecodedEvent", proc_macro2::Span::call_site());
+                        let enum_name = syn::Ident::new(&format!("Decoded{}", ast.ident.to_string()), proc_macro2::Span::call_site());
                         proc_macro::TokenStream::from(quote! {
                             // Enum for engine to use that doesn't contain substrtes additions to decode into.
                             pub enum #enum_name #impl_generics {
                                 #(#variants),*
                             }
 
-                            // Maybe have a trait for this?
-                            impl #impl_generics #enum_name #ty_generics {
+                            impl #impl_generics ::decode_event::DecodeEvent for #enum_name #ty_generics {
                                 // Cannot import substrate_xt into state_chain, so cannot have raw_event as parameter
-                                fn try_decode<I : ::codec::Input>(variant : &str, data : &mut I) -> ::sp_std::result::Result<Option<Self>, ::codec::Error> {
+                                fn try_decode<I : ::codec::Input>(variant : &str, data : &mut I) -> core::result::Result<core::option::Option<Self>, ::codec::Error> {
                                     #(#variant_structs)*
 
                                     Ok(match variant {
