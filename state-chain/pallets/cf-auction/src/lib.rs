@@ -116,17 +116,17 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	#[derive(decode_event::DecodeEvent)]
 	pub enum Event<T : Config> {
-		#[doc = "An auction phase has started [auction_index]"]
+		/// An auction phase has started \[auction_index\]
 		AuctionStarted{auction_index : T::AuctionIndex},
-		#[doc = "An auction has a set of winners [auction_index, winners]"]
+		/// An auction has a set of winners \[auction_index, winners\]
 		AuctionCompleted{auction_index : T::AuctionIndex, validators : Vec<T::ValidatorId>},
-		#[doc = "The auction has been confirmed off-chain [auction_index]"]
+		/// The auction has been confirmed off-chain \[auction_index\]
 		AuctionConfirmed{auction_index : T::AuctionIndex},
-		#[doc = "Awaiting bidders for the auction"]
+		/// Awaiting bidders for the auction
 		AwaitingBidders{},
-		#[doc = "The auction range upper limit has changed [before, after]"]
+		/// The auction range upper limit has changed \[before, after\]
 		AuctionRangeChanged{old : AuctionRange, range : AuctionRange},
-		#[doc = "The auction was aborted [auction_index]"]
+		/// The auction was aborted \[auction_index\]
 		AuctionAborted{auction_index : T::AuctionIndex}
 	}
 
