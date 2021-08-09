@@ -166,7 +166,7 @@ pub mod pallet {
 			let old_epoch = BlocksPerEpoch::<T>::get();
 			ensure!(old_epoch != number_of_blocks, Error::<T>::InvalidEpoch);
 			BlocksPerEpoch::<T>::set(number_of_blocks);
-			Self::deposit_event(Event::EpochDurationChanged(old_epoch, number_of_blocks));
+			Self::deposit_event(Event::EpochDurationChanged{from : old_epoch, to : number_of_blocks});
 			Ok(().into())
 		}
 
@@ -179,7 +179,7 @@ pub mod pallet {
 			ensure!(T::Auction::waiting_on_bids(), Error::<T>::AuctionInProgress);
 			ensure_root(origin)?;
 			Force::<T>::set(true);
-			Self::deposit_event(Event::ForceRotationRequested());
+			Self::deposit_event(Event::ForceRotationRequested{});
 			Ok(().into())
 		}
 
@@ -371,7 +371,7 @@ impl<T: Config> pallet_session::SessionManager<T::ValidatorId> for Pallet<T> {
 						*epoch
 					});
 					// Emit an event
-					Self::deposit_event(Event::NewEpoch(new_epoch));
+					Self::deposit_event(Event::NewEpoch{epoch_index : new_epoch});
 					// Generate our lookup list of validators
 					Self::generate_lookup();
 					// Our trait callback
