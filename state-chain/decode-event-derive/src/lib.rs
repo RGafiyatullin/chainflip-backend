@@ -43,7 +43,7 @@ pub fn decode_event(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                             }).collect::<Vec<_>>();
                             let all_fields = fields.iter().chain(phantomdata.iter());
                             quote! {
-                                #[derive(::codec::Encode, ::codec::Decode)]
+                                #[derive(::codec::Decode)]
                                 struct #variant_ident #impl_generics {
                                     #(#all_fields),*
                                 }
