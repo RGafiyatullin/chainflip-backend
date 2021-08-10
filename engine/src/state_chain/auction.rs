@@ -92,12 +92,16 @@ mod tests {
 
     #[test]
     fn auction_started_decoding() {
+
         let event: <SCRuntime as Config>::Event =
             pallet_cf_auction::Event::<SCRuntime>::AuctionStarted{auction_index : 1}.into();
 
         let encoded_auction_started = event.encode();
         // the first 2 bytes are (module_index, event_variant_index), these can be stripped
         let encoded_auction_started = encoded_auction_started[2..].to_vec();
+
+        use decode_event::DecodeEvent;
+        pallet_cf_auction::DecodedEvent::<SCRuntime>::decode(&mut &encoded_auction_started.clone()[..]);
 
         let decoded_event =
             AuctionStartedEvent::<StateChainRuntime>::decode(&mut &encoded_auction_started[..])

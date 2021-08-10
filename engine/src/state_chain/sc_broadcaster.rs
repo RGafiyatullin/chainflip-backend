@@ -163,6 +163,7 @@ mod tests {
         01, 02, 01, 02, 01, 02, 01, 02, 01,
     ];
 
+    // Factor out
     async fn create_subxt_client(
         state_chain_settings: &settings::StateChain,
     ) -> Client<StateChainRuntime> {

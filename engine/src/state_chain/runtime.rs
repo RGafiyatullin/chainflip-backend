@@ -86,6 +86,12 @@ impl<T: System + Clone + Debug + Eq + Send + Sync> SignedExtension for SCDefault
     }
 }
 
+impl StateChainRuntime {
+    fn decode_event(raw_event : substrate_subxt::RawEvent) -> Result<pallet_cf_auction::DecodedEvent::<state_chain_runtime::Runtime>> {
+        pallet_cf_auction::DecodedEvent::<state_chain_runtime::Runtime>::decode(&mut &raw_event.data[1..])
+    }
+} 
+
 impl Runtime for StateChainRuntime {
     type Signature = MultiSignature;
     type Extra = SCDefaultExtra<Self>;
