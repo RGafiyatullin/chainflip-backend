@@ -17,6 +17,7 @@ use super::{
     pallets::validator::{
         EpochDurationChangedEvent, ForceRotationRequestedEvent, NewEpochEvent, ValidatorEvent,
     },
+    pallets::vaults::{KeygenRequestEvent, VaultsEvent},
     runtime::StateChainRuntime,
 };
 
@@ -27,6 +28,7 @@ pub enum SCEvent {
     AuctionEvent(AuctionEvent<StateChainRuntime>),
     ValidatorEvent(ValidatorEvent<StateChainRuntime>),
     StakingEvent(StakingEvent<StateChainRuntime>),
+    VaultsEvent(VaultsEvent<StateChainRuntime>),
 }
 
 /// Decode a raw event (substrate codec) into a SCEvent wrapper enum
@@ -98,6 +100,15 @@ pub fn sc_event_from_raw_event(raw_event: RawEvent) -> Result<Option<SCEvent>> {
                     .into(),
             )),
             _ => Ok(None),
+        },
+        "Vaults" => match raw_event.variant.as_str() {
+            "KeygenRequest" => Ok(Some(
+                KeygenRequestEvent::<StateChainRuntime>::decode(&mut &raw_event.data[..])?.into(),
+            )),
+            e => {
+                println!("Vault event: '{}' not currently supported", e);
+                Ok(None)
+            }
         },
         _ => Ok(None),
     };

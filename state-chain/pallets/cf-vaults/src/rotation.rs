@@ -4,6 +4,8 @@ use frame_support::RuntimeDebug;
 use sp_runtime::traits::AtLeast32BitUnsigned;
 use sp_std::prelude::*;
 
+use serde::{Deserialize, Serialize};
+
 /// Request index type
 pub type RequestIndex = u64;
 
@@ -54,7 +56,7 @@ pub trait ChainHandler {
 }
 
 /// Our different Chain's specific parameters
-#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
+#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, Serialize, Deserialize)]
 pub enum ChainParams {
 	/// Ethereum blockchain
 	///
@@ -67,7 +69,7 @@ pub enum ChainParams {
 
 /// A representation of a key generation request
 /// This would be used for each supporting chain
-#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
+#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, Serialize, Deserialize)]
 pub struct KeygenRequest<ValidatorId> {
 	/// A Chain's parameters
 	pub(crate) chain: ChainParams,
