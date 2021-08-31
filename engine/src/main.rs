@@ -5,10 +5,10 @@ use chainflip_engine::{
     health::HealthMonitor,
     heartbeat,
     mq::nats_client::NatsMQClient,
-    p2p::{self, rpc as p2p_rpc, ValidatorId},
+    p2p::{self, rpc as p2p_rpc, P2PMessage, P2PMessageCommand, ValidatorId},
     settings::Settings,
     signing,
-    signing::db::PersistentKeyDB,
+    signing::{db::PersistentKeyDB, MultisigEvent, MultisigInstruction},
     state_chain::{self, runtime::StateChainRuntime},
     temp_event_mapper,
 };
@@ -87,12 +87,24 @@ async fn main() {
         .await
         .unwrap();
 
+    let (p2p_message_sender, p2p_message_receiver) =
+        tokio::sync::mpsc::unbounded_channel::<P2PMessage>();
+    let (multisig_instruction_sender, multisig_instruction_receiver) =
+        tokio::sync::mpsc::unbounded_channel::<MultisigInstruction>();
+    let (p2p_message_command_sender, p2p_message_command_receiver) =
+        tokio::sync::mpsc::unbounded_channel::<P2PMessageCommand>();
+    let (p2p_multisig_event_sender, p2p_multisig_event_receiver) =
+        tokio::sync::mpsc::unbounded_channel::<MultisigEvent>();
+
     futures::join!(
         // Start signing components
         signing::start(
             ValidatorId(key_pair.public().0),
             db,
-            mq_client.clone(),
+            p2p_message_receiver,
+            multisig_instruction_receiver,
+            p2p_multisig_event_sender,
+            p2p_message_command_sender,
             shutdown_client_rx,
             &root_logger,
         ),
@@ -106,7 +118,8 @@ async fn main() {
             )
             .await
             .expect("unable to connect p2p rpc client"),
-            mq_client.clone(),
+            p2p_message_sender,
+            p2p_message_command_receiver,
             p2p_shutdown_rx,
             &root_logger.clone()
         ),

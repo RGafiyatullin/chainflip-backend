@@ -6,6 +6,7 @@ The signing module facilitates the creation of a key that is shared by the chose
 
 ### external communication
 
+<!-- TODO: Update this -->
 `MultisigClient` uses a channel with the `Subject::MultisigEvent` as the subject on all outgoing messages to the stream.
 It subscribes to `P2PIncoming`, `MultisigInstruction`.
 It publishes to `MultisigEvent` with a `ReadyToKeygen`,`ReadyToSign`,`MessageSigned` or `KeygenResult` message.
@@ -43,7 +44,7 @@ Once a procedure is complete, it will send an `InnerEvent::InnerSignal` with the
 
 ### `SigningStateManager`
 
-Routes the messages to the correct `SigningState` process, so multiple signs can happen at once. 
+Routes the messages to the correct `SigningState` process, so multiple signs can happen at once.
 Handles buffering/delaying bc1's if the `SigningState` does not exist for the sign request yet.
 Runs a cleanup when told. The cleanup checks for timeouts.
 If a timeout happens, the manager shows a warning, no blame is issued.

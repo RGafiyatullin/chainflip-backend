@@ -60,8 +60,6 @@ pub enum Subject {
     AccountRetired,
     AccountActivated,
 
-    P2PIncoming,
-    P2POutgoing,
     MultisigInstruction,
     // both signing and keygen events come from here
     MultisigEvent,
@@ -92,13 +90,6 @@ impl SubjectName for Subject {
             }
             Subject::BroadcastSuccess(chain) => {
                 format!("broadcast_success.{}", chain)
-            }
-            // === Signing ===
-            Subject::P2PIncoming => {
-                format!("p2p_incoming")
-            }
-            Subject::P2POutgoing => {
-                format!("p2p_outgoing")
             }
             Subject::MultisigInstruction => {
                 format!("multisig_instruction")
