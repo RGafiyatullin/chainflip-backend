@@ -156,7 +156,7 @@ workflows:
           <<: *only_epic_branches
 
   chainflip-integration-tests:
-    <<: *nightly
+    #    <<: *nightly
     jobs:
       - build-docker-image:
           image: chainflip-io/chainflip-backend/rust-poetry
@@ -327,7 +327,7 @@ jobs:
           command: |
             cd eth-contracts
             poetry install --quiet
-            poetry run brownie run deploy_and all_events --network hardhat
+            poetry run brownie run deploy_and all_events --network hardhat &> /dev/null
       - run: sccache -s
       - run: cargo test --locked --release
       - discord/status:
