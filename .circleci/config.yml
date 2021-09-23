@@ -323,7 +323,9 @@ jobs:
       - run:
           name: Run Hardhat Network
           background: true
-          command: npx hardhat node
+          command: |
+            cd eth-contracts
+            npx hardhat node
       - run:
           name: Install poetry dependencies and deploy contracts
           command: |
