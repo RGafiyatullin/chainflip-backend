@@ -27,6 +27,13 @@ only_epic_branches: &only_epic_branches
         - /epic\/.*/
         - /release\/.*/
 
+only_develop_branches: &only_develop_branches
+  filters:
+    branches:
+      only:
+        # Uncomment and add your current branch when testing
+        - develop
+
 nightly: &nightly
   triggers:
     - schedule:
@@ -154,6 +161,65 @@ workflows:
             - do-credentials
             - infura-endpoints
           <<: *only_epic_branches
+
+  chainflip-build-testnet:
+    jobs:
+      # can I call build-docker-image/fmt/valitaros somehow or re-type them?
+      - build-docker-image:
+          name: build-rust-base
+          image: chainflip-io/chainflip-backend/rust-base
+          tag: latest
+          dockerfile: Dockerfile.rust-base
+          cache_from: ghcr.io/chainflip-io/chainflip-backend/rust-base:latest
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
+      - fmt-validator-package:
+          requires:
+            - build-rust-base
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
+      - compile-validator-package:
+          requires:
+            - fmt-validator-package
+          context:
+            - ghcr-credentials
+            - discord-webhooks
+          <<: *only_main_branches
+      - test-validator-package:
+          requires:
+            - compile-validator-package
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
+      - build-docker-image:
+          name: build-chainflip-engine
+          image: chainflip-io/chainflip-backend/chainflip-engine
+          extra_build_args: "--build-arg SERVICE=chainflip-engine"
+          requires:
+            - test-validator-package
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
+      - build-docker-image:
+          name: build-state-chain-node
+          image: chainflip-io/chainflip-backend/state-chain-node
+          extra_build_args: "--build-arg SERVICE=state-chain-node"
+          requires:
+            - test-validator-package
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
+      - create-testnet:
+          requires:
+            - build-chainflip-engine
+            - build-state-chain-node
+          context:
+            - ghcr-credentials
+            - do-credentials
+            - infura-endpoints
+          <<: *only_develop_branches
 
   chainflip-integration-tests:
     <<: *nightly
@@ -384,3 +450,58 @@ jobs:
           name: Destroy single node
           when: always
           command: helm uninstall bashful -n default
+
+  create-testnet:
+    parameters:
+      cluster_name:
+        description: Name of the cluster to authenticate to
+        type: string
+        default: cluster-staging
+    resource_class: small
+    executor: chainflip-master
+    steps:
+      - run:
+        name: Destroy cluster
+        when: always
+        command: helm uninstall #all of the dwarves -n default
+      - doctl/initialize
+      - run: doctl kubernetes cluster kubeconfig save <<parameters.cluster_name>> 
+      - run:
+          name: Port-forward into cluster
+          background: true
+          command: kubectl port-forward cluster -n chartmuseum service/chartmuseum 8080
+      - run: sleep 5
+      - run: help repo chainflip http://localhost:8080
+      - run:
+          name: Install cluster
+          command: >
+          # should I change the install argument for clusterization or 
+          # it's the default behaviour since bashful is the first validator
+          helm install bashful chainflip/chainflip-validator
+            --namespace default
+            --set state-chain-node.nodeType=validator
+            --set state-chain-node.image.tag="<<pipeline.git.revision>>"
+            --set "state-chain-node.stateChainNode.extraArgs={--rpc-external,--rpc-cors,all,--ws-external}"
+            --set chainflip-engine.image.tag="<<pipeline.git.revision>>"
+            --set chainflip-engine.config.eth.node_endpoint=$RINKEBY
+            --set global.nameSuffix="default"
+            --set global.testnet_id="$CIRCLE_BUILD_NUM"
+            --set chainflip-engine.engine.backtrace=full
+            --set global.chain=dev
+            --wait
+            --wait-for-jobs
+        run:
+          name: Test single node
+          command: helm test bashful -n default
+      - run:
+          name: Dump logs (state-chain-node)
+          when: always
+          command: kubectl logs -l app.kubernetes.io/name=state-chain-node
+      - run:
+          name: Dump logs (chainflip-engine)
+          when: always
+          command: kubectl logs -l app.kubernetes.io/name=chainflip-engine
+      - run:
+          name: Destroy cluster
+          when: always
+          command: helm uninstall #all of the dwarves -n default
