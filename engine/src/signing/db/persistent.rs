@@ -20,6 +20,11 @@ impl PersistentKeyDB {
     pub fn new(path: &Path, logger: &slog::Logger) -> Self {
         let config = DatabaseConfig::default();
         // TODO: Update to kvdb 14 and then can pass in &Path
+        if !path.exists() {
+            panic!("Db path: {} does not exist", path.display());
+        } else {
+            println!("Path does exist, carry on");
+        }
         let db = Database::open(&config, path.to_str().expect("Invalid path"))
             .expect("could not open database");
 
