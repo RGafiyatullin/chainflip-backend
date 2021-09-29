@@ -427,8 +427,8 @@ jobs:
     steps:
       - run:
         name: Destroy cluster
-          ## meso build.sh me condition using circle ci
-
+        command: ./build.sh -b="<<pipeline.git.revision" -t="$CIRCLE_BUILD_NUM" -d ## circle build num einai to tag?
+          ## meso build.sh me condition using circle ci ? an exei cluster kanto ?
         when: always
         command: helm uninstall #all of the dwarves -n default
       - doctl/initialize
