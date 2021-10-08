@@ -447,7 +447,7 @@ jobs:
       - run: sleep 5
       - run:
           name: Install cluster
-          command: ./build.sh -b="$CIRCLE_BRANCH" -t="<<pipeline.git.revision"
+          command: ./build.sh -b="$CIRCLE_BRANCH" -t="<<pipeline.git.revision>>"
         run:
           name: Test all nodes
           command: >
@@ -470,6 +470,6 @@ jobs:
       - run:
           name: Destroy cluster
           when: always
-          command: ./build.sh -b="$CIRCLE_BRANCH" -t="$CIRCLE_BUILD_NUM" -d
+          command: ./build.sh -b="$CIRCLE_BRANCH" -t="<<pipeline.git.revision>>" -d
       - run: echo $TEST_NODE_LOG_URL
 ######################## /Jobs ########################
