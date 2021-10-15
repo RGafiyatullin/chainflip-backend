@@ -9,6 +9,7 @@ ignore_main_branches: &ignore_main_branches
         - /release\/.*/
         # Uncomment and add your current branch when testing
 #        - bug/ch1978-fix-integration-tests
+        - feature/sc-1894
 only_main_branches: &only_main_branches
   filters:
     branches:
@@ -18,6 +19,7 @@ only_main_branches: &only_main_branches
         - /epic\/.*/
         - /release\/.*/
 #        - test/ci-with-machine
+        - feature/sc-1894
 
 only_epic_branches: &only_epic_branches
   filters:
@@ -178,7 +180,35 @@ workflows:
             - do-credentials
             - infura-endpoints
           <<: *only_epic_branches
-      - create_testnet:
+
+  chainflip-testnet:
+    jobs:
+      - cargo-build-and-test-validator-package:
+          context:
+            - ghcr-credentials
+            - discord-webhooks
+          <<: *only_main_branches
+      - build-docker-image:
+          name: build-chainflip-engine
+          image: chainflip-io/chainflip-backend/chainflip-engine
+          cache_from: ghcr.io/chainflip-io/chainflip-backend/chainflip-engine:latest
+          extra_build_args: "--build-arg SERVICE=chainflip-engine --build-arg REV=<<pipeline.git.revision>>"
+          requires:
+            - cargo-build-and-test-validator-package
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
+      - build-docker-image:
+          name: build-state-chain-node
+          image: chainflip-io/chainflip-backend/state-chain-node
+          cache_from: ghcr.io/chainflip-io/chainflip-backend/state-chain-node:latest
+          extra_build_args: "--build-arg SERVICE=state-chain-node --build-arg REV=<<pipeline.git.revision>>"
+          requires:
+            - cargo-build-and-test-validator-package
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
+      - create-testnet:
           requires:
             - build-chainflip-engine
             - build-state-chain-node
@@ -186,7 +216,7 @@ workflows:
             - ghcr-credentials
             - do-credentials
             - infura-endpoints
-          <<: *only_develop_branches
+          <<: *only_main_branches
 
   chainflip-integration-tests:
     <<: *nightly
@@ -442,34 +472,6 @@ jobs:
       - doctl/initialize
       - run: doctl kubernetes cluster kubeconfig save <<parameters.cluster_name>> 
       - run:
-          name: Destroy cluster
-          command: ./build.sh -b="$CIRCLE_BRANCH" -t="<<pipeline.git.revision>>" -d
-      - run: sleep 5
-      - run:
           name: Install cluster
-          command: ./build.sh -b="$CIRCLE_BRANCH" -t="<<pipeline.git.revision>>"
-        run:
-          name: Test all nodes
-          command: >
-            helm test bashful -n default
-            helm test doc -n default
-            helm test dopey -n default
-      - run:
-          name: Dump logs (state-chain-node)
-          when: always
-          command: kubectl logs -l app.kubernetes.io/name=state-chain-node --tail -1 > node.log
-      - run:
-          name: Dump logs (chainflip-engine)
-          when: always
-          command: kubectl logs -l app.kubernetes.io/name=chainflip-engine --tail -1 > engine.log
-      - run: |
-          mkdir artifacts
-          mv *.log artifacts
-      - store_artifacts:
-          path: artifacts
-      - run:
-          name: Destroy cluster
-          when: always
-          command: ./build.sh -b="$CIRCLE_BRANCH" -t="<<pipeline.git.revision>>" -d
-      - run: echo $TEST_NODE_LOG_URL
+          command: ./build.sh -b="$CIRCLE_BRANCH" -t="<<pipeline.git.revision>>" --reset
 ######################## /Jobs ########################
