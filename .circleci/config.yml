@@ -456,5 +456,5 @@ jobs:
           name: Install cluster
           command: |
             cd cluster
-            ./build.sh -b="$CIRCLE_BRANCH" -t="latest" --reset
+            ./build.sh -b="$CIRCLE_BRANCH" -t="latest" 
 ######################## /Jobs ########################
