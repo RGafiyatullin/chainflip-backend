@@ -183,35 +183,10 @@ workflows:
 
   chainflip-testnet:
     jobs:
-      - cargo-build-and-test-validator-package:
-          context:
-            - ghcr-credentials
-            - discord-webhooks
-          <<: *only_main_branches
-      - build-docker-image:
-          name: build-chainflip-engine
-          image: chainflip-io/chainflip-backend/chainflip-engine
-          cache_from: ghcr.io/chainflip-io/chainflip-backend/chainflip-engine:latest
-          extra_build_args: "--build-arg SERVICE=chainflip-engine --build-arg REV=<<pipeline.git.revision>>"
-          requires:
-            - cargo-build-and-test-validator-package
-          context:
-            - ghcr-credentials
-          <<: *only_main_branches
-      - build-docker-image:
-          name: build-state-chain-node
-          image: chainflip-io/chainflip-backend/state-chain-node
-          cache_from: ghcr.io/chainflip-io/chainflip-backend/state-chain-node:latest
-          extra_build_args: "--build-arg SERVICE=state-chain-node --build-arg REV=<<pipeline.git.revision>>"
-          requires:
-            - cargo-build-and-test-validator-package
-          context:
-            - ghcr-credentials
-          <<: *only_main_branches
       - create-testnet:
-          requires:
-            - build-chainflip-engine
-            - build-state-chain-node
+        #    requires:
+        #    - build-chainflip-engine
+        #    - build-state-chain-node
           context:
             - ghcr-credentials
             - do-credentials
@@ -364,7 +339,7 @@ jobs:
   clone-cluster-repo:
     resource_class: small
     docker:
-      - image: ""
+      - image: "cimg/base:stable"
     steps:
       - gh/setup
       - gh/clone:
@@ -470,8 +445,12 @@ jobs:
     executor: chainflip-master
     steps:
       - doctl/initialize
-      - run: doctl kubernetes cluster kubeconfig save <<parameters.cluster_name>> 
+      - run: doctl kubernetes cluster kubeconfig save <<parameters.cluster_name>>
+      - attach_workspace:
+          at: ./
       - run:
           name: Install cluster
-          command: ./build.sh -b="$CIRCLE_BRANCH" -t="<<pipeline.git.revision>>" --reset
+          command: |
+            cd cluster
+            ./build.sh -b="$CIRCLE_BRANCH" -t="latest" --reset
 ######################## /Jobs ########################
