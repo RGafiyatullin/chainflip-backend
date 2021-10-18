@@ -183,14 +183,39 @@ workflows:
 
   chainflip-testnet:
     jobs:
+      - cargo-build-and-test-validator-package:
+          context:
+            - ghcr-credentials
+            - discord-webhooks
+          <<: *only_main_branches
+      - build-docker-image:
+          name: build-chainflip-engine
+          image: chainflip-io/chainflip-backend/chainflip-engine
+          cache_from: ghcr.io/chainflip-io/chainflip-backend/chainflip-engine:latest
+          extra_build_args: "--build-arg SERVICE=chainflip-engine --build-arg REV=<<pipeline.git.revision>>"
+          requires:
+            - cargo-build-and-test-validator-package
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
+      - build-docker-image:
+          name: build-state-chain-node
+          image: chainflip-io/chainflip-backend/state-chain-node
+          cache_from: ghcr.io/chainflip-io/chainflip-backend/state-chain-node:latest
+          extra_build_args: "--build-arg SERVICE=state-chain-node --build-arg REV=<<pipeline.git.revision>>"
+          requires:
+            - cargo-build-and-test-validator-package
+          context:
+            - ghcr-credentials
+          <<: *only_main_branches
       - clone-cluster-repo:
           context:
             - github-credentials
       - create-testnet:
           requires:
             - clone-cluster-repo
-        #    - build-chainflip-engine
-        #    - build-state-chain-node
+            - build-chainflip-engine
+            - build-state-chain-node
           context:
             - ghcr-credentials
             - do-credentials
