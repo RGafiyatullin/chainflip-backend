@@ -7,6 +7,8 @@ use futures::compat::{Future01CompatExt, Stream01CompatExt};
 use futures::StreamExt;
 use futures::{Stream, TryFutureExt};
 use itertools::Itertools;
+use jsonrpc_core::{Error, ErrorCode};
+use jsonrpc_core_client::RpcError;
 use sp_core::{
     storage::{StorageChangeSet, StorageKey},
     Bytes, Pair,
@@ -141,7 +143,7 @@ impl StateChainClient {
         &self,
         nonce: u32,
         extrinsic: Extrinsic,
-    ) -> Result<sp_core::H256>
+    ) -> Result<sp_core::H256, RpcError>
     where
         state_chain_runtime::Call: std::convert::From<Extrinsic>,
         Extrinsic: std::fmt::Debug + Clone,
@@ -155,11 +157,11 @@ impl StateChainClient {
                     substrate_subxt::Encoded(state_chain_runtime::Call::from(extrinsic).encode()),
                     &self.signer,
                 )
-                .await?
+                .await
+                .unwrap()
                 .encode(),
             ))
             .compat()
-            .map_err(anyhow::Error::msg)
             .await
     }
 
@@ -173,12 +175,26 @@ impl StateChainClient {
 
         match self.inner_submit_extrinsic(*nonce, extrinsic.clone()).await {
             Ok(_) => *nonce += 1,
-            Err(error) => slog::error!(
-                logger,
-                "Could not submit extrinsic: {:?}, {}",
-                extrinsic,
-                error
-            ),
+            Err(error) => match error {
+                RpcError::JsonRpcError(e) => {
+                    match e {
+                        Error {
+                            code: ErrorCode::ServerError(1014),
+                            ..
+                        } => {
+                            println!("This is a nonce error");
+                        }
+                        _ => {
+                            println!("Nothing else matters")
+                        }
+                    };
+                }
+                RpcError::ParseError(parse_str, e) => {
+                    println!("Parse str: {}, error: {}", parse_str, e)
+                }
+                RpcError::Timeout => println!("timeout error"),
+                RpcError::Other(e) => println!("other error: {:?}", e),
+            },
         }
     }
     pub async fn events(
