@@ -315,3 +315,60 @@ pub async fn connect_to_state_chain(
             .map(|result_header| result_header.map_err(anyhow::Error::msg)),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        logging::utils::create_cli_logger_verbose,
+        settings::{self, Settings},
+        state_chain,
+    };
+    use slog::o;
+    use tokio_stream::StreamExt;
+
+    #[tokio::test]
+    async fn spam_chain_with_shit() {
+        let settings = Settings::from_file("config/Local.toml").unwrap();
+        let logger = create_cli_logger_verbose();
+
+        let (state_chain_client, mut state_chain_block_stream) =
+            state_chain::client::connect_to_state_chain(&settings)
+                .await
+                .expect("Could not connect to state chain");
+
+        let logger_c = logger.clone();
+        let handle1 = tokio::spawn(async move {
+            for i in 0..10 {
+                state_chain_client
+                    .submit_extrinsic(
+                        &logger_c.new(o!("THREAD" => 1)),
+                        pallet_cf_governance::Call::propose_governance_extrinsic(Box::new(
+                            pallet_cf_validator::Call::force_rotation().into(),
+                        )),
+                    )
+                    .await
+            }
+        });
+
+        let (state_chain_client, mut state_chain_block_stream) =
+            state_chain::client::connect_to_state_chain(&settings)
+                .await
+                .expect("Could not connect to state chain");
+
+        let handle2 = tokio::spawn(async move {
+            for i in 0..10 {
+                state_chain_client
+                    .submit_extrinsic(
+                        &logger.new(o!("THREAD" => 2)),
+                        pallet_cf_governance::Call::propose_governance_extrinsic(Box::new(
+                            pallet_cf_validator::Call::force_rotation().into(),
+                        )),
+                    )
+                    .await
+            }
+        });
+
+        tokio::join!(handle1, handle2);
+    }
+}
