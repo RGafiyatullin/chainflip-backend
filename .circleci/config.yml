@@ -233,7 +233,19 @@ workflows:
             - do-credentials
             - infura-endpoints
           <<: *only_main_branches
-
+#/
+  vault-e2e-rotation-test:
+    #    when:
+    jobs:
+      - clone-contracts-repo:
+          context:
+            - github-credentials
+      - run-vault-e2e-rotation-test:
+          requires:
+            - clone-contracts-repo
+          context:
+            - agg-key
+          <<: *only_main_branches
 ######################## /Workflows ########################
 
 ######################## Jobs ########################
@@ -520,4 +532,30 @@ jobs:
           command: |
             cd cluster
             ./build.sh -b="$CIRCLE_BRANCH" -t="latest" --local --reset
+#/
+  run-vault-e2e-rotation-test:
+    resource_class: small
+    executor: rust-poetry 
+    steps:
+      - checkout
+      - merge_target
+      - attach_workspace
+          at: ./
+      - run:
+          name: Install dependencies & run Hardhat network
+          background: true
+          command: |
+            cd eth-contracts
+            npm install
+            npx hardhat node
+      - run:
+          name: Install dependencies & deploy contracts
+          background: true
+          command: |
+            cd eth-contracts
+            poetry install --quiet
+            poetry run brownie run deploy_and --network hardhat
+      - run: sccache --show-stats
+      - run: cargo test --package chainflip-engine --test rotation_end_to_end -- vault_rotation_end_to_end --exact --nocapture
+      - send_notification
 ######################## /Jobs ########################
