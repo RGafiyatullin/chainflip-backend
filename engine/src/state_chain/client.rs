@@ -326,8 +326,7 @@ impl<RpcClient: StateChainRpcApi> StateChainClient<RpcClient> {
             .state)
     }
 
-    // we want to get it for all the chains
-    // need to pass in epoch index and chain id... why epoch index??
+    // TODO: Pass in epoch index
     pub async fn active_validator_window(
         &self,
         block_header: &state_chain_runtime::Header,
@@ -532,8 +531,24 @@ mod tests {
     #[ignore = "depends on running state chain"]
     async fn test_active_window_fetch() {
         let settings = Settings::from_file("config/Local.toml").unwrap();
+        let logger = create_test_logger();
         let (state_chain_client, mut block_stream) =
             connect_to_state_chain(&settings).await.unwrap();
+
+        let block_height_window = BlockHeightWindow {
+            from: 69,
+            to: Some(42),
+        };
+        let epoch: u32 = 0;
+        let xt = pallet_cf_vaults::Call::update_block_window(
+            epoch,
+            ChainId::Ethereum,
+            block_height_window,
+        );
+        state_chain_client
+            .submit_extrinsic(&logger, xt)
+            .await
+            .expect("should submit extrinsic");
 
         while let Some(block) = block_stream.next().await {
             let block_header = block.unwrap();
