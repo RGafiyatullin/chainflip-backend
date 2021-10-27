@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use cf_chains::ChainId;
-use cf_traits::{ChainflipAccountData, ChainflipAccountState};
+use cf_traits::{ChainflipAccountData, ChainflipAccountState, EpochIndex};
 use codec::{Decode, Encode};
 use frame_support::metadata::RuntimeMetadataPrefixed;
 use frame_support::unsigned::TransactionValidityError;
@@ -163,7 +163,7 @@ pub trait StateChainRpcApi {
         state_chain_runtime::Call: std::convert::From<Extrinsic>,
         Extrinsic: 'static + std::fmt::Debug + Clone + Send;
 
-    async fn storage_events_at(
+    async fn query_storage_at(
         &self,
         block_header: &state_chain_runtime::Header,
         storage_key: StorageKey,
@@ -198,7 +198,7 @@ impl StateChainRpcApi for StateChainRpcClient {
             .await
     }
 
-    async fn storage_events_at(
+    async fn query_storage_at(
         &self,
         block_header: &state_chain_runtime::Header,
         storage_key: StorageKey,
@@ -278,7 +278,7 @@ impl<RpcClient: StateChainRpcApi> StateChainClient<RpcClient> {
         block_header: &state_chain_runtime::Header,
     ) -> Result<Vec<EventInfo>> {
         self.state_chain_rpc_client
-            .storage_events_at(block_header, self.events_storage_key.clone())
+            .query_storage_at(block_header, self.events_storage_key.clone())
             .await?
             .into_iter()
             .map(|storage_change_set| {
@@ -303,7 +303,7 @@ impl<RpcClient: StateChainRpcApi> StateChainClient<RpcClient> {
     ) -> Result<ChainflipAccountState> {
         let node_status_updates: Vec<_> = self
             .state_chain_rpc_client
-            .storage_events_at(block_header, self.account_storage_key.clone())
+            .query_storage_at(block_header, self.account_storage_key.clone())
             .await?
             .into_iter()
             .map(|storage_change_set| {
@@ -332,34 +332,35 @@ impl<RpcClient: StateChainRpcApi> StateChainClient<RpcClient> {
         &self,
         block_header: &state_chain_runtime::Header,
     ) -> Result<Vec<BlockHeightWindow>> {
-        let active_window_storage_key = self.metadata.module("Vaults")?;
-
-        println!("Here's the Vaults module");
-        let active_window_storage_key = active_window_storage_key
+        let epoch: EpochIndex = 0;
+        let active_window_storage_key = self
+            .metadata
+            .module("Vaults")?
             .storage("ActiveWindows")?
             .double_map()?
-            .key(&0, &ChainId::Ethereum);
+            .key(&epoch, &ChainId::Ethereum);
 
-        println!("Getting events now");
         let active_validator_windows = self
             .state_chain_rpc_client
-            .storage_events_at(block_header, active_window_storage_key)
-            .await?
+            .query_storage_at(block_header, active_window_storage_key)
+            .await?;
+        let active_validator_windows = active_validator_windows
             .into_iter()
             .map(|storage_change_set| {
                 let StorageChangeSet { block: _, changes } = storage_change_set;
-                changes
-                    .into_iter()
-                    .filter_map(|(_storage_key, option_data)| {
-                        option_data.map(|data| {
-                            BlockHeightWindow::decode(&mut &data.0[..]).map_err(anyhow::Error::msg)
-                        })
-                    })
+                changes.into_iter().map(|(_storage_key, option_data)| {
+                    // We assume uninitialised storage items are default
+                    let window = if let Some(data) = option_data {
+                        BlockHeightWindow::decode(&mut &data.0[..]).map_err(anyhow::Error::msg)
+                    } else {
+                        Ok(BlockHeightWindow::default())
+                    };
+                    window
+                })
             })
             .flatten()
             .collect::<Result<Vec<_>>>()?;
 
-        // there will only be one per block, we probably don't need a subscription, we can just fetch this on a new epoch event, which we can do in the SC-Observer
         Ok(active_validator_windows)
     }
 
@@ -581,7 +582,6 @@ mod tests {
         mock_state_chain_rpc_client
             .expect_submit_extrinsic_rpc()
             .times(1)
-            // with verifies it's call with the correct argument
             .returning(move |_nonce: u32, _call: state_chain_runtime::Call| Ok(tx_hash.clone()));
 
         let state_chain_client = StateChainClient {
@@ -657,7 +657,6 @@ mod tests {
         mock_state_chain_rpc_client
             .expect_submit_extrinsic_rpc()
             .times(1)
-            // with verifies it's call with the correct argument
             .returning(move |_nonce: u32, _call: state_chain_runtime::Call| Err(RpcError::Timeout));
 
         let state_chain_client = StateChainClient {
@@ -703,7 +702,6 @@ mod tests {
         mock_state_chain_rpc_client
             .expect_submit_extrinsic_rpc()
             .times(1)
-            // with verifies it's call with the correct argument
             .returning(move |_nonce: u32, _call: state_chain_runtime::Call| {
                 Err(RpcError::JsonRpcError(Error {
                     code: ErrorCode::ServerError(1014),
