@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use cf_chains::ChainId;
 use cf_traits::{ChainflipAccountData, ChainflipAccountState};
 use codec::{Decode, Encode};
 use frame_support::metadata::RuntimeMetadataPrefixed;
@@ -10,6 +11,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use jsonrpc_core::{Error, ErrorCode};
 use jsonrpc_core_client::RpcError;
+use pallet_cf_vaults::BlockHeightWindow;
 use sp_core::H256;
 use sp_core::{
     storage::{StorageChangeSet, StorageKey},
@@ -324,6 +326,43 @@ impl<RpcClient: StateChainRpcApi> StateChainClient<RpcClient> {
             .state)
     }
 
+    // we want to get it for all the chains
+    // need to pass in epoch index and chain id... why epoch index??
+    pub async fn active_validator_window(
+        &self,
+        block_header: &state_chain_runtime::Header,
+    ) -> Result<Vec<BlockHeightWindow>> {
+        let active_window_storage_key = self.metadata.module("Vaults")?;
+
+        println!("Here's the Vaults module");
+        let active_window_storage_key = active_window_storage_key
+            .storage("ActiveWindows")?
+            .double_map()?
+            .key(&0, &ChainId::Ethereum);
+
+        println!("Getting events now");
+        let active_validator_windows = self
+            .state_chain_rpc_client
+            .storage_events_at(block_header, active_window_storage_key)
+            .await?
+            .into_iter()
+            .map(|storage_change_set| {
+                let StorageChangeSet { block: _, changes } = storage_change_set;
+                changes
+                    .into_iter()
+                    .filter_map(|(_storage_key, option_data)| {
+                        option_data.map(|data| {
+                            BlockHeightWindow::decode(&mut &data.0[..]).map_err(anyhow::Error::msg)
+                        })
+                    })
+            })
+            .flatten()
+            .collect::<Result<Vec<_>>>()?;
+
+        // there will only be one per block, we probably don't need a subscription, we can just fetch this on a new epoch event, which we can do in the SC-Observer
+        Ok(active_validator_windows)
+    }
+
     pub fn get_metadata(&self) -> substrate_subxt::Metadata {
         self.metadata.clone()
     }
@@ -490,7 +529,28 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "depends on running state chain"]
-    async fn test_finalised_storage_subs() {
+    async fn test_active_window_fetch() {
+        let settings = Settings::from_file("config/Local.toml").unwrap();
+        let (state_chain_client, mut block_stream) =
+            connect_to_state_chain(&settings).await.unwrap();
+
+        while let Some(block) = block_stream.next().await {
+            let block_header = block.unwrap();
+            let my_state_for_this_block = state_chain_client
+                .active_validator_window(&block_header)
+                .await
+                .expect("error in test");
+
+            println!(
+                "Returning active window for this block: {:?}",
+                my_state_for_this_block
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "depends on running state chain"]
+    async fn test_node_status_fetch() {
         let settings = Settings::from_file("config/Local.toml").unwrap();
         let (state_chain_client, mut block_stream) =
             connect_to_state_chain(&settings).await.unwrap();
