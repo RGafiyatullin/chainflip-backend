@@ -535,10 +535,7 @@ mod tests {
         let (state_chain_client, mut block_stream) =
             connect_to_state_chain(&settings).await.unwrap();
 
-        let block_height_window = BlockHeightWindow {
-            from: 69,
-            to: Some(42),
-        };
+        let block_height_window = BlockHeightWindow { from: 69, to: None };
         let epoch: u32 = 0;
         let xt = pallet_cf_vaults::Call::update_block_window(
             epoch,

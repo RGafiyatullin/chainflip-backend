@@ -52,6 +52,7 @@ pub struct Vault {
 pub mod pallet {
 	use super::*;
 	use frame_system::pallet_prelude::*;
+	use sp_runtime::DispatchResultWithInfo;
 
 	/// This is roughly the number of Ethereum blocks in 14 days.
 	pub const ETHEREUM_LEEWAY_IN_BLOCKS: u64 = 80_000;
@@ -165,6 +166,22 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
+		#[pallet::weight(10_000)]
+		pub fn update_block_window(
+			origin: OriginFor<T>,
+			epoch_index: EpochIndex,
+			chain_id: ChainId,
+			block_height_window_new: BlockHeightWindow,
+		) -> DispatchResultWithPostInfo {
+			// Set the leaving block number for the outgoing set of the current epoch.
+			ActiveWindows::<T>::mutate(epoch_index, chain_id, |block_height_window| {
+				block_height_window.from = block_height_window_new.from;
+				block_height_window.to = block_height_window_new.to;
+			});
+
+			Ok(().into())
+		}
+
 		/// A key generation succeeded. Update the state of the rotation and attempt to broadcast the setAggKey
 		/// transaction.
 		#[pallet::weight(10_000)]

@@ -302,6 +302,12 @@ pub async fn start<BlockStream, RpcClient>(
                                         ).await;
                                     }
                                 }
+                                state_chain_runtime::Event::pallet_cf_validator(
+                                    pallet_cf_validator::Event::NewEpoch(epoch_index)) => {
+                                        println!("Here's the epoch index: {:?}", epoch_index);
+                                        // get the new windows
+                                        
+                                    }
                                 ignored_event => {
                                     // ignore events we don't care about
                                     slog::trace!(logger, "Ignoring event: {:?}", ignored_event);
