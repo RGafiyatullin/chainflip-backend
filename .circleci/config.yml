@@ -221,6 +221,7 @@ workflows:
       - git-clone-contracts-repo
       - create-testnet:
           name: Create new testnet
+          extra_args: ""
           tag: "48544689baa5204cebf93f211cfd5bb3a4fa6e03"
           #          requires:
           #            - docker-build-chainflip-engine
