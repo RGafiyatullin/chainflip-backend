@@ -218,10 +218,7 @@ workflows:
       #          context:
       #            - ghcr-credentials
       #          <<: *only_main_branches
-      - git-clone-contracts-repo:
-          context:
-            - github-credentials
-
+      - git-clone-contracts-repo
       - create-testnet:
           name: Create new testnet
           tag: "48544689baa5204cebf93f211cfd5bb3a4fa6e03"
