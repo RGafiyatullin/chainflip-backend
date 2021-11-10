@@ -219,18 +219,18 @@ workflows:
       #            - ghcr-credentials
       #          <<: *only_main_branches
       - git-clone-contracts-repo
-      - create-testnet:
-          name: Create new testnet
-          extra_args: ""
-          tag: "48544689baa5204cebf93f211cfd5bb3a4fa6e03"
-          #          requires:
-          #            - docker-build-chainflip-engine
-          #            - docker-build-state-chain-node
-          context:
-            - ghcr-credentials
-            - do-credentials
-            - infura-endpoints
-          <<: *only_main_branches
+      #      - create-testnet:
+      #          name: Create new testnet
+      #          extra_args: ""
+      #          tag: "48544689baa5204cebf93f211cfd5bb3a4fa6e03"
+      #          #          requires:
+      #          #            - docker-build-chainflip-engine
+      #          #            - docker-build-state-chain-node
+      #          context:
+      #            - ghcr-credentials
+      #            - do-credentials
+      #            - infura-endpoints
+      #          <<: *only_main_branches
       - cargo-integration-tests:
           context:
             - ghcr-credentials
@@ -240,15 +240,15 @@ workflows:
             - git-clone-contracts-repo
       #            - docker-build-chainflip-engine
       #            - docker-build-state-chain-node
-      - create-testnet:
-          name: Destroy tesnet
-          extra_args: "--destroy"
-          requires:
-            - cargo-integration-tests
-          context:
-            - ghcr-credentials
-            - do-credentials
-            - infura-endpoints
+#      - create-testnet:
+#          name: Destroy tesnet
+#          extra_args: "--destroy"
+#          requires:
+#            - cargo-integration-tests
+#          context:
+#            - ghcr-credentials
+#            - do-credentials
+#            - infura-endpoints
 
 ######################## /Workflows ########################
 
