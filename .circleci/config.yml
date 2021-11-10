@@ -231,7 +231,6 @@ workflows:
           context:
             - ghcr-credentials
             - do-credentials
-            - github-credentials
             - infura-endpoints
           <<: *only_main_branches
       - cargo-integration-tests:
@@ -527,9 +526,11 @@ jobs:
       - doctl/initialize
       - run: doctl kubernetes cluster kubeconfig save <<parameters.cluster_name>>
       - run: >
+          set +x
           curl -H "Authorization: token $GITHUB_TOKEN"
           -H 'Accept: application/vnd.github.v3.raw'
           -O
+          --fail
           -L https://api.github.com/repos/chainflip-io/chainflip-cluster/contents/build.sh
       - run:
           name: Install cluster
