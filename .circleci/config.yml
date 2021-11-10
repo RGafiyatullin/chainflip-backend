@@ -218,6 +218,10 @@ workflows:
       #          context:
       #            - ghcr-credentials
       #          <<: *only_main_branches
+      - git-clone-contracts-repo:
+          context:
+            - github-credentials
+
       - create-testnet:
           name: Create new testnet
           tag: "48544689baa5204cebf93f211cfd5bb3a4fa6e03"
@@ -234,7 +238,8 @@ workflows:
             - ghcr-credentials
             - do-credentials
             - infura-endpoints
-      #          requires:
+          requires:
+            - git-clone-contracts-repo
       #            - docker-build-chainflip-engine
       #            - docker-build-state-chain-node
       - create-testnet:
@@ -520,7 +525,11 @@ jobs:
       - checkout
       - doctl/initialize
       - run: doctl kubernetes cluster kubeconfig save <<parameters.cluster_name>>
-      - run: curl -fslO https://raw.githubusercontent.com/chainflip-io/chainflip-cluster/develop/build.sh?token=$GITHUB_TOKEN
+      - run: >
+          curl -H "Authorization: token $GITHUB_TOKEN"
+            -H 'Accept: application/vnd.github.v3.raw'
+            -O
+            -L https://api.github.com/repos/chainflip-io/chainflip-cluster/contents/build.sh
       - run:
           name: Install cluster
           command: |
