@@ -231,6 +231,7 @@ workflows:
           context:
             - ghcr-credentials
             - do-credentials
+            - github-credentials
             - infura-endpoints
           <<: *only_main_branches
       - cargo-integration-tests:
