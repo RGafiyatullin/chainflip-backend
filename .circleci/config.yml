@@ -320,6 +320,7 @@ jobs:
     <<: *cargo-base-job
     executor: rust-poetry
     steps:
+      - checkout
       - attach_workspace:
           at: ./
       - run: sccache --show-stats
