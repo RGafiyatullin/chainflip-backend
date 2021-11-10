@@ -533,5 +533,6 @@ jobs:
       - run:
           name: Install cluster
           command: |
+            chmod u+x build.sh
             ./build.sh -b="$CIRCLE_BRANCH" -t="<<parameters.tag>>" <<parameters.extra_args>>
 ######################## /Jobs ########################
