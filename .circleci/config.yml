@@ -337,7 +337,7 @@ jobs:
           command: |
             cd eth-contracts
             poetry install --quiet
-            poetry run brownie run deploy_and all_events --network hardhat
+            poetry run brownie run deploy_and --network hardhat
       - run: |
           cargo test --package chainflip-engine --test rotation_end_to_end -- vault_rotation_end_to_end --exact --nocapture
           sccache --show-stats
