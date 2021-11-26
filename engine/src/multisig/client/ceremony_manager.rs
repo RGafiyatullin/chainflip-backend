@@ -126,7 +126,7 @@ impl CeremonyManager {
     pub fn on_keygen_request(&mut self, keygen_info: KeygenInfo, keygen_options: KeygenOptions) {
         let KeygenInfo {
             ceremony_id,
-            signers,
+            mut signers,
         } = keygen_info;
 
         let logger = self.logger.new(slog::o!(CEREMONY_ID_KEY => ceremony_id));
