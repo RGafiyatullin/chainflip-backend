@@ -131,6 +131,8 @@ impl CeremonyManager {
 
         let logger = self.logger.new(slog::o!(CEREMONY_ID_KEY => ceremony_id));
 
+        signers.sort(); // TODO: This "fix" makes the code below (and in other places) unnecessarily complex and therefore it should be cleaned up. For example the signer_idx will always be a vec containing 1 to signers-len() in ascending order.
+
         let validator_map = Arc::new(PartyIdxMapping::from_unsorted_signers(&signers));
 
         let (our_idx, signer_idxs) = match self.map_ceremony_parties(&signers, &validator_map) {
@@ -168,12 +170,14 @@ impl CeremonyManager {
         &mut self,
         data: MessageHash,
         key_info: KeygenResultInfo,
-        signers: Vec<AccountId>,
+        mut signers: Vec<AccountId>,
         ceremony_id: CeremonyId,
     ) {
         let logger = self.logger.new(slog::o!(CEREMONY_ID_KEY => ceremony_id));
 
         slog::debug!(logger, "Processing a request to sign");
+
+        signers.sort(); // TODO: This "fix" makes the code below (and in other places) unnecessarily complex and therefore it should be cleaned up. For example the signer_idx will always be a vec containing 1 to signers-len() in ascending order.
 
         // Check that the number of signers is correct
         let signers_expected = key_info.params.threshold + 1;
