@@ -10,6 +10,7 @@ use jsonrpc_core::{Error, ErrorCode};
 use jsonrpc_core_client::{RpcChannel, RpcError};
 use pallet_cf_vaults::Vault;
 use sp_core::H256;
+use sp_core::storage::StorageData;
 use sp_core::{
     storage::{StorageChangeSet, StorageKey},
     Bytes, Pair,
@@ -165,6 +166,12 @@ pub trait StateChainRpcApi {
         storage_key: StorageKey,
     ) -> Result<Vec<StorageChangeSet<state_chain_runtime::Hash>>>;
 
+    async fn storage(
+        &self,
+        block_hash: state_chain_runtime::Hash,
+        storage_key: StorageKey,
+    ) -> Result<Option<StorageData>>;
+
     async fn get_block(&self, block_hash: state_chain_runtime::Hash)
         -> Result<Option<SignedBlock>>;
 }
@@ -197,6 +204,17 @@ impl StateChainRpcApi for StateChainRpcClient {
     ) -> Result<Vec<StorageChangeSet<state_chain_runtime::Hash>>> {
         self.state_rpc_client
             .query_storage_at(vec![storage_key], block_hash)
+            .await
+            .map_err(rpc_error_into_anyhow_error)
+    }
+
+    async fn storage(
+        &self,
+        block_hash: state_chain_runtime::Hash,
+        storage_key: StorageKey,
+    ) -> Result<Option<StorageData>> {
+        self.state_rpc_client
+            .storage(storage_key, Some(block_hash))
             .await
             .map_err(rpc_error_into_anyhow_error)
     }
@@ -390,6 +408,26 @@ impl<RpcClient: StateChainRpcApi> StateChainClient<RpcClient> {
             .collect::<Result<_>>()?;
 
         Ok(storage_updates)
+    }
+
+    pub async fn get_nonce(&self, block_hash: state_chain_runtime::Hash) -> Result<u32> {
+        let account_info: frame_system::AccountInfo<
+            <RuntimeImplForSigningExtrinsics as System>::Index,
+            <RuntimeImplForSigningExtrinsics as System>::AccountData,
+        > = Decode::decode(
+            &mut &self
+                .state_chain_rpc_client
+                .storage(block_hash, self.account_storage_key.clone())
+                .await?
+                .ok_or_else(|| {
+                    anyhow::format_err!(
+                        "AccountId {:?} doesn't exist on the state chain.",
+                        self.our_account_id,
+                    )
+                })?
+                .0[..],
+        )?;
+        Ok(account_info.nonce)
     }
 
     // TODO: work out how to get all vaults with a single query... not sure if possible
