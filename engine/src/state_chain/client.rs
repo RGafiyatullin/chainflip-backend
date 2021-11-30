@@ -250,9 +250,10 @@ impl<RpcClient: StateChainRpcApi> StateChainClient<RpcClient> {
                 Ok(tx_hash) => {
                     slog::trace!(
                         logger,
-                        "{:?} submitted successfully with tx_hash: {}",
+                        "{:?} submitted successfully with tx_hash: {}. Nonce: {}",
                         extrinsic,
-                        tx_hash
+                        tx_hash,
+                        nonce
                     );
                     return Ok(tx_hash);
                 }
@@ -268,8 +269,9 @@ impl<RpcClient: StateChainRpcApi> StateChainClient<RpcClient> {
                         let err = rpc_error_into_anyhow_error(err);
                         slog::error!(
                             logger,
-                            "Extrinsic failed with error: {}. Extrinsic: {:?}",
+                            "Extrinsic failed with error: {}. Nonce: {}. Extrinsic: {:?}",
                             err,
+                            nonce,
                             extrinsic
                         );
                         self.nonce.fetch_sub(1, Ordering::Relaxed);
