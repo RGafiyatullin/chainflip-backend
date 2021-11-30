@@ -61,8 +61,12 @@ pub async fn start<BlockStream, RpcClient>(
             Ok(block_header) => {
                 let block_hash = block_header.hash();
 
-                slog::info!(logger, "Nonce is {:?} at block {}", state_chain_client.get_nonce(block_hash).await, block_header.number);
-
+                slog::info!(
+                    logger,
+                    "Nonce is {:?} at block {}",
+                    state_chain_client.get_nonce(block_hash).await,
+                    block_header.number
+                );
 
                 // get the eth vault we were last active for and start the witness processes
                 // for this window
