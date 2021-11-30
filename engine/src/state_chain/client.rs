@@ -587,6 +587,16 @@ pub async fn connect_to_state_chain(
     let chain_rpc_client: ChainRpcClient = rpc_client.clone().into();
     let state_rpc_client: StateRpcClient = rpc_client.clone().into();
 
+    println!(
+        "Latest Block Number: {}",
+        chain_rpc_client
+            .header(None)
+            .await
+            .map_err(rpc_error_into_anyhow_error)?
+            .unwrap()
+            .number
+    );
+
     let mut block_header_stream = chain_rpc_client
         .subscribe_finalized_heads()
         .map_err(rpc_error_into_anyhow_error)?
