@@ -16,8 +16,9 @@ benchmarks! {
 	heartbeat {
 		let caller: T::AccountId = whitelisted_caller();
 		let validator_id: T::ValidatorId = caller.clone().into();
+		let heartbeat_info = Default::default();
 		Nodes::<T>::insert(&validator_id, Liveness::<T>::default());
-	} : _(RawOrigin::Signed(caller))
+	} : _(RawOrigin::Signed(caller), heartbeat_info)
 	submit_network_state {
 		for b in 1 .. MAX_VALIDATOR_AMOUNT {
 			let caller: T::AccountId  = account("doogle", b, b);

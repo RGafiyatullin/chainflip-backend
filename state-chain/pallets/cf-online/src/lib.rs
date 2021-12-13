@@ -26,6 +26,8 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use sp_runtime::traits::Saturating;
 
+	type HeartbeatInfoFor<T> = <<T as Config>::Heartbeat as Heartbeat>::HeartbeatInfo;
+
 	#[pallet::pallet]
 	#[pallet::generate_store(pub (super) trait Store)]
 	pub struct Pallet<T>(_);
@@ -124,8 +126,15 @@ pub mod pallet {
 		/// ## Errors
 		///
 		/// - [BadOrigin](frame_support::error::BadOrigin)
+		///
+		/// ## Dependencies
+		///
+		/// - [Heartbeat]
 		#[pallet::weight(T::WeightInfo::heartbeat())]
-		pub fn heartbeat(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
+		pub fn heartbeat(
+			origin: OriginFor<T>,
+			heartbeat_info: HeartbeatInfoFor<T>,
+		) -> DispatchResultWithPostInfo {
 			let validator_id: T::ValidatorId = ensure_signed(origin)?.into();
 			let current_block_number = frame_system::Pallet::<T>::current_block_number();
 
@@ -133,7 +142,7 @@ pub mod pallet {
 				(*node).last_heartbeat = current_block_number;
 			});
 
-			T::Heartbeat::heartbeat_submitted(&validator_id, current_block_number);
+			T::Heartbeat::heartbeat_submitted(&validator_id, current_block_number, heartbeat_info);
 			Ok(().into())
 		}
 	}

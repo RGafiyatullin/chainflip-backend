@@ -573,11 +573,15 @@ pub mod offline_conditions {
 pub trait Heartbeat {
 	type ValidatorId: Default;
 	type BlockNumber;
+	/// Additional metadata submitted as part of a hearbeat.
+	type HeartbeatInfo: Member + Parameter + Default;
+
 	/// A heartbeat has been submitted
 	fn heartbeat_submitted(
 		validator_id: &Self::ValidatorId,
 		block_number: Self::BlockNumber,
-	) -> Weight;
+		heartbeat_info: Self::HeartbeatInfo,
+	);
 	/// Called on every heartbeat interval with the current network state
 	fn on_heartbeat_interval(network_state: NetworkState<Self::ValidatorId>) -> Weight;
 }

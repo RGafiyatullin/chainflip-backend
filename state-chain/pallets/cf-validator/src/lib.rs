@@ -128,6 +128,10 @@ pub mod pallet {
 		AccountPeerMappingOverlap,
 		/// Invalid signature
 		InvalidAccountPeerMappingSignature,
+		/// The provided PeerId is already registered for this account
+		AlreadyRegistered,
+		/// The provided mapping does not match what is stored
+		InvalidAccountMapping,
 	}
 
 	/// Pallet implements [`Hooks`] trait
@@ -238,14 +242,15 @@ pub mod pallet {
 				Error::<T>::InvalidAccountPeerMappingSignature
 			);
 			ensure!(
-				!AccountPeerMapping::<T>::contains_key(&account_id) &&
-					!MappedPeers::<T>::contains_key(&peer_id),
+				!MappedPeers::<T>::contains_key(&peer_id),
 				Error::<T>::AccountPeerMappingOverlap
 			);
-			AccountPeerMapping::<T>::insert(
-				account_id.clone(),
-				(account_id.clone(), peer_id.clone()),
-			);
+			AccountPeerMapping::<T>::mutate(&account_id, |maybe_mapping| {
+				if let Some((_, old_peer_id)) = *maybe_mapping {
+					MappedPeers::<T>::remove(old_peer_id);
+				}
+				*maybe_mapping = Some((account_id.clone(), peer_id.clone()));
+			});
 			MappedPeers::<T>::insert(peer_id.clone(), ());
 			Self::deposit_event(Event::PeerIdRegistered(account_id, peer_id));
 			Ok(().into())
@@ -567,6 +572,21 @@ impl<T: Config> EmergencyRotation for Pallet<T> {
 		if Self::emergency_rotation_in_progress() {
 			EmergencyRotationRequested::<T>::set(false);
 		}
+	}
+}
+
+pub struct ConfirmPeerRegistration<T: Config>(PhantomData<T>);
+
+impl<T: Config> ConfirmPeerRegistration<T> {
+	pub fn confirm_peer_registration(
+		account_id: <T as frame_system::Config>::AccountId,
+		peer_id: Ed25519PublicKey,
+	) -> DispatchResult {
+		ensure!(
+			AccountPeerMapping::<T>::get(&account_id) == Some((account_id, peer_id)),
+			Error::<T>::InvalidAccountMapping
+		);
+		Ok(())
 	}
 }
 

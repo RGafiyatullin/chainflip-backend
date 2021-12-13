@@ -195,12 +195,19 @@ pub struct ChainflipHeartbeat;
 impl Heartbeat for ChainflipHeartbeat {
 	type ValidatorId = AccountId;
 	type BlockNumber = BlockNumber;
+	type HeartbeatInfo = (AccountId, sp_core::ed25519::Public);
 
 	fn heartbeat_submitted(
 		validator_id: &Self::ValidatorId,
 		block_number: Self::BlockNumber,
-	) -> Weight {
-		<Reputation as Heartbeat>::heartbeat_submitted(validator_id, block_number)
+		heartbeat_info: Self::HeartbeatInfo,
+	) {
+		<Reputation as Heartbeat>::heartbeat_submitted(validator_id, block_number, ());
+		// TODO: This can return an error - what to do with it?
+		let _ = pallet_cf_validator::ConfirmPeerRegistration::<Runtime>::confirm_peer_registration(
+			heartbeat_info.0,
+			heartbeat_info.1,
+		);
 	}
 
 	fn on_heartbeat_interval(network_state: NetworkState<Self::ValidatorId>) -> Weight {

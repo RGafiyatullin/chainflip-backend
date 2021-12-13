@@ -84,6 +84,7 @@
     "validator_bond": "Amount"
   },
   "FlipBalance": "u128",
+  "HeartbeatInfoFor": "(AccountId, Ed25519PublicKey)",
   "H256": "[u8; 32]",
   "InternalSource": {
     "_enum": {
