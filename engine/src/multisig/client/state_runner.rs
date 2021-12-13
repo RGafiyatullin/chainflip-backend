@@ -59,6 +59,7 @@ where
         }
     }
 
+    // TODO: Rename to `on_ceremony_instruction`??
     /// Process ceremony request from the State Chain, which allows
     /// the state machine to make progress
     pub fn on_ceremony_request(

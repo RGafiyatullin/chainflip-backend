@@ -157,6 +157,7 @@ pub type MultisigOutcomeSender = tokio::sync::mpsc::UnboundedSender<MultisigOutc
 pub enum MultisigOutcome {
     Signing(SigningOutcome),
     Keygen(KeygenOutcome),
+    // Delayed,
 }
 
 /// Multisig client is is responsible for persistently storing generated keys and
@@ -235,8 +236,6 @@ where
     pub fn process_multisig_instruction(&mut self, instruction: MultisigInstruction) {
         match instruction {
             MultisigInstruction::Keygen(keygen_info) => {
-                // For now disable generating a new key when we already have one
-
                 slog::debug!(
                     self.logger,
                     "Received a keygen request, participants: {:?}",
@@ -266,8 +265,8 @@ where
                         );
                     }
                     None => {
+                        // TODO: Send something back down the channel
                         // The key is not ready, delay until either it is ready or timeout
-
                         slog::debug!(
                             self.logger,
                             "Delaying a request to sign for unknown key: {:?}",
@@ -279,12 +278,19 @@ where
                             .entry(sign_info.key_id.clone())
                             .or_default()
                             .push(PendingSigningInfo::new(sign_info));
+
+                        // Send delayed back through channel, so we don't block in the meantime
+                        // self.multisig_outcome_sender
+                        //     .send(MultisigOutcome::Delayed)
+                        //     .unwrap();
                     }
                 }
             }
         }
     }
 
+    // THIS CANNOT BE RUN AT THE MOMENT IRL, SINCE A KEYGEN CANNOT OCCUR IN PARALLEL WITH
+    // A SIGNING CEREMONY
     /// Process requests to sign that required the key in `key_info`
     fn process_pending_requests_to_sign(&mut self, key_info: KeygenResultInfo) {
         if let Some(reqs) = self

@@ -222,6 +222,9 @@ pub async fn start<BlockStream, RpcClient>(
                                                 )
                                             }
                                         },
+                                        // MultisigOutcome::Delayed => {
+                                        //     slog::trace!(logger, "Received MultisigOutcome delayed from Multisig client. Continue processing events");
+                                        // }
                                         MultisigOutcome::Signing(message_signing_result) => {
                                             panic!(
                                                 "Expecting KeygenResult, got: {:?}",
@@ -229,6 +232,7 @@ pub async fn start<BlockStream, RpcClient>(
                                             );
                                         }
                                     };
+
                                     let _ = state_chain_client
                                         .submit_signed_extrinsic(&logger, response_extrinsic)
                                         .await;
@@ -295,6 +299,9 @@ pub async fn start<BlockStream, RpcClient>(
                                                     .await;
                                             }
                                         },
+                                        // MultisigOutcome::Delayed => {
+                                        //     slog::trace!(logger, "Received MultisigOutcome delayed from Multisig client. Continue processing events");
+                                        // }
                                         MultisigOutcome::Keygen(keygen_result) => {
                                             panic!(
                                                 "Expecting MessageSigningResult, got: {:?}",
