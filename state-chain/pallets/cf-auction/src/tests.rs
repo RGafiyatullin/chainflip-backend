@@ -2,7 +2,7 @@ mod tests {
 	use crate::{mock::*, *};
 	use cf_traits::mocks::{
 		chainflip_account::MockChainflipAccount,
-		vault_rotation::{clear_confirmation, Mock as MockVaultRotator},
+		epoch_info::MockEpochInfo,
 	};
 	use frame_support::{assert_noop, assert_ok};
 
@@ -23,63 +23,63 @@ mod tests {
 			assert_eq!(AuctionPallet::backup_group_size(), expected_backup_group_size);
 
 			assert_eq!(
-				AuctionPallet::auction_result(),
-				Some(AuctionResult { winners, minimum_active_bid })
+				<AuctionPallet as Auctioneer>::run_auction().expect("we should have an auction"),
+				AuctionResult { winners, minimum_active_bid }
 			);
 		});
 	}
 
-	#[test]
-	fn run_through_phases() {
-		new_test_ext().execute_with(|| {
-			// We would have the genesis state with group 1 of the bidders
-			let (old_winners, old_minimum_active_bid) = expected_validating_set();
-			assert_eq!(
-				AuctionPallet::auction_result(),
-				Some(AuctionResult {
-					winners: old_winners.clone(),
-					minimum_active_bid: old_minimum_active_bid,
-				})
-			);
-			generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_B);
-			// Check we are in the bidders phase
-			assert_matches!(AuctionPallet::phase(), AuctionPhase::WaitingForBids);
-			// Having moved into the BidsTaken phase we should have our list of bidders filtered
-			// Expecting the phase to change, a set of winners, the bidder list and a bond value set
-			// to our min bid
-			assert_matches!(AuctionPallet::process(), Ok(AuctionPhase::ValidatorsSelected(validators, minimum_active_bid))
-				if (validators.clone(), minimum_active_bid) == expected_validating_set()
-			);
-			assert_matches!(AuctionPallet::current_phase(), AuctionPhase::ValidatorsSelected(validators, minimum_active_bid)
-				if (validators.clone(), minimum_active_bid) == expected_validating_set()
-			);
-			assert_eq!(
-				last_event(),
-				mock::Event::AuctionPallet(crate::Event::AuctionCompleted(
-					1,
-					expected_validating_set().0
-				)),
-			);
-			// Just leaves us to confirm this auction, if we try to process this we will get an error
-			// until is confirmed
-			assert_matches!(AuctionPallet::process(), Err(AuctionError::NotConfirmed));
-			// Confirm the auction
-			clear_confirmation();
-			// and finally we complete the process, a list of confirmed validators
-			let (new_winners, new_minimum_active_bid) = expected_validating_set();
-			assert_eq!(AuctionPallet::process(), Ok(AuctionPhase::WaitingForBids));
-
-			assert_eq!(
-				AuctionPallet::auction_result(),
-				Some(AuctionResult {
-					winners: new_winners.clone(),
-					minimum_active_bid: new_minimum_active_bid
-				})
-			);
-
-			assert_ne!(old_winners, new_winners);
-		});
-	}
+	// #[test]
+	// fn run_through_phases() {
+	// 	new_test_ext().execute_with(|| {
+	// 		// We would have the genesis state with group 1 of the bidders
+	// 		let (old_winners, old_minimum_active_bid) = expected_validating_set();
+	// 		assert_eq!(
+	// 			AuctionPallet::auction_result(),
+	// 			Some(AuctionResult {
+	// 				winners: old_winners.clone(),
+	// 				minimum_active_bid: old_minimum_active_bid,
+	// 			})
+	// 		);
+	// 		generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_B);
+	// 		// Check we are in the bidders phase
+	// 		assert_matches!(AuctionPallet::phase(), AuctionPhase::WaitingForBids);
+	// 		// Having moved into the BidsTaken phase we should have our list of bidders filtered
+	// 		// Expecting the phase to change, a set of winners, the bidder list and a bond value set
+	// 		// to our min bid
+	// 		assert_matches!(AuctionPallet::process(), Ok(AuctionPhase::ValidatorsSelected(validators,
+	// minimum_active_bid)) 			if (validators.clone(), minimum_active_bid) == expected_validating_set()
+	// 		);
+	// 		assert_matches!(AuctionPallet::current_phase(), AuctionPhase::ValidatorsSelected(validators,
+	// minimum_active_bid) 			if (validators.clone(), minimum_active_bid) == expected_validating_set()
+	// 		);
+	// 		assert_eq!(
+	// 			last_event(),
+	// 			mock::Event::AuctionPallet(crate::Event::AuctionCompleted(
+	// 				1,
+	// 				expected_validating_set().0
+	// 			)),
+	// 		);
+	// 		// Just leaves us to confirm this auction, if we try to process this we will get an error
+	// 		// until is confirmed
+	// 		assert_matches!(AuctionPallet::process(), Err(AuctionError::NotConfirmed));
+	// 		// Confirm the auction
+	// 		clear_confirmation();
+	// 		// and finally we complete the process, a list of confirmed validators
+	// 		let (new_winners, new_minimum_active_bid) = expected_validating_set();
+	// 		assert_eq!(AuctionPallet::process(), Ok(AuctionPhase::WaitingForBids));
+	//
+	// 		assert_eq!(
+	// 			AuctionPallet::auction_result(),
+	// 			Some(AuctionResult {
+	// 				winners: new_winners.clone(),
+	// 				minimum_active_bid: new_minimum_active_bid
+	// 			})
+	// 		);
+	//
+	// 		assert_ne!(old_winners, new_winners);
+	// 	});
+	// }
 
 	fn expected_group_sizes(number_of_bidders: u32) -> (u32, u32, u32) {
 		let expected_number_of_validators = min(MAX_VALIDATOR_SIZE, number_of_bidders);
@@ -101,50 +101,48 @@ mod tests {
 	fn should_create_correct_size_of_groups() {
 		new_test_ext().execute_with(|| {
 			generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_A);
-			run_auction();
+			let auction_result = run_complete_auction();
 			let validate_states = |nodes: Vec<ValidatorId>, state: ChainflipAccountState| {
 				for node in nodes {
 					assert_eq!(MockChainflipAccount::get(&node).state, state);
 				}
 			};
 
-			let validate_bidder_groups = || {
+			let validate_bidder_groups = |result: AuctionResult<ValidatorId, Amount>| {
 				let number_of_bidders = MockBidderProvider::get_bidders().len() as u32;
 				let (validators_size, backup_validators_size, passive_nodes_size) =
 					expected_group_sizes(number_of_bidders);
 
-				if let Some(result) = AuctionPallet::auction_result() {
-					assert_eq!(validators_size, result.winners.len() as u32);
-					assert_eq!(backup_validators_size, AuctionPallet::backup_group_size());
-					assert_eq!(
-						passive_nodes_size,
-						AuctionPallet::remaining_bidders().len() as u32 -
-							AuctionPallet::backup_group_size()
-					);
+				assert_eq!(validators_size, result.winners.len() as u32);
+				assert_eq!(backup_validators_size, AuctionPallet::backup_group_size());
+				assert_eq!(
+					passive_nodes_size,
+					AuctionPallet::remaining_bidders().len() as u32 -
+						AuctionPallet::backup_group_size()
+				);
 
-					validate_states(result.winners, ChainflipAccountState::Validator);
+				validate_states(result.winners, ChainflipAccountState::Validator);
 
-					let backup_validators = AuctionPallet::remaining_bidders()
-						.iter()
-						.take(AuctionPallet::backup_group_size() as usize)
-						.map(|(validator_id, _)| *validator_id)
-						.collect();
+				let backup_validators = AuctionPallet::remaining_bidders()
+					.iter()
+					.take(AuctionPallet::backup_group_size() as usize)
+					.map(|(validator_id, _)| *validator_id)
+					.collect();
 
-					validate_states(backup_validators, ChainflipAccountState::Backup);
+				validate_states(backup_validators, ChainflipAccountState::Backup);
 
-					let passive_nodes = AuctionPallet::remaining_bidders()
-						.iter()
-						.skip(AuctionPallet::backup_group_size() as usize)
-						.take(usize::MAX)
-						.map(|(validator_id, _)| *validator_id)
-						.collect();
+				let passive_nodes = AuctionPallet::remaining_bidders()
+					.iter()
+					.skip(AuctionPallet::backup_group_size() as usize)
+					.take(usize::MAX)
+					.map(|(validator_id, _)| *validator_id)
+					.collect();
 
-					validate_states(passive_nodes, ChainflipAccountState::Passive);
-				}
+				validate_states(passive_nodes, ChainflipAccountState::Passive);
 			};
 
 			// Validate groups at genesis
-			validate_bidder_groups();
+			validate_bidder_groups(auction_result);
 
 			// Run a few auctions and validate groups
 			let auction_bidders = [
@@ -155,8 +153,7 @@ mod tests {
 			];
 			for bidders in auction_bidders.iter() {
 				generate_bids(*bidders, BIDDER_GROUP_A);
-				run_auction();
-				validate_bidder_groups();
+				validate_bidder_groups(run_complete_auction());
 			}
 		});
 	}
@@ -182,59 +179,47 @@ mod tests {
 	fn should_promote_passive_node_if_stake_qualifies_for_backup() {
 		new_test_ext().execute_with(|| {
 			generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_A);
-			run_auction();
+			run_complete_auction();
 
-			match AuctionPallet::current_phase() {
-				AuctionPhase::WaitingForBids => {
-					let backup_validators = current_backup_validators();
-					let passive_nodes = current_passive_nodes();
+			let backup_validators = current_backup_validators();
+			let passive_nodes = current_passive_nodes();
 
-					let (bottom_backup_validator, lowest_backup_validator_bid) =
-						backup_validators.last().unwrap();
-					let (top_passive_node, highest_passive_node_bid) =
-						passive_nodes.first().unwrap();
-					assert_eq!(
-						*lowest_backup_validator_bid,
-						AuctionPallet::lowest_backup_validator_bid()
-					);
-					assert_eq!(
-						*highest_passive_node_bid,
-						AuctionPallet::highest_passive_node_bid()
-					);
-					let new_bid = lowest_backup_validator_bid + 1;
+			let (bottom_backup_validator, lowest_backup_validator_bid) =
+				backup_validators.last().unwrap();
+			let (top_passive_node, highest_passive_node_bid) = passive_nodes.first().unwrap();
+			assert_eq!(*lowest_backup_validator_bid, AuctionPallet::lowest_backup_validator_bid());
+			assert_eq!(*highest_passive_node_bid, AuctionPallet::highest_passive_node_bid());
+			let new_bid = lowest_backup_validator_bid + 1;
 
-					// Promote a passive node to the backup set
-					HandleStakes::<Test>::stake_updated(top_passive_node, new_bid);
+			// Promote a passive node to the backup set
+			HandleStakes::<Test>::stake_updated(top_passive_node, new_bid);
 
-					assert_eq!(
-						MockChainflipAccount::get(top_passive_node).state,
-						ChainflipAccountState::Backup
-					);
+			assert_eq!(
+				MockChainflipAccount::get(top_passive_node).state,
+				ChainflipAccountState::Backup
+			);
 
-					assert_eq!(
-						MockChainflipAccount::get(&bottom_backup_validator).state,
-						ChainflipAccountState::Passive
-					);
+			assert_eq!(
+				MockChainflipAccount::get(&bottom_backup_validator).state,
+				ChainflipAccountState::Passive
+			);
 
-					// Reset with the new bid
-					let top_of_the_passive_nodes = (*top_passive_node, new_bid);
+			// Reset with the new bid
+			let top_of_the_passive_nodes = (*top_passive_node, new_bid);
 
-					let backup_validators = current_backup_validators();
-					let passive_nodes = current_passive_nodes();
+			let backup_validators = current_backup_validators();
+			let passive_nodes = current_passive_nodes();
 
-					let new_bottom_of_the_backup_validators = backup_validators.last().unwrap();
-					let new_top_of_the_passive_nodes = passive_nodes.first().unwrap();
+			let new_bottom_of_the_backup_validators = backup_validators.last().unwrap();
+			let new_top_of_the_passive_nodes = passive_nodes.first().unwrap();
 
-					assert_eq!(&top_of_the_passive_nodes, new_bottom_of_the_backup_validators);
-					assert_eq!(
-						*new_top_of_the_passive_nodes,
-						(*bottom_backup_validator, *lowest_backup_validator_bid)
-					);
+			assert_eq!(&top_of_the_passive_nodes, new_bottom_of_the_backup_validators);
+			assert_eq!(
+				*new_top_of_the_passive_nodes,
+				(*bottom_backup_validator, *lowest_backup_validator_bid)
+			);
 
-					assert_eq!(AuctionPallet::lowest_backup_validator_bid(), new_bid);
-				},
-				_ => unreachable!("wrong phase"),
-			}
+			assert_eq!(AuctionPallet::lowest_backup_validator_bid(), new_bid);
 		});
 	}
 
@@ -242,28 +227,23 @@ mod tests {
 	fn should_demote_backup_validator_on_poor_stake() {
 		new_test_ext().execute_with(|| {
 			generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_A);
-			run_auction();
+			run_complete_auction();
 
-			match AuctionPallet::current_phase() {
-				AuctionPhase::WaitingForBids => {
-					let backup_validators = current_backup_validators();
+			let backup_validators = current_backup_validators();
 
-					let (top_backup_validator_id, _) = backup_validators.first().unwrap();
-					let new_bid = AuctionPallet::highest_passive_node_bid() - 1;
+			let (top_backup_validator_id, _) = backup_validators.first().unwrap();
+			let new_bid = AuctionPallet::highest_passive_node_bid() - 1;
 
-					HandleStakes::<Test>::stake_updated(top_backup_validator_id, new_bid);
+			HandleStakes::<Test>::stake_updated(top_backup_validator_id, new_bid);
 
-					assert_eq!(
-						MockChainflipAccount::get(top_backup_validator_id).state,
-						ChainflipAccountState::Passive
-					);
+			assert_eq!(
+				MockChainflipAccount::get(top_backup_validator_id).state,
+				ChainflipAccountState::Passive
+			);
 
-					// The top passive node would move upto backup set and the highest passive bid
-					// would be recalculated
-					assert_eq!(AuctionPallet::highest_passive_node_bid(), new_bid);
-				},
-				_ => unreachable!("wrong phase"),
-			}
+			// The top passive node would move upto backup set and the highest passive bid
+			// would be recalculated
+			assert_eq!(AuctionPallet::highest_passive_node_bid(), new_bid);
 		});
 	}
 
@@ -271,28 +251,23 @@ mod tests {
 	fn should_establish_a_new_lowest_backup_validator_bid() {
 		new_test_ext().execute_with(|| {
 			generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_A);
-			run_auction();
-			match AuctionPallet::current_phase() {
-				AuctionPhase::WaitingForBids => {
-					// Place bid below lowest backup validator bid but above highest passive node
-					// bid Should see lowest backup validator bid change but the state of the backup
-					// validator would not change
-					let backup_validators = current_backup_validators();
+			run_complete_auction();
+			// Place bid below lowest backup validator bid but above highest passive node
+			// bid Should see lowest backup validator bid change but the state of the backup
+			// validator would not change
+			let backup_validators = current_backup_validators();
 
-					let new_bid = AuctionPallet::lowest_backup_validator_bid() - 1;
-					// Take the top and update bid
-					let (top_backup_validator_id, _) = backup_validators.first().unwrap();
-					HandleStakes::<Test>::stake_updated(top_backup_validator_id, new_bid);
+			let new_bid = AuctionPallet::lowest_backup_validator_bid() - 1;
+			// Take the top and update bid
+			let (top_backup_validator_id, _) = backup_validators.first().unwrap();
+			HandleStakes::<Test>::stake_updated(top_backup_validator_id, new_bid);
 
-					assert_eq!(
-						MockChainflipAccount::get(top_backup_validator_id).state,
-						ChainflipAccountState::Backup
-					);
+			assert_eq!(
+				MockChainflipAccount::get(top_backup_validator_id).state,
+				ChainflipAccountState::Backup
+			);
 
-					assert_eq!(AuctionPallet::lowest_backup_validator_bid(), new_bid);
-				},
-				_ => unreachable!("wrong phase"),
-			}
+			assert_eq!(AuctionPallet::lowest_backup_validator_bid(), new_bid);
 		});
 	}
 
@@ -300,28 +275,23 @@ mod tests {
 	fn should_establish_a_highest_passive_node_bid() {
 		new_test_ext().execute_with(|| {
 			generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_A);
-			run_auction();
-			match AuctionPallet::current_phase() {
-				AuctionPhase::WaitingForBids => {
-					// Place bid above highest passive node bid but below lowest backup validator
-					// bid Should see highest passive node bid change but the state of the passive
-					// node would not change
-					let passive_nodes = current_passive_nodes();
+			run_complete_auction();
+			// Place bid above highest passive node bid but below lowest backup validator
+			// bid Should see highest passive node bid change but the state of the passive
+			// node would not change
+			let passive_nodes = current_passive_nodes();
 
-					let new_bid = AuctionPallet::highest_passive_node_bid() + 1;
-					// Take the top and update bid
-					let (bottom_passive_node, _) = passive_nodes.last().unwrap();
-					HandleStakes::<Test>::stake_updated(bottom_passive_node, new_bid);
+			let new_bid = AuctionPallet::highest_passive_node_bid() + 1;
+			// Take the top and update bid
+			let (bottom_passive_node, _) = passive_nodes.last().unwrap();
+			HandleStakes::<Test>::stake_updated(bottom_passive_node, new_bid);
 
-					assert_eq!(
-						MockChainflipAccount::get(bottom_passive_node).state,
-						ChainflipAccountState::Passive
-					);
+			assert_eq!(
+				MockChainflipAccount::get(bottom_passive_node).state,
+				ChainflipAccountState::Passive
+			);
 
-					assert_eq!(AuctionPallet::highest_passive_node_bid(), new_bid);
-				},
-				_ => unreachable!("wrong phase"),
-			}
+			assert_eq!(AuctionPallet::highest_passive_node_bid(), new_bid);
 		});
 	}
 
@@ -335,7 +305,7 @@ mod tests {
 			// Create a bigger group of validators, 100.
 			AuctionPallet::set_active_range((MIN_VALIDATOR_SIZE, max_validators)).unwrap();
 			// Run auction generate the groups
-			run_auction();
+			run_complete_auction();
 			// Request an emergency rotation
 			MockEmergencyRotation::request_emergency_rotation();
 			// Take down half the validators, holy moses!
@@ -382,11 +352,13 @@ mod tests {
 			// nodes If this wasn't an emergency rotation we would see the same distribution after
 			// an auction but as we have requested an emergency rotation we should see 50 plus 33 *
 			// 30% as validators or rather the winners.
-			run_auction();
+			run_complete_auction();
 
-			let auction_result = AuctionPallet::auction_result().expect("an auction result please");
 			assert_eq!(
-				auction_result.winners.len() as u32,
+				<AuctionPallet as Auctioneer>::run_auction()
+					.expect("we should have an auction")
+					.winners
+					.len() as u32,
 				(PercentageOfBackupValidatorsInEmergency::get() * number_of_backup_validators) /
 					100 + number_of_validators
 			);
@@ -426,33 +398,33 @@ mod tests {
 		});
 	}
 
-	#[test]
-	fn kill_them_all() {
-		new_test_ext().execute_with(|| {
-			// Create a test set of bidders
-			generate_bids(2, BIDDER_GROUP_A);
-			assert_matches!(
-				AuctionPallet::process(),
-				Ok(AuctionPhase::ValidatorsSelected(..))
-			);
+	// #[test]
+	// fn kill_them_all() {
+	// 	new_test_ext().execute_with(|| {
+	// 		// Create a test set of bidders
+	// 		generate_bids(2, BIDDER_GROUP_A);
+	// 		assert_matches!(
+	// 			AuctionPallet::process(),
+	// 			Ok(AuctionPhase::ValidatorsSelected(..))
+	// 		);
+	//
+	// 		assert_matches!(AuctionPallet::phase(), AuctionPhase::ValidatorsSelected(validators,
+	// minimum_active_bid) 			if !validators.is_empty() && minimum_active_bid > 0
+	// 		);
+	// 		// Kill it
+	// 		AuctionPallet::abort();
+	// 		assert_eq!(AuctionPallet::phase(), AuctionPhase::default());
+	// 	});
+	// }
 
-			assert_matches!(AuctionPallet::phase(), AuctionPhase::ValidatorsSelected(validators, minimum_active_bid)
-				if !validators.is_empty() && minimum_active_bid > 0
-			);
-			// Kill it
-			AuctionPallet::abort();
-			assert_eq!(AuctionPallet::phase(), AuctionPhase::default());
-		});
-	}
-
-	#[test]
-	fn should_abort_on_error_in_starting_vault_rotation() {
-		new_test_ext().execute_with(|| {
-			// Signal we want to error on vault rotation
-			MockVaultRotator::error_on_start_vault_rotation();
-			assert_matches!(AuctionPallet::process(), Err(..));
-		});
-	}
+	// #[test]
+	// fn should_abort_on_error_in_starting_vault_rotation() {
+	// 	new_test_ext().execute_with(|| {
+	// 		// Signal we want to error on vault rotation
+	// 		MockVaultRotator::error_on_start_vault_rotation();
+	// 		assert_matches!(AuctionPallet::process(), Err(..));
+	// 	});
+	// }
 
 	// An auction has failed with a set of bad validators being reported to the pallet
 	// The subsequent auction will not include these validators
@@ -475,15 +447,10 @@ mod tests {
 				MockOnline::set_online(bad_bidder, false);
 			}
 
-			// Run through an auction
-			assert_matches!(AuctionPallet::process(), Ok(AuctionPhase::ValidatorsSelected(..)));
-			clear_confirmation();
-			assert_matches!(AuctionPallet::process(), Ok(AuctionPhase::WaitingForBids));
-
 			// Confirm we just have the good bidders in our new auction result
 			assert_eq!(
-				AuctionPallet::auction_result()
-					.expect("we should have an auction result")
+				<AuctionPallet as Auctioneer>::run_auction()
+					.expect("we should have an auction")
 					.winners,
 				good_bidders
 					.iter()

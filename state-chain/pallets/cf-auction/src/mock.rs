@@ -3,10 +3,10 @@ use crate as pallet_cf_auction;
 use cf_traits::{
 	impl_mock_online,
 	mocks::{
-		chainflip_account::MockChainflipAccount,
-		vault_rotation::{clear_confirmation, Mock as MockVaultRotator},
+		chainflip_account::MockChainflipAccount, ensure_origin_mock::NeverFailingOriginCheck,
+		epoch_info::MockEpochInfo,
 	},
-	Bid, ChainflipAccountData, EmergencyRotation,
+	Bid, Chainflip, ChainflipAccountData, EmergencyRotation,
 };
 use frame_support::{construct_runtime, parameter_types, traits::ValidatorRegistration};
 use sp_core::H256;
@@ -20,7 +20,7 @@ use std::{cell::RefCell, collections::HashMap};
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
 
-pub type Amount = u64;
+pub type Amount = u128;
 pub type ValidatorId = u64;
 
 pub const MIN_VALIDATOR_SIZE: u32 = 1;
@@ -46,7 +46,7 @@ pub fn generate_bids(number_of_bids: u32, group: u32) {
 		for bid_number in (1..=number_of_bids as u64).rev() {
 			let validator_id = bid_number * group as u64;
 			MockOnline::set_online(&validator_id, true);
-			(*cell).push((validator_id, bid_number * 100));
+			(*cell).push((validator_id, (bid_number * 100).into()));
 		}
 	});
 }
@@ -57,15 +57,11 @@ pub fn set_bidders(bidders: Vec<(ValidatorId, Amount)>) {
 	});
 }
 
-pub fn run_auction() {
-	AuctionPallet::process()
-		.and_then(|_| {
-			clear_confirmation();
-			AuctionPallet::process()
-		})
-		.unwrap();
-
-	assert_eq!(AuctionPallet::phase(), AuctionPhase::WaitingForBids);
+pub fn run_complete_auction() -> AuctionResult<ValidatorId, Amount> {
+	let auction_result =
+		<AuctionPallet as Auctioneer>::run_auction().expect("the auction should run");
+	<AuctionPallet as Auctioneer>::confirm_auction(auction_result.clone());
+	auction_result
 }
 
 pub fn last_event() -> mock::Event {
@@ -153,14 +149,20 @@ impl HasPeerMapping for MockPeerMapping {
 	}
 }
 
+impl Chainflip for Test {
+	type KeyId = Vec<u8>;
+	type ValidatorId = ValidatorId;
+	type Amount = Amount;
+	type Call = Call;
+	type EnsureWitnessed = NeverFailingOriginCheck<Self>;
+	type EpochInfo = MockEpochInfo;
+}
+
 impl Config for Test {
 	type Event = Event;
-	type Amount = Amount;
-	type ValidatorId = ValidatorId;
 	type BidderProvider = MockBidderProvider;
 	type Registrar = Test;
 	type MinValidators = MinValidators;
-	type Handler = MockVaultRotator;
 	type ChainflipAccount = MockChainflipAccount;
 	type Online = MockOnline;
 	type PeerMapping = MockPeerMapping;

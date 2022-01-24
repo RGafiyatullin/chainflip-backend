@@ -83,6 +83,7 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use pallet_session::WeightInfo as SessionWeightInfo;
 	use sp_runtime::app_crypto::RuntimePublic;
+	use cf_traits::{AuctionError, VaultRotator};
 
 	#[pallet::pallet]
 	#[pallet::generate_store(pub (super) trait Store)]
@@ -115,6 +116,9 @@ pub mod pallet {
 
 		/// An auction type
 		type Auctioneer: Auctioneer<ValidatorId = Self::ValidatorId, Amount = Self::Amount>;
+
+		/// The lifecycle of a vault rotation
+		type Handler: VaultRotator<ValidatorId = Self::ValidatorId>;
 
 		/// The range of online validators we would trigger an emergency rotation
 		#[pallet::constant]
@@ -169,12 +173,22 @@ pub mod pallet {
 					T::EpochTransitionHandler::on_epoch_ending();
 				}
 
-				if let Ok(AuctionPhase::WaitingForBids) = T::Auctioneer::process() {
-					// Auction completed when we return to the state of `WaitingForBids`
-					if Force::<T>::get() {
-						Force::<T>::set(false);
+
+				if let Ok(phase) = T::Auctioneer::process() {
+					match phase {
+						AuctionPhase::WaitingForBids => {
+							// Auction completed when we return to the state of `WaitingForBids`
+							if Force::<T>::get() {
+								Force::<T>::set(false);
+							}
+							ReadyToRotate::<T>::put(RotationStatus::AwaitingCompletion);
+						}
+						AuctionPhase::ValidatorsSelected(winners, _) => {
+							// TODO - what do to with this error?
+							let _ = T::Handler::start_vault_rotation(validating_set);
+						}
 					}
-					ReadyToRotate::<T>::put(RotationStatus::AwaitingCompletion);
+
 				}
 			}
 			0

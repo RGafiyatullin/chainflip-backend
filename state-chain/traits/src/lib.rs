@@ -12,6 +12,7 @@ use frame_support::{
 	Hashable, Parameter,
 };
 use sp_runtime::{DispatchError, RuntimeDebug};
+use sp_runtime::traits::MaybeSerializeDeserialize;
 use sp_std::{marker::PhantomData, prelude::*};
 
 /// An index to a block.
@@ -24,7 +25,15 @@ pub type AuctionIndex = u64;
 /// Common base config for Chainflip pallets.
 pub trait Chainflip: frame_system::Config {
 	/// An amount for a bid
-	type Amount: Member + Parameter + Default + Eq + Ord + Copy + AtLeast32BitUnsigned;
+	type Amount: Member
+		+ Parameter
+		+ Default
+		+ Eq
+		+ Ord
+		+ Copy
+		+ AtLeast32BitUnsigned
+		+ MaybeSerializeDeserialize;
+
 	/// An identity for a validator
 	type ValidatorId: Member
 		+ Default
@@ -32,7 +41,8 @@ pub trait Chainflip: frame_system::Config {
 		+ Ord
 		+ core::fmt::Debug
 		+ From<<Self as frame_system::Config>::AccountId>
-		+ Into<<Self as frame_system::Config>::AccountId>;
+		+ Into<<Self as frame_system::Config>::AccountId>
+		+ MaybeSerializeDeserialize;
 
 	/// An id type for keys used in threshold signature ceremonies.
 	type KeyId: Member + Parameter + From<Vec<u8>>;
@@ -142,31 +152,41 @@ pub type ActiveValidatorRange = (u32, u32);
 /// This results in a set of winners and a minimum bid after the auction.  After each successful
 /// call of `process()` the phase will transition else resulting in an error and preventing to move
 /// on.  A confirmation is looked to before completing the auction with the `AuctionConfirmation`
-/// trait.
+// /// trait.
+// pub trait Auctioneer {
+// 	type ValidatorId;
+// 	type Amount;
+// 	type BidderProvider;
+//
+// 	/// The last auction ran
+// 	fn auction_index() -> AuctionIndex;
+// 	/// Range describing auction set size
+// 	fn active_range() -> ActiveValidatorRange;
+// 	/// Set new auction range, returning on success the old value
+// 	fn set_active_range(range: ActiveValidatorRange) -> Result<ActiveValidatorRange, AuctionError>;
+// 	/// Our last successful auction result
+// 	fn auction_result() -> Option<AuctionResult<Self::ValidatorId, Self::Amount>>;
+// 	/// The current phase we find ourselves in
+// 	fn phase() -> AuctionPhase<Self::ValidatorId, Self::Amount>;
+// 	/// Are we in an auction?
+// 	fn waiting_on_bids() -> bool;
+// 	/// Move our auction process to the next phase returning success with phase completed
+// 	///
+// 	/// At each phase we assess the bidders based on a fixed set of criteria which results
+// 	/// in us arriving at a winning list and a bond set for this auction
+// 	fn process() -> Result<AuctionPhase<Self::ValidatorId, Self::Amount>, AuctionError>;
+// 	/// Abort the process and back the preliminary phase
+// 	fn abort();
+// }
+
 pub trait Auctioneer {
 	type ValidatorId;
 	type Amount;
 	type BidderProvider;
 
-	/// The last auction ran
 	fn auction_index() -> AuctionIndex;
-	/// Range describing auction set size
-	fn active_range() -> ActiveValidatorRange;
-	/// Set new auction range, returning on success the old value
-	fn set_active_range(range: ActiveValidatorRange) -> Result<ActiveValidatorRange, AuctionError>;
-	/// Our last successful auction result
-	fn auction_result() -> Option<AuctionResult<Self::ValidatorId, Self::Amount>>;
-	/// The current phase we find ourselves in
-	fn phase() -> AuctionPhase<Self::ValidatorId, Self::Amount>;
-	/// Are we in an auction?
-	fn waiting_on_bids() -> bool;
-	/// Move our auction process to the next phase returning success with phase completed
-	///
-	/// At each phase we assess the bidders based on a fixed set of criteria which results
-	/// in us arriving at a winning list and a bond set for this auction
-	fn process() -> Result<AuctionPhase<Self::ValidatorId, Self::Amount>, AuctionError>;
-	/// Abort the process and back the preliminary phase
-	fn abort();
+	fn run_auction() -> Result<AuctionResult<Self::ValidatorId, Self::Amount>, AuctionError>;
+	fn confirm_auction(auction: AuctionResult<Self::ValidatorId, Self::Amount>);
 }
 
 pub trait BackupValidators {
