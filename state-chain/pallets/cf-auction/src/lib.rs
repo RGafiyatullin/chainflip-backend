@@ -9,12 +9,10 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-// mod migrations;
 pub mod weights;
 
 pub use weights::WeightInfo;
 
-#[cfg(test)]
 use cf_traits::{
 	ActiveValidatorRange, AuctionError, AuctionIndex, AuctionResult, Auctioneer, BackupValidators,
 	BidderProvider, ChainflipAccount, ChainflipAccountState, EmergencyRotation, EpochInfo,
@@ -26,26 +24,16 @@ pub use pallet::*;
 use sp_runtime::traits::{One, Zero};
 use sp_std::{cmp::min, prelude::*};
 
-pub mod releases {
-	use frame_support::traits::StorageVersion;
-	// Genesis version
-	pub const V0: StorageVersion = StorageVersion::new(0);
-	// Version 1 - Update for AuctionPhase for CurrentPhase
-	pub const V1: StorageVersion = StorageVersion::new(1);
-}
-
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
 	use cf_traits::{
-		AuctionIndex, Chainflip, ChainflipAccount, EmergencyRotation,
-		HasPeerMapping, RemainingBid,
+		AuctionIndex, Chainflip, ChainflipAccount, EmergencyRotation, HasPeerMapping, RemainingBid,
 	};
 	use frame_support::traits::ValidatorRegistration;
 
 	#[pallet::pallet]
 	#[pallet::generate_store(pub (super) trait Store)]
-	#[pallet::storage_version(releases::V1)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
@@ -80,34 +68,7 @@ pub mod pallet {
 
 	/// Pallet implements \[Hooks\] trait
 	#[pallet::hooks]
-	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
-		// fn on_runtime_upgrade() -> Weight {
-		// 	if releases::V0 == <Pallet<T> as GetStorageVersion>::on_chain_storage_version() {
-		// 		releases::V1.put::<Pallet<T>>();
-		// 		migrations::v1::migrate::<T>().saturating_add(T::DbWeight::get().reads_writes(1, 1))
-		// 	} else {
-		// 		T::DbWeight::get().reads(1)
-		// 	}
-		// }
-		//
-		// #[cfg(feature = "try-runtime")]
-		// fn pre_upgrade() -> Result<(), &'static str> {
-		// 	if releases::V0 == <Pallet<T> as GetStorageVersion>::on_chain_storage_version() {
-		// 		migrations::v1::pre_migrate::<T, Self>()
-		// 	} else {
-		// 		Ok(())
-		// 	}
-		// }
-		//
-		// #[cfg(feature = "try-runtime")]
-		// fn post_upgrade() -> Result<(), &'static str> {
-		// 	if releases::V1 == <Pallet<T> as GetStorageVersion>::on_chain_storage_version() {
-		// 		migrations::v1::post_migrate::<T, Self>()
-		// 	} else {
-		// 		Ok(())
-		// 	}
-		// }
-	}
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {}
 
 	/// Size range for number of validators we want in our validating set
 	#[pallet::storage]
@@ -115,7 +76,7 @@ pub mod pallet {
 	pub(super) type ActiveValidatorSizeRange<T: Config> =
 		StorageValue<_, ActiveValidatorRange, ValueQuery>;
 
-	/// The index of the auction we are in
+	/// The index of the auction we are running
 	#[pallet::storage]
 	#[pallet::getter(fn current_auction_index)]
 	pub(super) type CurrentAuctionIndex<T: Config> = StorageValue<_, AuctionIndex, ValueQuery>;
@@ -211,17 +172,16 @@ pub mod pallet {
 	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
 		fn build(&self) {
 			Pallet::<T>::set_active_range(self.validator_size_range).expect("valid range");
-
-			for validator_id in &self.winners {
-				T::ChainflipAccount::update_state(
-					&(validator_id.clone().into()),
-					ChainflipAccountState::Validator,
-				);
-			}
-
-			BackupGroupSize::<T>::put(
-				self.winners.len() as u32 / T::ActiveToBackupValidatorRatio::get(),
-			);
+			// for validator_id in &self.winners {
+			// 	T::ChainflipAccount::update_state(
+			// 		&(validator_id.clone().into()),
+			// 		ChainflipAccountState::Validator,
+			// 	);
+			// }
+			//
+			// BackupGroupSize::<T>::put(
+			// 	self.winners.len() as u32 / T::ActiveToBackupValidatorRatio::get(),
+			// );
 		}
 	}
 }
@@ -244,19 +204,6 @@ impl<T: Config> Pallet<T> {
 	}
 }
 
-impl<T: Config> QualifyValidator for Pallet<T> {
-	type ValidatorId = T::ValidatorId;
-
-	fn is_qualified(validator_id: &Self::ValidatorId) -> bool {
-		// Rule #1 - They are registered
-		// Rule #2 - They have a registered peer id
-		// Rule #3 - Confirm that the validators are 'online'
-		T::Registrar::is_registered(validator_id) &&
-			T::PeerMapping::has_peer_mapping(validator_id) &&
-			T::Online::is_online(validator_id)
-	}
-}
-
 impl<T: Config> Auctioneer for Pallet<T> {
 	type ValidatorId = T::ValidatorId;
 	type Amount = T::Amount;
@@ -272,7 +219,10 @@ impl<T: Config> Auctioneer for Pallet<T> {
 	// to be able to actual join the validating set.  If we manage to pass these tests
 	// we kill the last set of winners stored, set the bond to 0, store this set of
 	// bidders and change our state ready for an 'Auction' to be ran
-	fn run_auction() -> Result<AuctionResult<Self::ValidatorId, Self::Amount>, AuctionError> {
+	fn run_auction<Q>() -> Result<AuctionResult<Self::ValidatorId, Self::Amount>, AuctionError>
+	where
+		Q: QualifyValidator<ValidatorId = T::ValidatorId>,
+	{
 		// A new auction has started, store and emit the event
 		let auction_index = CurrentAuctionIndex::<T>::mutate(|idx| {
 			*idx += 1;
@@ -282,9 +232,7 @@ impl<T: Config> Auctioneer for Pallet<T> {
 		// Number one rule - If we have a bid at 0 then please leave
 		bids.retain(|(_, amount)| !amount.is_zero());
 		// Determine if this validator is qualified for bidding
-		bids.retain(|(validator_id, _)| {
-			<Pallet<T> as QualifyValidator>::is_qualified(validator_id)
-		});
+		bids.retain(|(validator_id, _)| Q::is_qualified(validator_id));
 		let number_of_bidders = bids.len() as u32;
 		let (min_number_of_validators, max_number_of_validators) =
 			ActiveValidatorSizeRange::<T>::get();
@@ -340,7 +288,7 @@ impl<T: Config> Auctioneer for Pallet<T> {
 		let minimum_active_bid =
 			next_validator_group.last().map(|(_, bid)| *bid).unwrap_or_default();
 
-		let validating_set: Vec<_> = next_validator_group
+		let winners: Vec<_> = next_validator_group
 			.iter()
 			.map(|(validator_id, _)| (*validator_id).clone())
 			.collect();
@@ -354,16 +302,9 @@ impl<T: Config> Auctioneer for Pallet<T> {
 		RemainingBidders::<T>::put(remaining_bidders);
 		BackupGroupSize::<T>::put(backup_group_size);
 
-		Self::deposit_event(Event::AuctionCompleted(
-			auction_index,
-			validating_set.clone(),
-		));
+		Self::deposit_event(Event::AuctionCompleted(auction_index, winners.clone()));
 
-		return Ok(AuctionResult {
-			auction_index,
-			winners: validating_set.clone(),
-			minimum_active_bid,
-		})
+		Ok(AuctionResult { auction_index, winners, minimum_active_bid })
 	}
 
 	// Things have gone well and we have a set of 'Winners', congratulations.
@@ -392,7 +333,7 @@ impl<T: Config> Auctioneer for Pallet<T> {
 		LowestBackupValidatorBid::<T>::put(lowest_backup_validator_bid);
 		HighestPassiveNodeBid::<T>::put(highest_passive_node_bid);
 
-		update_status(auction.winners.clone(), ChainflipAccountState::Validator);
+		update_status(auction.winners, ChainflipAccountState::Validator);
 
 		update_status(
 			backup_validators.iter().map(|(validator_id, _)| validator_id.clone()).collect(),
@@ -502,6 +443,20 @@ impl<T: Config> Pallet<T> {
 	}
 }
 
+// TODO move to validator
+impl<T: Config> QualifyValidator for HandleStakes<T> {
+	type ValidatorId = T::ValidatorId;
+
+	fn is_qualified(validator_id: &Self::ValidatorId) -> bool {
+		// Rule #1 - They are registered
+		// Rule #2 - They have a registered peer id
+		// Rule #3 - Confirm that the validators are 'online'
+		T::Registrar::is_registered(validator_id) &&
+			T::PeerMapping::has_peer_mapping(validator_id) &&
+			T::Online::is_online(validator_id)
+	}
+}
+
 pub struct HandleStakes<T>(PhantomData<T>);
 impl<T: Config> StakeHandler for HandleStakes<T> {
 	type ValidatorId = T::ValidatorId;
@@ -515,11 +470,11 @@ impl<T: Config> StakeHandler for HandleStakes<T> {
 
 		// We validate that the staker is qualified and can be considered to be a BV if the stake
 		// meets the requirements
-		if !<Pallet<T> as QualifyValidator>::is_qualified(validator_id) {
+		if !Self::is_qualified(validator_id) {
 			return
 		}
 
-		// TODO do we need to check state here from EpochInfo or something?
+		// TODO Check if this is OK as it was only available out of auction phases which don't exist anymore
 		match T::ChainflipAccount::get(&(validator_id.clone().into())).state {
 			ChainflipAccountState::Passive => {
 				if amount > LowestBackupValidatorBid::<T>::get() {

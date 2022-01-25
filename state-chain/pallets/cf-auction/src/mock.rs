@@ -58,11 +58,14 @@ pub fn set_bidders(bidders: Vec<(ValidatorId, Amount)>) {
 }
 
 pub fn run_complete_auction() -> AuctionResult<ValidatorId, Amount> {
-	let auction_result =
-		<AuctionPallet as Auctioneer>::run_auction().expect("the auction should run");
+	let auction_result = <AuctionPallet as Auctioneer>::run_auction::<MockQualifyValidator>()
+		.expect("the auction should run");
 
 	<AuctionPallet as Auctioneer>::confirm_auction(auction_result.clone())
 		.expect("this should confirm as auction index will match");
+
+	MockEpochInfo::set_bond(auction_result.minimum_active_bid);
+	MockEpochInfo::set_validators(auction_result.winners.clone());
 
 	auction_result
 }
@@ -72,7 +75,7 @@ pub fn last_event() -> mock::Event {
 }
 
 // The set we would expect
-pub fn expected_validating_set() -> (Vec<ValidatorId>, Amount) {
+pub fn expected_winning_set() -> (Vec<ValidatorId>, Amount) {
 	let mut bidders = MockBidderProvider::get_bidders();
 	bidders.truncate(MAX_VALIDATOR_SIZE as usize);
 	(bidders.iter().map(|(validator_id, _)| *validator_id).collect(), bidders.last().unwrap().1)
@@ -152,6 +155,15 @@ impl HasPeerMapping for MockPeerMapping {
 	}
 }
 
+pub struct MockQualifyValidator;
+impl QualifyValidator for MockQualifyValidator {
+	type ValidatorId = ValidatorId;
+
+	fn is_qualified(validator_id: &Self::ValidatorId) -> bool {
+		MockOnline::is_online(validator_id)
+	}
+}
+
 impl Chainflip for Test {
 	type KeyId = Vec<u8>;
 	type ValidatorId = ValidatorId;
@@ -195,7 +207,7 @@ impl BidderProvider for MockBidderProvider {
 pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
 	generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_A);
 
-	let (winners, minimum_active_bid) = expected_validating_set();
+	let (winners, minimum_active_bid) = expected_winning_set();
 	let config = GenesisConfig {
 		system: Default::default(),
 		auction_pallet: AuctionPalletConfig {

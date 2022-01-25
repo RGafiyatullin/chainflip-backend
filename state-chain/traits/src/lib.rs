@@ -11,8 +11,7 @@ use frame_support::{
 	traits::{EnsureOrigin, Get, Imbalance, SignedImbalance, StoredMap},
 	Hashable, Parameter,
 };
-use sp_runtime::{DispatchError, RuntimeDebug};
-use sp_runtime::traits::MaybeSerializeDeserialize;
+use sp_runtime::{traits::MaybeSerializeDeserialize, DispatchError, RuntimeDebug};
 use sp_std::{marker::PhantomData, prelude::*};
 
 /// An index to a block.
@@ -185,9 +184,16 @@ pub trait Auctioneer {
 	type Amount;
 	type BidderProvider;
 
+	/// TODO
 	fn auction_index() -> AuctionIndex;
-	fn run_auction() -> Result<AuctionResult<Self::ValidatorId, Self::Amount>, AuctionError>;
-	fn confirm_auction(auction: AuctionResult<Self::ValidatorId, Self::Amount>) -> Result<(), AuctionError> ;
+	/// TODO
+	fn run_auction<Q>() -> Result<AuctionResult<Self::ValidatorId, Self::Amount>, AuctionError>
+	where
+		Q: QualifyValidator<ValidatorId = Self::ValidatorId>;
+	/// TODO
+	fn confirm_auction(
+		auction: AuctionResult<Self::ValidatorId, Self::Amount>,
+	) -> Result<(), AuctionError>;
 }
 
 pub trait BackupValidators {
