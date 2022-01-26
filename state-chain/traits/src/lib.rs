@@ -2,18 +2,19 @@
 
 pub mod mocks;
 
+use std::fmt::Debug;
+
 use cf_chains::{Chain, ChainCrypto};
 use codec::{Decode, Encode};
 use frame_support::{
 	dispatch::{DispatchResultWithPostInfo, UnfilteredDispatchable, Weight},
 	pallet_prelude::Member,
 	sp_runtime::traits::AtLeast32BitUnsigned,
-	traits::{EnsureOrigin, Get, Imbalance, SignedImbalance, StoredMap},
+	traits::{EnsureOrigin, Get, Imbalance, SignedImbalance, StoredMap, ValidatorRegistration},
 	Hashable, Parameter,
 };
 use sp_runtime::{traits::MaybeSerializeDeserialize, DispatchError, RuntimeDebug};
 use sp_std::{marker::PhantomData, prelude::*};
-
 /// An index to a block.
 pub type BlockNumber = u32;
 pub type FlipBalance = u128;
@@ -135,7 +136,7 @@ pub type Bid<ValidatorId, Amount> = (ValidatorId, Amount);
 pub type RemainingBid<ValidatorId, Amount> = Bid<ValidatorId, Amount>;
 
 /// A successful auction result
-#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
+#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, Default)]
 pub struct AuctionResult<ValidatorId, Amount> {
 	pub auction_index: AuctionIndex,
 	pub winners: Vec<ValidatorId>,
@@ -213,7 +214,7 @@ pub trait VaultRotationHandler {
 /// Rotating vaults
 pub trait VaultRotator {
 	type ValidatorId;
-	type RotationError;
+	type RotationError: Debug;
 
 	/// Start a vault rotation with the following `candidates`
 	fn start_vault_rotation(candidates: Vec<Self::ValidatorId>) -> Result<(), Self::RotationError>;
@@ -640,4 +641,36 @@ pub trait QualifyValidator {
 	type ValidatorId;
 	/// Is the validator qualified to be a validator and meet our expectations of one
 	fn is_qualified(validator_id: &Self::ValidatorId) -> bool;
+}
+
+/// An unchecked qualification of a validator
+pub struct ValidatorUnchecked<T>(PhantomData<T>);
+
+impl<ValidatorId> QualifyValidator for ValidatorUnchecked<ValidatorId> {
+	type ValidatorId = ValidatorId;
+	fn is_qualified(_validator_id: &Self::ValidatorId) -> bool {
+		true
+	}
+}
+
+pub trait QualifyConfig {
+	type ValidatorId;
+	type Registrar: ValidatorRegistration<Self::ValidatorId>;
+	type PeerMapping: HasPeerMapping<ValidatorId = Self::ValidatorId>;
+	type Online: IsOnline<ValidatorId = Self::ValidatorId>;
+}
+
+pub struct ValidatorChecked<T>(PhantomData<T>);
+
+impl<T: QualifyConfig> QualifyValidator for ValidatorChecked<T> {
+	type ValidatorId = T::ValidatorId;
+
+	fn is_qualified(validator_id: &Self::ValidatorId) -> bool {
+		// Rule #1 - They are registered
+		// Rule #2 - They have a registered peer id
+		// Rule #3 - Confirm that the validators are 'online'
+		T::Registrar::is_registered(validator_id) &&
+			T::PeerMapping::has_peer_mapping(validator_id) &&
+			T::Online::is_online(validator_id)
+	}
 }
