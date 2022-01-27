@@ -608,7 +608,6 @@ impl<T: Config> pallet_session::SessionManager<T::ValidatorId> for Pallet<T> {
 	/// We provide an implementation for this as we already have a set of validators with keys at
 	/// genesis
 	fn new_session_genesis(_new_index: SessionIndex) -> Option<Vec<T::ValidatorId>> {
-		// TODO check this
 		None
 	}
 
