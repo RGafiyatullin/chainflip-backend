@@ -25,9 +25,6 @@ type Block = frame_system::mocking::MockBlock<Test>;
 pub type Amount = u64;
 pub type ValidatorId = u64;
 
-pub const MIN_VALIDATOR_SIZE: u32 = 1;
-pub const MAX_VALIDATOR_SIZE: u32 = 3;
-
 thread_local! {
 	pub static OLD_VALIDATORS: RefCell<Vec<u64>> = RefCell::new(vec![]);
 	pub static CURRENT_VALIDATORS: RefCell<Vec<u64>> = RefCell::new(vec![]);
@@ -151,7 +148,7 @@ impl Auctioneer for MockAuctioneer {
 	}
 
 	fn confirm_auction(
-		auction: AuctionResult<Self::ValidatorId, Self::Amount>,
+		_auction: AuctionResult<Self::ValidatorId, Self::Amount>,
 	) -> Result<(), AuctionError> {
 		AUCTION_CONFIRM_BEHAVIOUR.with(|cell| *cell.borrow())
 	}
@@ -245,7 +242,7 @@ impl VaultRotator for MockVaultRotator {
 	type RotationError = AuctionError;
 
 	/// Start a vault rotation with the following `candidates`
-	fn start_vault_rotation(candidates: Vec<Self::ValidatorId>) -> Result<(), Self::RotationError> {
+	fn start_vault_rotation(_candidates: Vec<Self::ValidatorId>) -> Result<(), Self::RotationError> {
 		Ok(())
 	}
 
@@ -280,10 +277,17 @@ impl Config for Test {
 
 /// Session pallet requires a set of validators at genesis.
 pub const DUMMY_GENESIS_VALIDATORS: &'static [u64] = &[u64::MAX];
+pub const MINIMUM_ACTIVE_BID_AT_GENESIS: Amount = 1;
+pub const BLOCKS_TO_SESSION_ROTATION: u64 = 4;
 
 pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
 	// Initialise the auctioneer with an auction result
-
+	MockAuctioneer::set_run_behaviour(Ok(AuctionResult {
+		auction_index: 1,
+		winners: DUMMY_GENESIS_VALIDATORS.to_vec(),
+		minimum_active_bid: MINIMUM_ACTIVE_BID_AT_GENESIS,
+	}));
+			
 	let config = GenesisConfig {
 		system: SystemConfig::default(),
 		session: SessionConfig {

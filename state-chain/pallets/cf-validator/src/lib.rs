@@ -12,8 +12,6 @@ pub mod weights;
 pub use weights::WeightInfo;
 
 #[cfg(test)]
-#[macro_use]
-extern crate assert_matches;
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
@@ -172,7 +170,7 @@ pub mod pallet {
 		type Online = T::Online;
 	}
 
-	type RotationStatusOf<T: Config> = RotationStatus<T::ValidatorId, T::Amount>;
+	type RotationStatusOf<T> = RotationStatus<<T as frame_system::Config>::AccountId, <T as Config>::Amount>;
 
 	impl<T: Config> Pallet<T> {
 		pub(crate) fn update_rotation_status(new_status: RotationStatusOf<T>) {
@@ -191,7 +189,7 @@ pub mod pallet {
 					if blocks_per_epoch > Zero::zero() {
 						let current_epoch_started_at = CurrentEpochStartedAt::<T>::get();
 						let diff = block_number.saturating_sub(current_epoch_started_at);
-						if diff < blocks_per_epoch {
+						if diff >= blocks_per_epoch {
 							Self::update_rotation_status(RotationStatus::RunAuction);
 						}
 					}
@@ -206,22 +204,22 @@ pub mod pallet {
 								auction_result.clone(),
 							)),
 							Err(e) =>
-								log::warn!(target: "cf-auction", "starting a vault rotation failed due to error: {:?}", e),
+								log::warn!(target: "cf-validator", "starting a vault rotation failed due to error: {:?}", e),
 						}
 					},
 					Err(e) =>
-						log::warn!(target: "cf-auction", "auction failed due to error: {:?}", e),
+						log::warn!(target: "cf-validator", "auction failed due to error: {:?}", e),
 				},
 				RotationStatus::AwaitingVaults(auction_result) =>
 					match T::VaultRotator::finalize_rotation() {
 						Ok(_) => {
-							Self::update_rotation_status(RotationStatus::VaultsRotated(
-								auction_result.clone(),
-							));
-							T::Auctioneer::confirm_auction(auction_result);
+							match T::Auctioneer::confirm_auction(auction_result.clone()) {
+								Ok(_) => Self::update_rotation_status(RotationStatus::VaultsRotated(auction_result)),
+								Err(e) => log::warn!(target: "cf-validator", "failed to confirm auction {:?}", e),
+							}
 						},
 						Err(e) =>
-							log::warn!(target: "cf-auction", "starting a vault rotation failed due to error: {:?}", e),
+							log::warn!(target: "cf-validator", "starting a vault rotation failed due to error: {:?}", e),
 					},
 				RotationStatus::VaultsRotated(auction_result) => {
 					Self::update_rotation_status(RotationStatus::SessionRotating(auction_result));

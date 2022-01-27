@@ -1,5 +1,3 @@
-use frame_support::traits::Get;
-
 use super::*;
 
 pub(crate) mod v1 {
