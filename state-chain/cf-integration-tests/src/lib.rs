@@ -497,7 +497,6 @@ mod tests {
 
 	pub struct ExtBuilder {
 		pub accounts: Vec<(AccountId, FlipBalance)>,
-		winners: Vec<AccountId>,
 		root: AccountId,
 		blocks_per_epoch: BlockNumber,
 		max_validators: u32,
@@ -508,7 +507,6 @@ mod tests {
 		fn default() -> Self {
 			Self {
 				accounts: vec![],
-				winners: vec![],
 				root: AccountId::default(),
 				blocks_per_epoch: Zero::zero(),
 				max_validators: MAX_VALIDATORS,
@@ -520,11 +518,6 @@ mod tests {
 	impl ExtBuilder {
 		fn accounts(mut self, accounts: Vec<(AccountId, FlipBalance)>) -> Self {
 			self.accounts = accounts;
-			self
-		}
-
-		fn winners(mut self, winners: Vec<AccountId>) -> Self {
-			self.winners = winners;
 			self
 		}
 
@@ -579,12 +572,12 @@ mod tests {
 			.assimilate_storage(storage)
 			.unwrap();
 
-			pallet_cf_auction::GenesisConfig::<Runtime> {
-				validator_size_range: (self.min_validators, self.max_validators),
-				winners: self.winners.clone(),
-				minimum_active_bid: TOTAL_ISSUANCE / 100,
-			}
-			.assimilate_storage(storage)
+			GenesisBuild::<Runtime>::assimilate_storage(
+				&pallet_cf_auction::GenesisConfig {
+					validator_size_range: (self.min_validators, self.max_validators),
+				},
+				storage,
+			)
 			.unwrap();
 
 			GenesisBuild::<Runtime>::assimilate_storage(
@@ -645,8 +638,7 @@ mod tests {
 	mod genesis {
 		use super::*;
 		use cf_traits::{
-			AuctionResult, Auctioneer, ChainflipAccount, ChainflipAccountState,
-			ChainflipAccountStore, StakeTransfer,
+			ChainflipAccount, ChainflipAccountState, ChainflipAccountStore, StakeTransfer,
 		};
 		pub const GENESIS_BALANCE: FlipBalance = TOTAL_ISSUANCE / 100;
 		pub const NUMBER_OF_VALIDATORS: u32 = 3;
@@ -657,11 +649,6 @@ mod tests {
 					(AccountId::from(ALICE), GENESIS_BALANCE),
 					(AccountId::from(BOB), GENESIS_BALANCE),
 					(AccountId::from(CHARLIE), GENESIS_BALANCE),
-				])
-				.winners(vec![
-					AccountId::from(ALICE),
-					AccountId::from(BOB),
-					AccountId::from(CHARLIE),
 				])
 				.root(AccountId::from(ERIN))
 		}
@@ -694,7 +681,7 @@ mod tests {
 				);
 
 				let accounts =
-					[AccountId::from(ALICE), AccountId::from(BOB), AccountId::from(CHARLIE)];
+					[AccountId::from(CHARLIE), AccountId::from(BOB), AccountId::from(ALICE)];
 
 				for account in accounts.iter() {
 					assert_eq!(
@@ -706,19 +693,14 @@ mod tests {
 
 				assert_eq!(
 					Auction::current_auction_index(),
-					0,
-					"we should have had no auction yet"
+					1,
+					"we should have had the genesis auction"
 				);
-				let AuctionResult { winners, minimum_active_bid } =
-					Auction::auction_result().expect("an auction result");
-				assert_eq!(minimum_active_bid, GENESIS_BALANCE);
-				assert_eq!(winners, accounts);
 
-				assert_eq!(
-					Session::validators(),
-					accounts,
-					"the validators are those expected at genesis"
-				);
+				assert_eq!(Validator::bond(), GENESIS_BALANCE);
+				let mut validators = Validator::validators();
+				validators.sort();
+				assert_eq!(validators, accounts, "the validators are those expected at genesis");
 
 				assert_eq!(
 					Validator::epoch_number_of_blocks(),
@@ -789,20 +771,16 @@ mod tests {
 		}
 	}
 
-	// The minimum number of blocks an auction will last
-	const AUCTION_BLOCKS: BlockNumber = 2;
-	// The minimum number of blocks a keygen ceremony will last
-	const KEYGEN_CEREMONY_BLOCKS: BlockNumber = 3;
 	// The minimum number of blocks a vault rotation should last
-	const VAULT_ROTATION_BLOCKS: BlockNumber = AUCTION_BLOCKS + KEYGEN_CEREMONY_BLOCKS;
+	const VAULT_ROTATION_BLOCKS: BlockNumber = 6;
 
 	mod epoch {
-		use super::*;
+		use super::{genesis::GENESIS_BALANCE, *};
 		use crate::tests::network::{setup_account, setup_peer_mapping};
 		use cf_traits::{
-			AuctionPhase, AuctionResult, ChainflipAccount, ChainflipAccountState,
-			ChainflipAccountStore, EpochInfo,
+			ChainflipAccount, ChainflipAccountState, ChainflipAccountStore, EpochInfo,
 		};
+		use pallet_cf_validator::RotationStatus;
 		use state_chain_runtime::{Auction, HeartbeatBlockInterval, Validator};
 
 		#[test]
@@ -816,6 +794,15 @@ mod tests {
 			const EPOCH_BLOCKS: BlockNumber = 100;
 			super::genesis::default()
 				.blocks_per_epoch(EPOCH_BLOCKS)
+				// As we run a rotation at genesis we will need accounts to support
+				// having 5 validators as the default is 3 (Alice, Bob and Charlie)
+				.accounts(vec![
+					(AccountId::from(ALICE), GENESIS_BALANCE),
+					(AccountId::from(BOB), GENESIS_BALANCE),
+					(AccountId::from(CHARLIE), GENESIS_BALANCE),
+					(AccountId::from([0xfc; 32]), GENESIS_BALANCE),
+					(AccountId::from([0xfb; 32]), GENESIS_BALANCE),
+				])
 				.min_validators(5)
 				.build()
 				.execute_with(|| {
@@ -848,11 +835,7 @@ mod tests {
 						"we should have ran an auction"
 					);
 
-					assert_eq!(
-						Auction::current_phase(),
-						AuctionPhase::default(),
-						"we should be back at the start"
-					);
+					assert_eq!(Validator::rotation_phase(), RotationStatus::RunAuction);
 
 					// Next block, another auction
 					testnet.move_forward_blocks(1);
@@ -863,11 +846,7 @@ mod tests {
 						"we should have ran another auction"
 					);
 
-					assert_eq!(
-						Auction::current_phase(),
-						AuctionPhase::default(),
-						"we should be back at the start"
-					);
+					assert_eq!(Validator::rotation_phase(), RotationStatus::RunAuction);
 
 					for node in &offline_nodes {
 						testnet.set_active(node, true);
@@ -939,29 +918,12 @@ mod tests {
 						"this should be the first auction"
 					);
 
-					// In this block we should have reached the state `ValidatorsSelected`
-					// and in this group we would have in this network the genesis validators and
-					// the nodes that have staked as well
-					assert_matches::assert_matches!(
-						Auction::current_phase(),
-						AuctionPhase::ValidatorsSelected(mut candidates, _) => {
-							candidates.sort();
-							assert_eq!(candidates, nodes);
-						},
-						"the new candidates should be those genesis validators and the new nodes created in test"
-					);
+					assert_eq!(Validator::rotation_phase(), RotationStatus::RunAuction);
+
 					// For each subsequent block the state chain will check if the vault has rotated
 					// until then we stay in the `ValidatorsSelected`
 					// Run things to a successful vault rotation
 					testnet.move_forward_blocks(VAULT_ROTATION_BLOCKS);
-					// The vault rotation should have proceeded and we should now be back
-					// at `WaitingForBids` with a new set of winners; the genesis validators and
-					// the new nodes we staked into the network
-					assert_matches::assert_matches!(
-						Auction::current_phase(),
-						AuctionPhase::WaitingForBids,
-						"we should be back waiting for bids after a successful auction and rotation"
-					);
 
 					assert_eq!(
 						GENESIS_EPOCH + 1,
@@ -969,14 +931,13 @@ mod tests {
 						"We should be in the next epoch"
 					);
 
-					let AuctionResult { mut winners, minimum_active_bid } =
-						Auction::last_auction_result().expect("last auction result");
-
 					assert_eq!(
-						minimum_active_bid, stake_amount,
+						Validator::bond(),
+						stake_amount,
 						"minimum active bid should be that of the new stake"
 					);
 
+					let mut winners = Validator::validators();
 					winners.sort();
 					assert_eq!(
 						winners,
@@ -1328,6 +1289,12 @@ mod tests {
 					}
 
 					assert_eq!(
+						Auction::current_auction_index(),
+						1,
+						"we should have ran auction at genesis"
+					);
+
+					assert_eq!(
 						1,
 						Validator::epoch_index(),
 						"We should still be in the first epoch"
@@ -1336,6 +1303,13 @@ mod tests {
 					// Start an auction and wait for rotation
 					testnet.move_forward_blocks(EPOCH_BLOCKS);
 					testnet.move_forward_blocks(VAULT_ROTATION_BLOCKS);
+
+					assert_eq!(
+						Auction::current_auction_index(),
+						2,
+						"we should have ran 2 auctions now"
+					);
+
 					assert_eq!(
 						GENESIS_EPOCH + 1,
 						Validator::epoch_index(),
@@ -1380,8 +1354,8 @@ mod tests {
 
 					assert_eq!(
 						Auction::current_auction_index(),
-						2,
-						"this should be the second auction"
+						3,
+						"this should be the third auction"
 					);
 
 					// Run things to a successful vault rotation
