@@ -20,7 +20,7 @@ use cf_traits::{
 };
 use codec::{Decode, Encode};
 use frame_support::{instances::*, weights::Weight};
-use pallet_cf_auction::{HandleStakes, VaultRotationEventHandler};
+use pallet_cf_auction::HandleStakes;
 use pallet_cf_broadcast::BroadcastConfig;
 use pallet_cf_validator::PercentageRange;
 use sp_runtime::{
@@ -122,7 +122,7 @@ impl VaultRotationHandler for ChainflipVaultRotationHandler {
 	type ValidatorId = AccountId;
 
 	fn vault_rotation_aborted() {
-		VaultRotationEventHandler::<Runtime>::vault_rotation_aborted();
+		<Validator as VaultRotationHandler>::vault_rotation_aborted();
 	}
 }
 

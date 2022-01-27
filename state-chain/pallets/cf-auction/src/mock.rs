@@ -6,7 +6,7 @@ use cf_traits::{
 		chainflip_account::MockChainflipAccount, ensure_origin_mock::NeverFailingOriginCheck,
 		epoch_info::MockEpochInfo,
 	},
-	Bid, Chainflip, ChainflipAccountData, EmergencyRotation,
+	Bid, Chainflip, ChainflipAccountData, EmergencyRotation, IsOnline,
 };
 use frame_support::{construct_runtime, parameter_types, traits::ValidatorRegistration};
 use sp_core::H256;
@@ -88,7 +88,7 @@ construct_runtime!(
 		UncheckedExtrinsic = UncheckedExtrinsic,
 	{
 		System: frame_system::{Pallet, Call, Config, Storage, Event<T>},
-		AuctionPallet: pallet_cf_auction::{Pallet, Call, Storage, Event<T>, Config<T>},
+		AuctionPallet: pallet_cf_auction::{Pallet, Call, Storage, Event<T>, Config},
 	}
 );
 
@@ -145,16 +145,6 @@ impl EmergencyRotation for MockEmergencyRotation {
 
 impl_mock_online!(ValidatorId);
 
-pub struct MockPeerMapping;
-
-impl HasPeerMapping for MockPeerMapping {
-	type ValidatorId = ValidatorId;
-
-	fn has_peer_mapping(_validator_id: &Self::ValidatorId) -> bool {
-		true
-	}
-}
-
 pub struct MockQualifyValidator;
 impl QualifyValidator for MockQualifyValidator {
 	type ValidatorId = ValidatorId;
@@ -176,15 +166,13 @@ impl Chainflip for Test {
 impl Config for Test {
 	type Event = Event;
 	type BidderProvider = MockBidderProvider;
-	type Registrar = Test;
 	type MinValidators = MinValidators;
 	type ChainflipAccount = MockChainflipAccount;
-	type Online = MockOnline;
-	type PeerMapping = MockPeerMapping;
 	type ActiveToBackupValidatorRatio = BackupValidatorRatio;
 	type WeightInfo = ();
 	type EmergencyRotation = MockEmergencyRotation;
 	type PercentageOfBackupValidatorsInEmergency = PercentageOfBackupValidatorsInEmergency;
+	type QualifyValidator = MockQualifyValidator;
 }
 
 impl ValidatorRegistration<ValidatorId> for Test {
@@ -207,13 +195,10 @@ impl BidderProvider for MockBidderProvider {
 pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
 	generate_bids(NUMBER_OF_BIDDERS, BIDDER_GROUP_A);
 
-	let (winners, minimum_active_bid) = expected_winning_set();
 	let config = GenesisConfig {
 		system: Default::default(),
 		auction_pallet: AuctionPalletConfig {
 			validator_size_range: (MIN_VALIDATOR_SIZE, MAX_VALIDATOR_SIZE),
-			winners,
-			minimum_active_bid,
 		},
 	};
 

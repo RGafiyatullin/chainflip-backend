@@ -131,7 +131,7 @@ mod tests {
 			initialise_validator(epoch);
 			MockAuctioneer::set_run_behaviour(Ok(Default::default()));
 			run_to_block(epoch);
-			assert_eq!(ValidatorPallet::ready_to_rotate(), RotationStatus::RunAuction);
+			assert_eq!(ValidatorPallet::rotation_phase(), RotationStatus::RunAuction);
 			assert_noop!(
 				ValidatorPallet::force_rotation(Origin::root()),
 				Error::<Test>::RotationInProgress

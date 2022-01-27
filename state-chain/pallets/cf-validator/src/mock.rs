@@ -7,8 +7,8 @@ use frame_support::{
 
 use cf_traits::{
 	mocks::chainflip_account::MockChainflipAccount, AuctionError, AuctionIndex, AuctionResult, Bid,
-	BidderProvider, ChainflipAccount, ChainflipAccountData, IsOnline, IsOutgoing, QualifyValidator,
-	VaultRotator,
+	BidderProvider, ChainflipAccount, ChainflipAccountData, IsOnline, IsOutgoing, QualifyConfig,
+	QualifyValidator, VaultRotator,
 };
 use sp_core::H256;
 use sp_runtime::{
@@ -139,11 +139,9 @@ impl Auctioneer for MockAuctioneer {
 	where
 		Q: QualifyValidator<ValidatorId = Self::ValidatorId>,
 	{
-		AUCTION_RUN_BEHAVIOUR.with(|cell| {
-			match (*cell.borrow()).as_ref() {
-				Ok(a) => Ok((*a).clone()),
-				Err(e) => Err(*e)
-			}
+		AUCTION_RUN_BEHAVIOUR.with(|cell| match (*cell.borrow()).as_ref() {
+			Ok(a) => Ok((*a).clone()),
+			Err(e) => Err(*e),
 		})
 	}
 
@@ -242,7 +240,9 @@ impl VaultRotator for MockVaultRotator {
 	type RotationError = AuctionError;
 
 	/// Start a vault rotation with the following `candidates`
-	fn start_vault_rotation(_candidates: Vec<Self::ValidatorId>) -> Result<(), Self::RotationError> {
+	fn start_vault_rotation(
+		_candidates: Vec<Self::ValidatorId>,
+	) -> Result<(), Self::RotationError> {
 		Ok(())
 	}
 
@@ -262,6 +262,13 @@ parameter_types! {
 	};
 }
 
+impl QualifyConfig for Test {
+	type ValidatorId = ValidatorId;
+	type Registrar = Self;
+	type PeerMapping = MockPeerMapping;
+	type Online = MockOnline;
+}
+
 impl Config for Test {
 	type Event = Event;
 	type MinEpoch = MinEpoch;
@@ -271,8 +278,7 @@ impl Config for Test {
 	type Auctioneer = MockAuctioneer;
 	type EmergencyRotationPercentageRange = EmergencyRotationPercentageRange;
 	type VaultRotator = MockVaultRotator;
-	type Online = MockOnline;
-	type Registrar = Self;
+	type QualifyConfig = Self;
 }
 
 /// Session pallet requires a set of validators at genesis.
@@ -287,7 +293,7 @@ pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
 		winners: DUMMY_GENESIS_VALIDATORS.to_vec(),
 		minimum_active_bid: MINIMUM_ACTIVE_BID_AT_GENESIS,
 	}));
-			
+
 	let config = GenesisConfig {
 		system: SystemConfig::default(),
 		session: SessionConfig {

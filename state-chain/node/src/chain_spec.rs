@@ -460,14 +460,7 @@ fn testnet_genesis(
 			code: wasm_binary.to_vec(),
 			changes_trie_config: Default::default(),
 		},
-		validator: ValidatorConfig {
-			winners: initial_authorities
-				.iter()
-				.map(|(validator_id, ..)| validator_id.clone())
-				.collect::<Vec<AccountId>>(),
-			minimum_active_bid: genesis_stake_amount,
-			blocks_per_epoch: 8 * HOURS,
-		},
+		validator: ValidatorConfig { blocks_per_epoch: 8 * HOURS },
 		session: SessionConfig {
 			keys: initial_authorities
 				.iter()

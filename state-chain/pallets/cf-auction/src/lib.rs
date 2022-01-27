@@ -16,9 +16,9 @@ pub use weights::WeightInfo;
 use cf_traits::{
 	ActiveValidatorRange, AuctionError, AuctionIndex, AuctionResult, Auctioneer, BackupValidators,
 	BidderProvider, ChainflipAccount, ChainflipAccountState, EmergencyRotation, EpochInfo,
-	HasPeerMapping, IsOnline, QualifyValidator, RemainingBid, StakeHandler,
+	QualifyValidator, RemainingBid, StakeHandler,
 };
-use frame_support::{pallet_prelude::*, traits::ValidatorRegistration};
+use frame_support::pallet_prelude::*;
 use frame_system::pallet_prelude::*;
 pub use pallet::*;
 use sp_runtime::traits::{One, Zero};
@@ -27,10 +27,7 @@ use sp_std::{cmp::min, prelude::*};
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use cf_traits::{
-		AuctionIndex, Chainflip, ChainflipAccount, EmergencyRotation, HasPeerMapping, RemainingBid,
-	};
-	use frame_support::traits::ValidatorRegistration;
+	use cf_traits::{AuctionIndex, Chainflip, ChainflipAccount, EmergencyRotation, RemainingBid};
 
 	#[pallet::pallet]
 	#[pallet::generate_store(pub (super) trait Store)]
@@ -43,18 +40,14 @@ pub mod pallet {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 		/// Providing bidders
 		type BidderProvider: BidderProvider<ValidatorId = Self::ValidatorId, Amount = Self::Amount>;
-		/// To confirm we have a session key registered for a validator
-		type Registrar: ValidatorRegistration<Self::ValidatorId>;
 		/// Benchmark stuff
 		type WeightInfo: WeightInfo;
 		/// For looking up Chainflip Account data.
 		type ChainflipAccount: ChainflipAccount<AccountId = Self::AccountId>;
-		/// An online validator
-		type Online: IsOnline<ValidatorId = Self::ValidatorId>;
-		/// A validator register their peer id
-		type PeerMapping: HasPeerMapping<ValidatorId = Self::ValidatorId>;
 		/// Emergency Rotations
 		type EmergencyRotation: EmergencyRotation;
+		/// Qualify what a validator is expected to be
+		type QualifyValidator: QualifyValidator<ValidatorId = Self::ValidatorId>;
 		/// Minimum amount of validators
 		#[pallet::constant]
 		type MinValidators: Get<u32>;
@@ -150,38 +143,22 @@ pub mod pallet {
 	}
 
 	#[pallet::genesis_config]
-	pub struct GenesisConfig<T: Config> {
+	pub struct GenesisConfig {
 		pub validator_size_range: ActiveValidatorRange,
-		pub winners: Vec<T::ValidatorId>,
-		pub minimum_active_bid: T::Amount,
 	}
 
 	#[cfg(feature = "std")]
-	impl<T: Config> Default for GenesisConfig<T> {
+	impl Default for GenesisConfig {
 		fn default() -> Self {
-			Self {
-				validator_size_range: (Zero::zero(), Zero::zero()),
-				winners: vec![],
-				minimum_active_bid: Zero::zero(),
-			}
+			Self { validator_size_range: (Zero::zero(), Zero::zero()) }
 		}
 	}
 
 	// The build of genesis for the pallet.
 	#[pallet::genesis_build]
-	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
+	impl<T: Config> GenesisBuild<T> for GenesisConfig {
 		fn build(&self) {
 			Pallet::<T>::set_active_range(self.validator_size_range).expect("valid range");
-			// for validator_id in &self.winners {
-			// 	T::ChainflipAccount::update_state(
-			// 		&(validator_id.clone().into()),
-			// 		ChainflipAccountState::Validator,
-			// 	);
-			// }
-			//
-			// BackupGroupSize::<T>::put(
-			// 	self.winners.len() as u32 / T::ActiveToBackupValidatorRatio::get(),
-			// );
 		}
 	}
 }
@@ -351,17 +328,6 @@ impl<T: Config> Auctioneer for Pallet<T> {
 	}
 }
 
-// TODO Move to validator
-// pub struct VaultRotationEventHandler<T>(PhantomData<T>);
-//
-// impl<T: Config> VaultRotationHandler for VaultRotationEventHandler<T> {
-// 	type ValidatorId = T::ValidatorId;
-//
-// 	fn vault_rotation_aborted() {
-// 		Pallet::<T>::abort();
-// 	}
-// }
-
 impl<T: Config> Pallet<T> {
 	fn current_backup_validators(
 		remaining_bidders: &[RemainingBid<T::ValidatorId, T::Amount>],
@@ -443,20 +409,6 @@ impl<T: Config> Pallet<T> {
 	}
 }
 
-// TODO move to validator
-impl<T: Config> QualifyValidator for HandleStakes<T> {
-	type ValidatorId = T::ValidatorId;
-
-	fn is_qualified(validator_id: &Self::ValidatorId) -> bool {
-		// Rule #1 - They are registered
-		// Rule #2 - They have a registered peer id
-		// Rule #3 - Confirm that the validators are 'online'
-		T::Registrar::is_registered(validator_id) &&
-			T::PeerMapping::has_peer_mapping(validator_id) &&
-			T::Online::is_online(validator_id)
-	}
-}
-
 pub struct HandleStakes<T>(PhantomData<T>);
 impl<T: Config> StakeHandler for HandleStakes<T> {
 	type ValidatorId = T::ValidatorId;
@@ -470,11 +422,12 @@ impl<T: Config> StakeHandler for HandleStakes<T> {
 
 		// We validate that the staker is qualified and can be considered to be a BV if the stake
 		// meets the requirements
-		if !Self::is_qualified(validator_id) {
+		if !T::QualifyValidator::is_qualified(validator_id) {
 			return
 		}
 
-		// TODO Check if this is OK as it was only available out of auction phases which don't exist anymore
+		// TODO Check if this is OK as it was only available out of auction phases which don't exist
+		// anymore
 		match T::ChainflipAccount::get(&(validator_id.clone().into())).state {
 			ChainflipAccountState::Passive => {
 				if amount > LowestBackupValidatorBid::<T>::get() {
