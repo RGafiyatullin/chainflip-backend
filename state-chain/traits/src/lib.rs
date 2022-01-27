@@ -2,8 +2,6 @@
 
 pub mod mocks;
 
-use std::fmt::Debug;
-
 use cf_chains::{Chain, ChainCrypto};
 use codec::{Decode, Encode};
 use frame_support::{
@@ -214,7 +212,7 @@ pub trait VaultRotationHandler {
 /// Rotating vaults
 pub trait VaultRotator {
 	type ValidatorId;
-	type RotationError: Debug;
+	type RotationError: core::fmt::Debug;
 
 	/// Start a vault rotation with the following `candidates`
 	fn start_vault_rotation(candidates: Vec<Self::ValidatorId>) -> Result<(), Self::RotationError>;
