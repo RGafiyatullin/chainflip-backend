@@ -133,6 +133,9 @@ async fn main() {
         )
         .await
         .expect("Should get StakeManager address from SC");
+
+    println!("Stake manager address: {}", stake_manager_address);
+
     let stake_manager_contract =
         StakeManager::new(stake_manager_address).expect("Should create StakeManager contract");
 
@@ -142,6 +145,8 @@ async fn main() {
         >::hashed_key().into()))
         .await
         .expect("Should get KeyManager address from SC");
+
+    println!("Key manager address: {}", stake_manager_address);
 
     let key_manager_contract =
         KeyManager::new(key_manager_address).expect("Should create KeyManager contract");

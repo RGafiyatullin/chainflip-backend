@@ -142,6 +142,15 @@ impl<B: BlockT, H: ExHashT> PeerNetwork for NetworkService<B, H> {
 
 	fn write_notification(&self, target: PeerId, message: Vec<u8>) {
 		self.write_notification(target, CHAINFLIP_P2P_PROTOCOL_NAME, message);
+
+		match self.notification_sender(target, CHAINFLIP_P2P_PROTOCOL_NAME) {
+			Ok(_sender) => {
+				println!("Successfully obtained notification sender for {}", target);
+			},
+			Err(err) => {
+				eprintln!("Failed to get notification sender for {}: {}", target, err);
+			},
+		}
 	}
 
 	fn event_stream(&self) -> Pin<Box<dyn futures::Stream<Item = Event> + Send>> {
