@@ -293,6 +293,9 @@ fn load_keys_using_kvdb(
         .iter(0)
         .filter_map(|(key_id, key_info)| {
             let key_id: KeyId = KeyId(key_id.into());
+
+            println!("key info: {:?}", &*key_info);
+
             match bincode::deserialize::<KeygenResultInfo>(&*key_info) {
                 Ok(keygen_info) => {
                     slog::info!(
