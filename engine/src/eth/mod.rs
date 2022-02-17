@@ -580,6 +580,8 @@ pub trait EthObserver {
                 .number()
                 .expect("Should have block number");
             // we only want to start observing once we reach the from_block specified
+
+            println!("got block {}", best_safe_block_number);
             if best_safe_block_number < from_block {
                 slog::trace!(
                     logger,
@@ -590,6 +592,12 @@ pub trait EthObserver {
             } else {
                 // our chain_head is above the from_block number
                 // The `fromBlock` parameter doesn't seem to work reliably with the web3 subscription streams
+
+                println!(
+                    "Requesting past blocks in block range {}-{}",
+                    from_block, best_safe_block_number
+                );
+
                 let past_logs = eth_rpc
                     .get_logs(
                         FilterBuilder::default()
@@ -604,6 +612,8 @@ pub trait EthObserver {
                         slog::error!(logger, "Failed to fetch past ETH logs: {}", err);
                         vec![]
                     });
+
+                println!("Got {} past logs", past_logs.len());
 
                 let future_logs = filtered_log_stream_by_contract(
                     safe_head_stream,
