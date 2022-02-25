@@ -1033,3 +1033,38 @@ mod timeout {
         // ======================
     }
 }
+
+#[tokio::test]
+async fn should_handle_point_at_infinity() {
+    use curv::elliptic::curves::{secp256_k1::Secp256k1Point, ECPoint};
+    use multisig::crypto::Point;
+
+    let (mut signing_ceremony, _) = new_signing_ceremony_with_keygen().await;
+
+    let mut messages = signing_ceremony.request().await;
+
+    // This account id will send a point at infinity
+    let [bad_account_id] = signing_ceremony.select_account_ids();
+
+    for message in messages.get_mut(&bad_account_id).unwrap().values_mut() {
+        let point_at_infinity = Point(Secp256k1Point::zero());
+
+        *message = frost::SigningCommitment {
+            d: point_at_infinity,
+            e: point_at_infinity,
+        };
+    }
+
+    let messages = helpers::run_stages!(
+        signing_ceremony,
+        messages,
+        frost::VerifyComm2,
+        frost::LocalSig3,
+        frost::VerifyLocalSig4
+    );
+
+    signing_ceremony.distribute_messages(messages);
+    signing_ceremony
+        .complete_with_error(&[bad_account_id])
+        .await;
+}
