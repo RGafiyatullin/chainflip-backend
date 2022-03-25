@@ -354,6 +354,7 @@ pub async fn start<BlockStream, RpcClient, EthRpc>(
                                                                 attempt_id,
                                                                 tx_hash
                                                             );
+                                                            // witness instead of report transmission success
                                                             pallet_cf_witnesser_api::Call::witness_eth_transmission_success(
                                                                 attempt_id, tx_hash
                                                             )

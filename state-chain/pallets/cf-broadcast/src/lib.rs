@@ -246,6 +246,9 @@ pub mod pallet {
 		BroadcastAttemptExpired(BroadcastAttemptId, BroadcastStage),
 		/// A broadcast has been aborted after failing `MaximumAttempts`. \[broadcast_id\]
 		BroadcastAborted(BroadcastId),
+
+		// temp
+		RetryFailedBroadcast(BroadcastId, AttemptCount),
 	}
 
 	#[pallet::error]
@@ -629,6 +632,10 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 
 	/// Retry a failed attempt by starting anew with incremented attempt_count.
 	fn retry_failed_broadcast(failed: FailedBroadcastAttempt<T, I>) {
+		Self::deposit_event(Event::<T, I>::RetryFailedBroadcast(
+			failed.broadcast_id,
+			failed.attempt_count,
+		));
 		Self::start_broadcast_attempt(
 			failed.broadcast_id,
 			failed.attempt_count.wrapping_add(1),

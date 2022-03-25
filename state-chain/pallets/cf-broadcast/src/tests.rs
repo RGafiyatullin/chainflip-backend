@@ -75,6 +75,9 @@ impl MockCfe {
 					// Informational only. No action required by the CFE.
 				},
 				BroadcastEvent::__Ignore(_, _) => unreachable!(),
+				BroadcastEvent::RetryFailedBroadcast(_, _) => {
+					// informational only (temp)
+				},
 			},
 			_ => panic!("Unexpected event"),
 		};
