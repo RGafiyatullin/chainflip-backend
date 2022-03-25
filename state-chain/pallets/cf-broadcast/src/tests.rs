@@ -78,6 +78,9 @@ impl MockCfe {
 				BroadcastEvent::RetryFailedBroadcast(_, _) => {
 					// informational only (temp)
 				},
+				BroadcastEvent::NoValidatorsOnline(_, _) => {
+					// info only (temp)
+				},
 			},
 			_ => panic!("Unexpected event"),
 		};

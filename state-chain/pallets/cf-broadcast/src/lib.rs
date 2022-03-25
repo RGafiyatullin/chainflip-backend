@@ -249,6 +249,7 @@ pub mod pallet {
 
 		// temp
 		RetryFailedBroadcast(BroadcastId, AttemptCount),
+		NoValidatorsOnline(BroadcastId, AttemptCount),
 	}
 
 	#[pallet::error]
@@ -603,6 +604,7 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 			log::warn!("No online validators at the moment.");
 			let failed =
 				FailedBroadcastAttempt::<T, I> { broadcast_id, attempt_count, unsigned_tx };
+			Self::deposit_event(Event::<T, I>::NoValidatorsOnline(broadcast_id, attempt_count));
 			Self::schedule_retry(failed);
 		}
 	}
