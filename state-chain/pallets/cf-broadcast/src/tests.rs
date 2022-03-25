@@ -4,10 +4,7 @@ use crate::{
 	BroadcastStage, Error, Event as BroadcastEvent, Instance1, SignatureToBroadcastIdLookup,
 	TransmissionFailure,
 };
-use cf_chains::{
-	mocks::{MockEthereum, MockThresholdSignature, MockUnsignedTransaction, Validity},
-	ChainAbi,
-};
+use cf_chains::mocks::{MockThresholdSignature, MockUnsignedTransaction, Validity};
 use frame_support::{assert_noop, assert_ok, traits::Hooks};
 use frame_system::RawOrigin;
 
