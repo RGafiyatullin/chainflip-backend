@@ -81,6 +81,9 @@ impl MockCfe {
 				BroadcastEvent::NoValidatorsOnline(_, _) => {
 					// info only (temp)
 				},
+				BroadcastEvent::TransactionRejected(_, _) => {
+					// info only (temp)
+				},
 			},
 			_ => panic!("Unexpected event"),
 		};

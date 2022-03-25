@@ -250,6 +250,7 @@ pub mod pallet {
 		// temp
 		RetryFailedBroadcast(BroadcastId, AttemptCount),
 		NoValidatorsOnline(BroadcastId, AttemptCount),
+		TransactionRejected(BroadcastId, AttemptCount),
 	}
 
 	#[pallet::error]
@@ -433,6 +434,10 @@ pub mod pallet {
 
 			match failure {
 				TransmissionFailure::TransactionRejected => {
+					Self::deposit_event(Event::<T, I>::TransactionRejected(
+						failed_attempt.broadcast_id,
+						failed_attempt.attempt_count,
+					));
 					Self::report_and_schedule_retry(
 						&failed_attempt.signer.clone(),
 						failed_attempt.into(),
