@@ -251,6 +251,7 @@ pub mod pallet {
 		RetryFailedBroadcast(BroadcastId, AttemptCount),
 		NoValidatorsOnline(BroadcastId, AttemptCount),
 		TransactionRejected(BroadcastId, AttemptCount),
+		TransmissionFailure(BroadcastAttemptId),
 	}
 
 	#[pallet::error]
@@ -427,6 +428,7 @@ pub mod pallet {
 			failure: TransmissionFailure,
 			_tx_hash: TransactionHashFor<T, I>,
 		) -> DispatchResultWithPostInfo {
+			Self::deposit_event(Event::<T, I>::TransmissionFailure(attempt_id));
 			let _success = T::EnsureWitnessed::ensure_origin(origin)?;
 
 			let failed_attempt = AwaitingTransmission::<T, I>::take(attempt_id)

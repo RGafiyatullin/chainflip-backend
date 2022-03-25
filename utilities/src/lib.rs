@@ -26,6 +26,13 @@ pub fn success_threshold_from_share_count(share_count: u32) -> u32 {
 }
 
 #[test]
+fn test_success() {
+    let num = success_threshold_from_share_count(3);
+    println!("Num required: {}", num);
+}
+
+// strange that this tests the inner
+#[test]
 fn check_threshold_calculation() {
     assert_eq!(threshold_from_share_count(150), 99);
     assert_eq!(threshold_from_share_count(100), 66);

@@ -84,6 +84,9 @@ impl MockCfe {
 				BroadcastEvent::TransactionRejected(_, _) => {
 					// info only (temp)
 				},
+				BroadcastEvent::TransmissionFailure(_) => {
+					// temp
+				},
 			},
 			_ => panic!("Unexpected event"),
 		};
