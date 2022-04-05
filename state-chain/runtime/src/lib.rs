@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 // `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
 #![recursion_limit = "256"]
-mod chainflip;
+pub mod chainflip;
 pub mod constants;
 mod migrations;
 #[cfg(test)]
@@ -558,6 +558,12 @@ pub type Executive = frame_executive::Executive<
 >;
 
 impl_runtime_apis! {
+
+	impl chainflip::SimpleRuntimeApi<Block> for Runtime {
+		fn get_int() -> u32 {
+			42
+		}
+	}
 
 	impl sp_api::Core<Block> for Runtime {
 		fn version() -> RuntimeVersion {

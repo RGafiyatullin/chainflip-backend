@@ -7,6 +7,12 @@ pub use missed_authorship_slots::MissedAuraSlots;
 use pallet_cf_flip::Surplus;
 pub use signer_nomination::RandomSignerNomination;
 
+sp_api::decl_runtime_apis!(
+	pub trait SimpleRuntimeApi {
+		fn get_int() -> u32;
+	}
+);
+
 use crate::{
 	AccountId, Auction, Authorship, BlockNumber, Call, EmergencyRotationPercentageRange, Emissions,
 	Environment, Flip, FlipBalance, HeartbeatBlockInterval, Reputation, Runtime, System, Validator,

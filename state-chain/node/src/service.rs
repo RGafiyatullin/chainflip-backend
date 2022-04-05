@@ -1,17 +1,18 @@
 //! Service and ServiceFactory implementation. Specialized wrapper over substrate service.
 
 use jsonrpc_core::MetaIoHandler;
-use sc_client_api::{ExecutorProvider, RemoteBackend};
+use sc_client_api::{ExecutorProvider, HeaderBackend, RemoteBackend};
 use sc_consensus_aura::{ImportQueueParams, SlotProportion, StartAuraParams};
 pub use sc_executor::NativeElseWasmExecutor;
 use sc_finality_grandpa::SharedVoterState;
 use sc_keystore::LocalKeystore;
-use sc_service::{error::Error as ServiceError, Configuration, TaskManager};
+use sc_service::{error::Error as ServiceError, Configuration, TaskManager, TransactionPool};
 use sc_telemetry::{Telemetry, TelemetryWorker};
 use sp_consensus::SlotData;
 use sp_consensus_aura::sr25519::AuthorityPair as AuraPair;
-use state_chain_runtime::{self, opaque::Block, RuntimeApi};
-use std::{sync::Arc, time::Duration};
+use state_chain_runtime::{self, chainflip::SimpleRuntimeApi, opaque::Block, RuntimeApi};
+use std::{marker::PhantomData, sync::Arc, time::Duration};
+use substrate_frame_rpc_system::FullSystem;
 
 // Our native executor instance.
 pub struct ExecutorDispatch;
@@ -153,6 +154,36 @@ fn remote_keystore(_url: &str) -> Result<Arc<LocalKeystore>, &'static str> {
 	Err("Remote Keystore not supported.")
 }
 
+use jsonrpc_derive::rpc;
+#[rpc]
+pub trait SimpleApi {
+	/// Connect to validators and disconnect from old validators
+	#[rpc(name = "get_int")]
+	fn get_int(&self) -> Result<u32, jsonrpc_core::Error>;
+}
+
+pub struct PartialSystem<C, B> {
+	client: Arc<C>,
+	_phantom: PhantomData<B>,
+}
+
+impl<C, B> SimpleApi for PartialSystem<C, B>
+where
+	B: sp_runtime::traits::Block,
+	C: sp_api::ProvideRuntimeApi<B>,
+	C: Send + Sync + 'static,
+	C: HeaderBackend<B>,
+	C::Api: SimpleRuntimeApi<B>,
+{
+	fn get_int(&self) -> Result<u32, jsonrpc_core::Error> {
+		let at = sp_api::BlockId::hash(self.client.info().best_hash);
+		self.client
+			.runtime_api()
+			.get_int(&at)
+			.map_err(|_| jsonrpc_core::Error::new(jsonrpc_core::ErrorCode::ServerError(0)))
+	}
+}
+
 /// Builds a new service for a full client.
 pub fn new_full(mut config: Configuration) -> Result<TaskManager, ServiceError> {
 	let sc_service::PartialComponents {
@@ -237,6 +268,10 @@ pub fn new_full(mut config: Configuration) -> Result<TaskManager, ServiceError> 
 					deny_unsafe,
 				),
 			));
+			io.extend_with(SimpleApi::to_delegate(PartialSystem {
+				client: client.clone(),
+				_phantom: PhantomData::default(),
+			}));
 			Ok(io)
 		})
 	};
