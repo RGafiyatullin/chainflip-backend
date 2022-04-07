@@ -19,19 +19,19 @@ futures = { version = '0.3.4', features = ['compat'] }
 
 [dependencies.sp-runtime]
 git = 'https://github.com/chainflip-io/substrate.git'
-tag = 'merge-config-option'
+tag = 'local-grandpa-hacking'
 
 [dependencies.sc-network]
 git = 'https://github.com/chainflip-io/substrate.git'
-tag = 'merge-config-option'
+tag = 'local-grandpa-hacking'
 
 [dependencies.sp-core]
 git = 'https://github.com/chainflip-io/substrate.git'
-tag = 'merge-config-option'
+tag = 'local-grandpa-hacking'
 
 [dependencies.sc-rpc]
 git = 'https://github.com/chainflip-io/substrate.git'
-tag = 'merge-config-option'
+tag = 'local-grandpa-hacking'
 features = ['test-helpers']
 
 [dev-dependencies]
