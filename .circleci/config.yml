@@ -129,7 +129,7 @@ workflows:
           name: build-rust-base
           extra_build_args: "--build-arg NIGHTLY=nightly-2021-07-05"
           image: chainflip-io/chainflip-backend/rust-base
-          tag: 2021
+          tag: "2021"
           dockerfile: Dockerfile.rust-base
 #          cache_from: ghcr.io/chainflip-io/chainflip-backend/rust-base:latest
           context:
@@ -139,7 +139,7 @@ workflows:
           name: build-rust-poetry
           image: chainflip-io/chainflip-backend/rust-poetry
 #          cache_from: ghcr.io/chainflip-io/chainflip-backend/rust-poetry:latest
-          tag: 2021
+          tag: "2021"
           dockerfile: Dockerfile.rust-poetry
           context:
             - ghcr-credentials
