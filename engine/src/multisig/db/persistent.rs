@@ -169,6 +169,11 @@ impl KeyDB for PersistentKeyDB {
                 // Strip the prefix off the key_id
                 let key_id: KeyId = KeyId(key_id[PREFIX_SIZE..].into());
 
+                slog::debug!(
+                    self.logger,
+                    "Loading key share binary: {}",
+                    hex::encode(&key_info)
+                );
                 // deserialize the `KeygenResultInfo`
                 match bincode::deserialize::<KeygenResultInfo>(&*key_info) {
                     Ok(keygen_result_info) => {
