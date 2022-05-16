@@ -67,9 +67,9 @@ impl PartyIdxMapping {
 }
 
 macro_rules! derive_from_enum {
-    ($variant: ty, $variant_path: path, $enum: ty) => {
-        impl<P: ECPoint> From<$variant> for $enum {
-            fn from(x: $variant) -> Self {
+    ($name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)?, $variant_path: path, $enum: ty) => {
+        impl $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? From< $name $(< $( $lt ),+ >)? > for $enum {
+            fn from(x: $name $(< $( $lt ),+ >)?) -> Self {
                 $variant_path(x)
             }
         }
@@ -77,8 +77,8 @@ macro_rules! derive_from_enum {
 }
 
 macro_rules! derive_try_from_variant {
-    ($variant: ty, $variant_path: path, $enum: ty) => {
-        impl<P: ECPoint> std::convert::TryFrom<$enum> for $variant {
+    ($name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)?, $variant_path: path, $enum: ty) => {
+        impl $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? std::convert::TryFrom<$enum> for $name $(< $( $lt ),+ >)? {
             type Error = $enum;
 
             fn try_from(data: $enum) -> Result<Self, Self::Error> {
@@ -93,32 +93,23 @@ macro_rules! derive_try_from_variant {
 }
 
 macro_rules! derive_impls_for_enum_variants {
-    ($variant: ty, $variant_path: path, $enum: ty) => {
-        derive_from_enum!($variant, $variant_path, $enum);
-        derive_try_from_variant!($variant, $variant_path, $enum);
+    ($name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)?, $variant_path: path, $enum: ty) => {
+        derive_from_enum!($name $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)?, $variant_path, $enum);
+        derive_try_from_variant!($name $(< $( $lt ),+ >)?, $variant_path, $enum);
+        derive_display_as_type_name!($name $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)?);
     };
 }
 
 /// Derive display to match the type's name
 macro_rules! derive_display_as_type_name {
-    ($name: ty) => {
-        impl std::fmt::Display for $name {
+    ( $name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)? ) => {
+        impl $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? std::fmt::Display for $name $(< $( $lt ),+ >)?
+        {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, stringify!($name))
             }
         }
-    };
-}
-
-/// Derive display to match the type's name
-macro_rules! derive_display_as_type_name_p {
-    ($name: ty) => {
-        impl<P: ECPoint> std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, stringify!($name))
-            }
-        }
-    };
+    }
 }
 
 #[cfg(test)]

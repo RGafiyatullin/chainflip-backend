@@ -8,8 +8,8 @@ use crate::multisig::{client::common::BroadcastVerificationMessage, crypto::ECPo
 use super::keygen_frost::ShamirShare;
 
 macro_rules! derive_impls_for_keygen_data {
-    ($variant: ty, $variant_path: path) => {
-        derive_impls_for_enum_variants!($variant, $variant_path, KeygenData<P>);
+    ($name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)?, $variant_path: path) => {
+        derive_impls_for_enum_variants!($name $(< $( $lt ),+ >)?, $variant_path, KeygenData<P>);
     };
 }
 
@@ -85,21 +85,24 @@ pub type VerifyBlameResponses7<P> = BroadcastVerificationMessage<BlameResponse6<
 
 derive_impls_for_keygen_data!(HashComm1, KeygenData::HashComm1);
 derive_impls_for_keygen_data!(VerifyHashComm2, KeygenData::VerifyHashComm2);
-derive_impls_for_keygen_data!(Comm1<P>, KeygenData::Comm1);
-derive_impls_for_keygen_data!(VerifyComm2<P>, KeygenData::Verify2);
-derive_impls_for_keygen_data!(ShamirShare<P>, KeygenData::SecretShares3);
+derive_impls_for_keygen_data!(Comm1<P: ECPoint>, KeygenData::Comm1);
+derive_impls_for_keygen_data!(VerifyComm2<P: ECPoint>, KeygenData::Verify2);
+derive_impls_for_keygen_data!(ShamirShare<P: ECPoint>, KeygenData::SecretShares3);
 derive_impls_for_keygen_data!(Complaints4, KeygenData::Complaints4);
 derive_impls_for_keygen_data!(VerifyComplaints5, KeygenData::VerifyComplaints5);
-derive_impls_for_keygen_data!(BlameResponse6<P>, KeygenData::BlameResponse6);
-derive_impls_for_keygen_data!(VerifyBlameResponses7<P>, KeygenData::VerifyBlameResponses7);
+derive_impls_for_keygen_data!(BlameResponse6<P: ECPoint>, KeygenData::BlameResponse6);
+derive_impls_for_keygen_data!(
+    VerifyBlameResponses7<P: ECPoint>,
+    KeygenData::VerifyBlameResponses7
+);
 
-derive_display_as_type_name!(HashComm1);
-derive_display_as_type_name!(VerifyHashComm2);
-derive_display_as_type_name_p!(ShamirShare<P>);
-derive_display_as_type_name!(Complaints4);
-derive_display_as_type_name!(VerifyComplaints5);
-derive_display_as_type_name_p!(BlameResponse6<P>);
-derive_display_as_type_name_p!(VerifyBlameResponses7<P>);
+// derive_display_as_type_name!(HashComm1);
+// derive_display_as_type_name!(VerifyHashComm2);
+// derive_display_as_type_name!(ShamirShare<P: ECPoint>);
+// derive_display_as_type_name!(Complaints4);
+// derive_display_as_type_name!(VerifyComplaints5);
+// derive_display_as_type_name!(BlameResponse6<P: ECPoint>);
+// derive_display_as_type_name!(VerifyBlameResponses7<P: ECPoint>);
 
-derive_display_as_type_name_p!(Comm1<P>);
-derive_display_as_type_name_p!(VerifyComm2<P>);
+// derive_display_as_type_name!(Comm1<P: ECPoint>);
+// derive_display_as_type_name!(VerifyComm2<P: ECPoint>);

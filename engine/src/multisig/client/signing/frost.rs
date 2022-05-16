@@ -71,8 +71,8 @@ pub struct LocalSig3<P: ECPoint> {
 }
 
 macro_rules! derive_impls_for_signing_data {
-    ($variant: ty, $variant_path: path) => {
-        derive_impls_for_enum_variants!($variant, $variant_path, SigningData<P>);
+    ($name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)?, $variant_path: path) => {
+        derive_impls_for_enum_variants!($name $(< $( $lt ),+ >)?, $variant_path, SigningData<P>);
     };
 }
 
@@ -90,15 +90,21 @@ pub enum SigningData<P: ECPoint> {
     VerifyLocalSigsStage4(VerifyLocalSig4<P>),
 }
 
-derive_impls_for_signing_data!(Comm1<P>, SigningData::CommStage1);
-derive_impls_for_signing_data!(VerifyComm2<P>, SigningData::BroadcastVerificationStage2);
-derive_impls_for_signing_data!(LocalSig3<P>, SigningData::LocalSigStage3);
-derive_impls_for_signing_data!(VerifyLocalSig4<P>, SigningData::VerifyLocalSigsStage4);
+derive_impls_for_signing_data!(Comm1<P: ECPoint>, SigningData::CommStage1);
+derive_impls_for_signing_data!(
+    VerifyComm2<P: ECPoint>,
+    SigningData::BroadcastVerificationStage2
+);
+derive_impls_for_signing_data!(LocalSig3<P: ECPoint>, SigningData::LocalSigStage3);
+derive_impls_for_signing_data!(
+    VerifyLocalSig4<P: ECPoint>,
+    SigningData::VerifyLocalSigsStage4
+);
 
-derive_display_as_type_name_p!(Comm1<P>);
-derive_display_as_type_name_p!(VerifyComm2<P>);
-derive_display_as_type_name_p!(LocalSig3<P>);
-derive_display_as_type_name_p!(VerifyLocalSig4<P>);
+// derive_display_as_type_name!(Comm1<P: ECPoint>);
+// derive_display_as_type_name!(VerifyComm2<P: ECPoint>);
+// derive_display_as_type_name!(LocalSig3<P: ECPoint>);
+// derive_display_as_type_name!(VerifyLocalSig4<P: ECPoint>);
 
 impl<P: ECPoint> Display for SigningData<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

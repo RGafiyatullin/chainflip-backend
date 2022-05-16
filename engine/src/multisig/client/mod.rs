@@ -80,8 +80,8 @@ pub enum MultisigData<P: ECPoint> {
     Signing(SigningData<P>),
 }
 
-derive_try_from_variant!(KeygenData<P>, MultisigData::Keygen, MultisigData<P>);
-derive_try_from_variant!(SigningData<P>, MultisigData::Signing, MultisigData<P>);
+derive_try_from_variant!(KeygenData<P: ECPoint>, MultisigData::Keygen, MultisigData<P>);
+derive_try_from_variant!(SigningData<P: ECPoint>, MultisigData::Signing, MultisigData<P>);
 
 impl<P: ECPoint> From<SigningData<P>> for MultisigData<P> {
     fn from(data: SigningData<P>) -> Self {
