@@ -417,10 +417,7 @@ impl<T: Config> cf_traits::StakeTransfer for Pallet<T> {
 	}
 
 	fn try_claim(account_id: &Self::AccountId, amount: Self::Balance) -> Result<(), DispatchError> {
-		ensure!(
-			amount <= Self::claimable_balance(account_id),
-			DispatchError::from(Error::<T>::InsufficientLiquidity)
-		);
+		ensure!(amount <= Self::claimable_balance(account_id), Error::<T>::InsufficientLiquidity);
 
 		Self::settle(account_id, Self::bridge_out(amount).into());
 		T::StakeHandler::on_stake_updated(account_id, Self::staked_balance(account_id));
