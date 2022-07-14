@@ -64,15 +64,14 @@ fn only_one_heartbeat_per_interval_earns_reputation() {
 }
 
 #[test]
-fn updating_accrual_rate_should_affect_reputation_points() {
+fn update_accrual_ratio_uses_smallest_ratio() {
 	new_test_ext().execute_with(|| {
 		// Fails due to too high a reputation points
+		let reputation = 30;
+		assert!(reputation > MAX_REPUTATION_POINT_ACCRUED);
 		assert_noop!(
-			ReputationPallet::update_accrual_ratio(
-				Origin::root(),
-				MAX_REPUTATION_POINT_ACCRUED + 1,
-				20
-			),
+			// GCD of 31 and 7 is 1, so 31 will still be the reputation
+			ReputationPallet::update_accrual_ratio(Origin::root(), reputation, 7),
 			Error::<Test>::InvalidAccrualRatio,
 		);
 
@@ -82,13 +81,30 @@ fn updating_accrual_rate_should_affect_reputation_points() {
 			Error::<Test>::InvalidAccrualRatio,
 		);
 
+		// GCD of 30 and 6 is 6, so the actual ratio becomes, 5:1, and this isn't greater than the
+		// max points accrued
+		let online_points = 6;
+		assert_ok!(ReputationPallet::update_accrual_ratio(
+			Origin::root(),
+			reputation,
+			online_points
+		));
+		let gcd = 6;
+		assert_eq!(
+			ReputationPallet::accrual_ratio(),
+			(reputation / gcd, online_points / gcd as u64)
+		);
+	});
+}
+
+#[test]
+fn updating_accrual_rate_should_affect_reputation_points() {
+	new_test_ext().execute_with(|| {
 		assert_ok!(ReputationPallet::update_accrual_ratio(
 			Origin::root(),
 			ACCRUAL_RATIO.0,
 			ACCRUAL_RATIO.1,
 		));
-
-		assert_eq!(ReputationPallet::accrual_ratio(), ACCRUAL_RATIO);
 
 		submit_heartbeat_and_move_forward_heartbeat_interval(ALICE);
 		assert_eq!(reputation_points(&ALICE), REPUTATION_PER_HEARTBEAT);

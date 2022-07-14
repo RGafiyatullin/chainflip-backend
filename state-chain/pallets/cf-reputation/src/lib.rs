@@ -254,11 +254,26 @@ pub mod pallet {
 			T::EnsureGovernance::ensure_origin(origin)?;
 
 			ensure!(
-				reputation_points <= T::MaximumAccruableReputation::get() &&
-					online_credits > Zero::zero(),
+				online_credits > Zero::zero() && reputation_points >= Zero::zero(),
 				Error::<T>::InvalidAccrualRatio
 			);
 
+			let reputation_points_u64 = reputation_points as u64;
+			let online_credits_u64: u64 =
+				sp_runtime::traits::UniqueSaturatedInto::unique_saturated_into(online_credits);
+			let highest_common_factor =
+				num::integer::gcd(reputation_points_u64, online_credits_u64);
+			let reputation_points = reputation_points_u64 / highest_common_factor;
+			let online_credits = online_credits_u64 / highest_common_factor;
+
+			ensure!(
+				reputation_points <= T::MaximumAccruableReputation::get() as u64,
+				Error::<T>::InvalidAccrualRatio
+			);
+			let reputation_points =
+				reputation_points.try_into().map_err(|_| Error::<T>::InvalidAccrualRatio)?;
+
+			let online_credits: T::BlockNumber = (online_credits as u32).into();
 			AccrualRatio::<T>::set((reputation_points, online_credits));
 			Self::deposit_event(Event::AccrualRateUpdated(reputation_points, online_credits));
 
@@ -520,6 +535,7 @@ impl<T: Config> Pallet<T> {
 impl<T: Config> ReputationResetter for Pallet<T> {
 	type ValidatorId = T::ValidatorId;
 
+	// TODO: Look at where this is used
 	/// Reset both the online credits and the reputation points of a validator to zero.
 	fn reset_reputation(validator: &Self::ValidatorId) {
 		Reputations::<T>::mutate(validator, |rep| {
