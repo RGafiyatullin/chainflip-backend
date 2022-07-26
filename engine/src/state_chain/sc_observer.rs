@@ -266,6 +266,50 @@ macro_rules! match_event {
     }}
 }
 
+async fn is_client_active_in_current_epoch<RpcClient>(
+    send_instruction: &(impl Fn(ObserveInstruction) + Copy),
+    state_chain_client: &Arc<StateChainClient<RpcClient>>,
+    initial_block_hash: H256,
+) -> bool
+where
+    RpcClient: StateChainRpcApi + Send + Sync + 'static,
+{
+    let historical_active_epochs = state_chain_client.get_storage_map::<pallet_cf_validator::HistoricalActiveEpochs<state_chain_runtime::Runtime>>(
+        initial_block_hash,
+        &state_chain_client.our_account_id
+    ).await.unwrap();
+
+    assert!(historical_active_epochs.iter().is_sorted());
+
+    stream::iter(historical_active_epochs.into_iter())
+        .fold(false, |acc, epoch| {
+            let state_chain_client = state_chain_client.clone();
+            async move {
+                start_epoch_observation(
+                    send_instruction,
+                    &state_chain_client,
+                    initial_block_hash,
+                    epoch,
+                )
+                .await;
+                if try_end_previous_epoch_observation(
+                    send_instruction,
+                    &state_chain_client,
+                    initial_block_hash,
+                    epoch + 1,
+                )
+                .await
+                {
+                    acc
+                } else {
+                    assert!(!acc);
+                    true
+                }
+            }
+        })
+        .await
+}
+
 pub async fn start<BlockStream, RpcClient, EthRpc, MultisigClient>(
     state_chain_client: Arc<StateChainClient<RpcClient>>,
     sc_block_stream: BlockStream,
@@ -308,40 +352,12 @@ pub async fn start<BlockStream, RpcClient, EthRpc, MultisigClient>(
             .unwrap();
     };
 
-    let historical_active_epochs = state_chain_client.get_storage_map::<pallet_cf_validator::HistoricalActiveEpochs<state_chain_runtime::Runtime>>(
+    let mut active_in_current_epoch = is_client_active_in_current_epoch(
+        &send_instruction,
+        &state_chain_client,
         initial_block_hash,
-        &state_chain_client.our_account_id
-    ).await.unwrap();
-
-    assert!(historical_active_epochs.iter().is_sorted());
-
-    let mut active_in_current_epoch = stream::iter(historical_active_epochs.into_iter())
-        .fold(false, |acc, epoch| {
-            let state_chain_client = state_chain_client.clone();
-            async move {
-                start_epoch_observation(
-                    send_instruction,
-                    &state_chain_client,
-                    initial_block_hash,
-                    epoch,
-                )
-                .await;
-                if try_end_previous_epoch_observation(
-                    send_instruction,
-                    &state_chain_client,
-                    initial_block_hash,
-                    epoch + 1,
-                )
-                .await
-                {
-                    acc
-                } else {
-                    assert!(!acc);
-                    true
-                }
-            }
-        })
-        .await;
+    )
+    .await;
 
     let mut sc_block_stream = Box::pin(sc_block_stream);
     loop {
