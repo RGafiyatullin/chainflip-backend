@@ -261,9 +261,12 @@ fn main() -> anyhow::Result<()> {
                 witnessing_instruction_sender,
                 cfe_settings_update_sender,
                 latest_block_hash,
-                root_logger.clone()
+                &root_logger
             );
-            scope.spawn(sc_observer_future);
+            scope.spawn(async move {
+                sc_observer_future.await;
+                Ok(()) // TODO Handle errors/panics from sc_observer
+            });
 
             Ok(())
         }.boxed()

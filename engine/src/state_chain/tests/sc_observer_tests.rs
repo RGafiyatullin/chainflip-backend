@@ -9,7 +9,6 @@ use frame_system::Phase;
 use mockall::predicate::{self, eq};
 use pallet_cf_broadcast::BroadcastAttemptId;
 use pallet_cf_vaults::{Vault, Vaults};
-
 use sp_core::{
     storage::{StorageData, StorageKey},
     Hasher, H256, U256,
@@ -147,10 +146,9 @@ async fn sends_initial_extrinsics_and_starts_witnessing_when_current_authority_o
         instruction_sender,
         cfe_settings_update_sender,
         initial_block_hash,
-        logger,
+        &logger,
     )
-    .await
-    .unwrap();
+    .await;
 
     // ensure we kicked off the witness processes
     assert_eq!(
@@ -201,10 +199,9 @@ async fn sends_initial_extrinsics_and_starts_witnessing_when_historic_on_startup
         instruction_sender,
         cfe_settings_update_sender,
         initial_block_hash,
-        logger,
+        &logger,
     )
-    .await
-    .unwrap();
+    .await;
 
     // ensure we kicked off the witness processes
     assert_eq!(
@@ -250,10 +247,9 @@ async fn sends_initial_extrinsics_when_not_historic_on_startup() {
         instruction_sender,
         cfe_settings_update_sender,
         initial_block_hash,
-        logger,
+        &logger,
     )
-    .await
-    .unwrap();
+    .await;
 
     // ensure we did NOT kick off the witness processes - as we are *only* backup, not outgoing
     assert!(instruction_receiver.recv().await.is_err());
@@ -369,10 +365,9 @@ async fn current_authority_to_current_authority_on_new_epoch_event() {
         instruction_sender,
         cfe_settings_update_sender,
         initial_block_hash,
-        logger,
+        &logger,
     )
-    .await
-    .unwrap();
+    .await;
 
     // ensure we did kick off the witness processes at the start
     assert_eq!(
@@ -499,10 +494,9 @@ async fn not_historical_to_authority_on_new_epoch() {
         instruction_sender,
         cfe_settings_update_sender,
         initial_block_hash,
-        logger,
+        &logger,
     )
-    .await
-    .unwrap();
+    .await;
 
     // after a new epoch, we should have sent new messages down the channels
     assert_eq!(instruction_receiver.recv().await.unwrap(), EPOCH_FOUR_START);
@@ -623,10 +617,9 @@ async fn current_authority_to_historical_on_new_epoch_event() {
         instruction_sender,
         cfe_settings_update_sender,
         initial_block_hash,
-        logger,
+        &logger,
     )
-    .await
-    .unwrap();
+    .await;
 
     // ensure we did kick off the witness processes at the start
     assert_eq!(
@@ -754,10 +747,9 @@ async fn only_encodes_and_signs_when_specified() {
         instruction_sender,
         cfe_settings_update_sender,
         initial_block_hash,
-        logger,
+        &logger,
     )
-    .await
-    .unwrap();
+    .await;
 
     // ensure we kicked off the witness processes
     assert_eq!(
@@ -801,10 +793,9 @@ async fn run_the_sc_observer() {
         instruction_sender,
         cfe_settings_update_sender,
         initial_block_hash,
-        logger,
+        &logger,
     )
-    .await
-    .unwrap();
+    .await;
 }
 
 // Test that the ceremony requests are calling the correct MultisigClientApi functions
@@ -819,11 +810,11 @@ async fn should_handle_ceremony_request() {
     let not_our_account_id = AccountId32::new([1u8; 32]);
     assert_ne!(our_account_id, not_our_account_id);
 
-    let mut rpc = MockStateChainRpcApi::new();
-    rpc.expect_submit_extrinsic_rpc()
-        .returning(move |_| Ok(H256::default()));
-    let state_chain_client = Arc::new(StateChainClient::create_test_sc_client(rpc));
+    // Mock interfaces
     let mut multisig_client = MockMultisigClientApi::new();
+    let state_chain_client = Arc::new(StateChainClient::create_test_sc_client(
+        MockStateChainRpcApi::new(),
+    ));
 
     // Set up the mock api to expect the 2 not_participating_ceremony calls
     multisig_client
