@@ -22,14 +22,6 @@ auth: &dockerconfig
   username: $DOCKER_USERNAME
   password: $DOCKER_PASSWORD
 
-cargo-base-job: &cargo-base-job
-  executor: rust-base
-  environment:
-    SCCACHE_CACHE_SIZE: 14G
-    AWS_DEFAULT_REGION: eu-central-1
-    AWS_ROLE_ARN: arn:aws:iam::962042992619:role/chainflip-circleci-bot
-  resource_class: xlarge
-
 ######################## /Anchors ########################
 
 ######################## Config ########################
@@ -40,6 +32,11 @@ executors:
       - image: ghcr.io/chainflip-io/chainflip-platform-monorepo/chainflip-master:latest
         auth: *dockerconfig
   rust-base:
+    environment:
+      SCCACHE_BUCKET: chainflip-sccache
+      AWS_DEFAULT_REGION: eu-central-1
+      AWS_ROLE_ARN: arn:aws:iam::962042992619:role/chainflip-circleci-bot
+    resource_class: xlarge
     docker:
       - image: ghcr.io/chainflip-io/chainflip-backend/rust-base:nightly-2021-11-16
         auth: *dockerconfig
@@ -98,23 +95,6 @@ commands:
           failure_message: <<parameters.failure_message>>
           only_for_branches: <<parameters.only_for_branches>>
           webhook: $DW_ALERTS_STAGING
-  aws_oidc_authenticate:
-    steps:
-      - run:
-          name: authenticate-and-interact
-          command: |
-            # use the OpenID Connect token to obtain AWS credentials
-            read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \<<< \
-              $(aws sts assume-role-with-web-identity \
-               --role-arn ${AWS_ROLE_ARN} \
-               --role-session-name "CircleCI-${CIRCLE_WORKFLOW_ID}-${CIRCLE_JOB}" \
-               --web-identity-token $CIRCLE_OIDC_TOKEN \
-               --duration-seconds 3600 \
-               --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-               --output text)
-            export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-            # interact with AWS
-            aws sts get-caller-identity
   merge_target:
     steps:
       - run:
@@ -295,7 +275,7 @@ jobs:
   # First to check connection, and once after each
   # cargo function to track the performance of the compilation.
   cargo-check:
-    <<: *cargo-base-job
+    executor: rust-base
     steps:
       - checkout
       - merge_target
@@ -308,7 +288,7 @@ jobs:
             sccache --show-stats
 
   cargo-test:
-    <<: *cargo-base-job
+    executor: rust-base
     steps:
       - checkout
       - merge_target
@@ -318,7 +298,7 @@ jobs:
           sccache --show-stats
 
   cargo-clippy:
-    <<: *cargo-base-job
+    executor: rust-base
     steps:
       - checkout
       - merge_target
@@ -329,7 +309,7 @@ jobs:
           sccache --show-stats
 
   cargo-doc:
-    <<: *cargo-base-job
+    executor: rust-base
     shell: /bin/bash # Circle's beautiful way of ignoring failures 🙄
     steps:
       - checkout
@@ -342,7 +322,7 @@ jobs:
           path: target/doc/
 
   update-cargo-audit-log:
-    <<: *cargo-base-job
+    executor: rust-base
     shell: /bin/bash # Circle's beautiful way of ignoring failures 🙄
     steps:
       - checkout
