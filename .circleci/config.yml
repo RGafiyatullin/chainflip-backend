@@ -84,6 +84,9 @@ commands:
           profile-name: chainflip-circleci-bot
           role-arn: 'arn:aws:iam::962042992619:role/chainflip-circleci-bot'
           source-profile: default
+      - run: |
+          export AWS_ACCESS_KEY_ID=$(aws configure get default.aws_access_key_id)
+          export AWS_SECRET_ACCESS_KEY=$(aws configure get default.aws_secret_access_key)
   install_gh_cli:
     parameters:
       version:
