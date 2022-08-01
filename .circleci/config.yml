@@ -36,11 +36,17 @@ executors:
       SCCACHE_BUCKET: chainflip-sccache
       AWS_DEFAULT_REGION: eu-central-1
       AWS_ROLE_ARN: arn:aws:iam::962042992619:role/chainflip-circleci-bot
+      SCCACHE_LOG: debug
     resource_class: xlarge
     docker:
       - image: ghcr.io/chainflip-io/chainflip-backend/rust-base:nightly-2021-11-16
         auth: *dockerconfig
   rust-base-ci:
+    environment:
+      SCCACHE_BUCKET: chainflip-sccache
+      AWS_DEFAULT_REGION: eu-central-1
+      AWS_ROLE_ARN: arn:aws:iam::962042992619:role/chainflip-circleci-bot
+    resource_class: xlarge
     docker:
       - image: ghcr.io/chainflip-io/chainflip-backend/rust-base:nightly-2021-11-16
         auth: *dockerconfig
@@ -68,6 +74,14 @@ parameters:
 
 ######################## Commands ########################
 commands:
+  aws_oidc:
+    steps:
+      - aws-cli/setup:
+          profile-name: default
+      - aws-cli/role-arn-setup:
+          profile-name: chainflip-circleci-bot
+          role-arn: 'arn:aws:iam::962042992619:role/chainflip-circleci-bot'
+          source-profile: default
   install_gh_cli:
     parameters:
       version:
@@ -236,6 +250,7 @@ jobs:
     executor: rust-base-ci
     resource_class: xlarge
     steps:
+      - aws_oidc
       - checkout
       - merge_target
       - run: sccache --show-stats
@@ -259,12 +274,7 @@ jobs:
   cargo-fmt:
     executor: rust-base
     steps:
-      - aws-cli/setup:
-          profile-name: default
-      - aws-cli/role-arn-setup:
-          profile-name: chainflip-circleci-bot
-          role-arn: 'arn:aws:iam::962042992619:role/chainflip-circleci-bot'
-          source-profile: default
+      - aws_oidc
       - checkout
       - merge_target
       - run: >
@@ -277,6 +287,7 @@ jobs:
   cargo-check:
     executor: rust-base
     steps:
+      - aws_oidc
       - checkout
       - merge_target
       - run: sccache --show-stats
@@ -290,6 +301,7 @@ jobs:
   cargo-test:
     executor: rust-base
     steps:
+      - aws_oidc
       - checkout
       - merge_target
       - run: sccache --show-stats
@@ -300,6 +312,7 @@ jobs:
   cargo-clippy:
     executor: rust-base
     steps:
+      - aws_oidc
       - checkout
       - merge_target
       - run: sccache --show-stats
@@ -312,6 +325,7 @@ jobs:
     executor: rust-base
     shell: /bin/bash # Circle's beautiful way of ignoring failures 🙄
     steps:
+      - aws_oidc
       - checkout
       - merge_target
       - run: sccache --show-stats
@@ -325,6 +339,7 @@ jobs:
     executor: rust-base
     shell: /bin/bash # Circle's beautiful way of ignoring failures 🙄
     steps:
+      - aws_oidc
       - checkout
       - merge_target
       - install_gh_cli
