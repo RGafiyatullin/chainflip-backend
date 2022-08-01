@@ -37,7 +37,7 @@ executors:
       AWS_DEFAULT_REGION: eu-central-1
       AWS_ROLE_ARN: arn:aws:iam::962042992619:role/chainflip-circleci-bot
       SCCACHE_LOG: debug
-      SCCACHE_ERROR_LOG: sccache_log.txt
+      SCCACHE_ERROR_LOG: /tmp/sccache_log.txt
     resource_class: xlarge
     docker:
       - image: ghcr.io/chainflip-io/chainflip-backend/rust-base:nightly-2021-11-16
@@ -320,7 +320,7 @@ jobs:
       # TODO: remove the global ignores (#1254)
       - run: |
           sh clippy.sh
-          cat sccache_log.txt
+          cat /tmp/sccache_log.txt
           sccache --show-stats
 
   cargo-doc:
