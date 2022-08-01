@@ -322,9 +322,11 @@ jobs:
       - run: sccache --version
       - run: sccache --show-stats
       # TODO: remove the global ignores (#1254)
-      - run: |
-          touch /tmp/sccache.log
-          tail -f /tmp/sccache.log
+      - run:
+          background: true
+          command: |
+            touch /tmp/sccache.log
+            tail -f /tmp/sccache.log
       - run: |
           export AWS_ACCESS_KEY_ID=$(aws configure get default.aws_access_key_id)
           export AWS_SECRET_ACCESS_KEY=$(aws configure get default.aws_secret_access_key)
