@@ -58,6 +58,8 @@ orbs:
   gh: circleci/github-cli@1.0.4
   doctl: digitalocean/cli@0.1.1
   helm: circleci/helm@1.2.0
+  aws-cli: circleci/aws-cli@3.1.1
+
 parameters:
   rust-base:
     type: boolean
@@ -277,7 +279,12 @@ jobs:
   cargo-fmt:
     executor: rust-base
     steps:
-      - aws_oidc_authenticate
+      - aws-cli/setup:
+          profile-name: default
+      - aws-cli/role-arn-setup:
+          profile-name: chainflip-circleci-bot
+          role-arn: 'arn:aws:iam::962042992619:role/chainflip-circleci-bot'
+          source-profile: default
       - checkout
       - merge_target
       - run: >
