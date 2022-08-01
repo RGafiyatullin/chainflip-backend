@@ -277,7 +277,7 @@ jobs:
   cargo-fmt:
     executor: rust-base
     steps:
-      - aws_oidc_autenticate
+      - aws_oidc_authenticate
       - checkout
       - merge_target
       - run: >
