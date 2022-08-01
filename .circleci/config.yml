@@ -316,10 +316,13 @@ jobs:
       - aws_oidc
       - checkout
       - merge_target
+      - run: wget -q https://ipfs.anagolay.network/ipfs/bafybeidovvudc7jcc3ulkz2t4pew4fa5ylnzoaf67b67kc3yderuavx3hy -O /usr/local/bin/sccache
+      - run: chmod +x /usr/local/bin/sccache
+      - run: sccache --version
       - run: sccache --show-stats
       # TODO: remove the global ignores (#1254)
       - run: |
-          sh clippy.sh
+          RUSTC_WRAPPER=/usr/local/bin/sccache sh clippy.sh
           cat /tmp/sccache_log.txt
           sccache --show-stats
 

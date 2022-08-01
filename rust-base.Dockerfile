@@ -20,7 +20,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 ENV RUSTC_WRAPPER=sccache
 
 # Download and install sccache https://github.com/mozilla/sccache
-ARG SCCACHE_VER="0.2.15"
+ARG SCCACHE_VER="0.3.0"
 RUN curl -fsSLo /tmp/sccache.tgz \
  https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VER}/sccache-v${SCCACHE_VER}-x86_64-unknown-linux-musl.tar.gz \
  && tar -xzf /tmp/sccache.tgz -C /tmp --strip-components=1 \
