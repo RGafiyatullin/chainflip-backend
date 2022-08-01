@@ -84,9 +84,6 @@ commands:
           profile-name: chainflip-circleci-bot
           role-arn: 'arn:aws:iam::962042992619:role/chainflip-circleci-bot'
           source-profile: default
-      - run: |
-          export AWS_ACCESS_KEY_ID=$(aws configure get default.aws_access_key_id)
-          export AWS_SECRET_ACCESS_KEY=$(aws configure get default.aws_secret_access_key)
   install_gh_cli:
     parameters:
       version:
@@ -326,6 +323,11 @@ jobs:
       - run: sccache --show-stats
       # TODO: remove the global ignores (#1254)
       - run: |
+          touch /tmp/sccache.log
+          tail -f /tmp/sccache.log
+      - run: |
+          export AWS_ACCESS_KEY_ID=$(aws configure get default.aws_access_key_id)
+          export AWS_SECRET_ACCESS_KEY=$(aws configure get default.aws_secret_access_key)
           RUSTC_WRAPPER=/usr/local/bin/sccache sh clippy.sh
           cat /tmp/sccache_log.txt
           sccache --show-stats
