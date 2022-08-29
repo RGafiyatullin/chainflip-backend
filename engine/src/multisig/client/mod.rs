@@ -105,7 +105,7 @@ pub trait MultisigClientApi<C: CryptoScheme> {
     async fn keygen(
         &self,
         ceremony_id: CeremonyId,
-        participants: Vec<AccountId>,
+        participants: BTreeSet<AccountId>,
     ) -> Result<
         C::Point,
         (
@@ -118,7 +118,7 @@ pub trait MultisigClientApi<C: CryptoScheme> {
         &self,
         ceremony_id: CeremonyId,
         key_id: KeyId,
-        signers: Vec<AccountId>,
+        signers: BTreeSet<AccountId>,
         data: MessageHash,
     ) -> Result<
         C::Signature,
@@ -154,13 +154,13 @@ pub mod mocks {
             async fn keygen(
                 &self,
                 _ceremony_id: CeremonyId,
-                _participants: Vec<AccountId>,
+                _participants: BTreeSet<AccountId>,
             ) -> Result<C::Point, (BTreeSet<AccountId>, CeremonyFailureReason<KeygenFailureReason>)>;
             async fn sign(
                 &self,
                 _ceremony_id: CeremonyId,
                 _key_id: KeyId,
-                _signers: Vec<AccountId>,
+                _signers: BTreeSet<AccountId>,
                 _data: MessageHash,
             ) -> Result<<C as CryptoScheme>::Signature, (BTreeSet<AccountId>, CeremonyFailureReason<SigningFailureReason>)>;
             fn update_latest_ceremony_id(&self, ceremony_id: CeremonyId);
@@ -183,7 +183,7 @@ where
 }
 
 pub struct KeygenRequestDetails<C: CryptoScheme> {
-    pub participants: Vec<AccountId>,
+    pub participants: BTreeSet<AccountId>,
     pub rng: Rng,
     pub result_sender: CeremonyResultSender<KeygenCeremony<C>>,
 }
@@ -192,7 +192,7 @@ pub struct SigningRequestDetails<C>
 where
     C: CryptoScheme,
 {
-    pub participants: Vec<AccountId>,
+    pub participants: BTreeSet<AccountId>,
     pub data: MessageHash,
     pub keygen_result_info: KeygenResultInfo<<C as CryptoScheme>::Point>,
     pub rng: Rng,
@@ -234,7 +234,7 @@ where
     pub fn initiate_keygen(
         &self,
         ceremony_id: CeremonyId,
-        participants: Vec<AccountId>,
+        participants: BTreeSet<AccountId>,
     ) -> impl '_
            + Future<
         Output = Result<
@@ -307,7 +307,7 @@ where
         &self,
         ceremony_id: CeremonyId,
         key_id: KeyId,
-        signers: Vec<AccountId>,
+        signers: BTreeSet<AccountId>,
         data: MessageHash,
     ) -> impl '_
            + Future<
@@ -391,7 +391,7 @@ impl<C: CryptoScheme> MultisigClientApi<C> for MultisigClient<C> {
     async fn keygen(
         &self,
         ceremony_id: CeremonyId,
-        participants: Vec<AccountId>,
+        participants: BTreeSet<AccountId>,
     ) -> Result<
         C::Point,
         (
@@ -406,7 +406,7 @@ impl<C: CryptoScheme> MultisigClientApi<C> for MultisigClient<C> {
         &self,
         ceremony_id: CeremonyId,
         key_id: KeyId,
-        signers: Vec<AccountId>,
+        signers: BTreeSet<AccountId>,
         data: MessageHash,
     ) -> Result<
         C::Signature,
