@@ -382,7 +382,7 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	pub enum Event<T: Config<I>, I: 'static = ()> {
 		/// Request a key generation \[ceremony_id, participants\]
-		KeygenRequest(CeremonyId, Vec<T::ValidatorId>),
+		KeygenRequest(CeremonyId, BTreeSet<T::ValidatorId>),
 		/// The vault for the request has rotated
 		VaultRotationCompleted,
 		/// The Keygen ceremony has been aborted \[ceremony_id\]
@@ -700,9 +700,9 @@ impl<T: Config<I>, I: 'static> VaultRotator for Pallet<T, I> {
 	type ValidatorId = T::ValidatorId;
 
 	/// # Panics
-	/// - If an empty Vec of candidates is provided
+	/// - If an empty BTreeSet of candidates is provided
 	/// - If a vault rotation outcome is already Pending (i.e. there's one already in progress)
-	fn start_vault_rotation(candidates: Vec<Self::ValidatorId>) {
+	fn start_vault_rotation(candidates: BTreeSet<Self::ValidatorId>) {
 		assert!(!candidates.is_empty());
 
 		assert_ne!(Self::get_vault_rotation_outcome(), AsyncResult::Pending);
@@ -711,7 +711,7 @@ impl<T: Config<I>, I: 'static> VaultRotator for Pallet<T, I> {
 
 		PendingVaultRotation::<T, I>::put(VaultRotationStatus::<T, I>::new(
 			ceremony_id,
-			BTreeSet::from_iter(candidates.clone()),
+			candidates.clone(),
 		));
 
 		// Start the timer for resolving Keygen - we check this in the on_initialise() hook each

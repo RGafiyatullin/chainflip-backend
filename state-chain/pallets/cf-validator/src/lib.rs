@@ -1065,7 +1065,7 @@ impl<T: Config> Pallet<T> {
 	}
 
 	fn start_vault_rotation(rotation_state: RuntimeRotationState<T>) {
-		let candidates: Vec<_> = rotation_state.authority_candidates();
+		let candidates: BTreeSet<_> = rotation_state.authority_candidates();
 		if candidates.len() < AuthoritySetMinSize::<T>::get().into() {
 			log::warn!(
 				target: "cf-validator",

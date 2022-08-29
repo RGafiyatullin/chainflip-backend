@@ -20,6 +20,7 @@ use sp_runtime::{
 	testing::Header,
 	traits::{BlakeTwo256, IdentityLookup},
 };
+use sp_std::collections::btree_set::BTreeSet;
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -99,8 +100,8 @@ impl SignerNomination for MockNominator {
 	fn threshold_nomination_with_seed<S>(
 		_seed: S,
 		_epoch_index: EpochIndex,
-	) -> Option<Vec<Self::SignerId>> {
-		Some(vec![Self::get_nominee().unwrap()])
+	) -> Option<BTreeSet<Self::SignerId>> {
+		Some(BTreeSet::from_iter([Self::get_nominee().unwrap()]))
 	}
 }
 

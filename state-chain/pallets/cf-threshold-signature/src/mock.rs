@@ -90,17 +90,17 @@ impl Chainflip for Test {
 // Mock SignerNomination
 
 thread_local! {
-	pub static THRESHOLD_NOMINEES: std::cell::RefCell<Option<Vec<u64>>> = Default::default();
+	pub static THRESHOLD_NOMINEES: std::cell::RefCell<Option<BTreeSet<u64>>> = Default::default();
 }
 
 pub struct MockNominator;
 
 impl MockNominator {
-	pub fn set_nominees(nominees: Option<Vec<u64>>) {
+	pub fn set_nominees(nominees: Option<BTreeSet<u64>>) {
 		THRESHOLD_NOMINEES.with(|cell| *cell.borrow_mut() = nominees)
 	}
 
-	pub fn get_nominees() -> Option<Vec<u64>> {
+	pub fn get_nominees() -> Option<BTreeSet<u64>> {
 		THRESHOLD_NOMINEES.with(|cell| cell.borrow().clone())
 	}
 }
@@ -118,7 +118,7 @@ impl cf_traits::SignerNomination for MockNominator {
 	fn threshold_nomination_with_seed<H>(
 		_seed: H,
 		_epoch_index: EpochIndex,
-	) -> Option<Vec<Self::SignerId>> {
+	) -> Option<BTreeSet<Self::SignerId>> {
 		Self::get_nominees()
 	}
 }
@@ -228,7 +228,7 @@ impl ExtBuilder {
 
 	pub fn with_nominees(mut self, nominees: impl IntoIterator<Item = u64>) -> Self {
 		self.ext.execute_with(|| {
-			let nominees = Vec::from_iter(nominees);
+			let nominees = BTreeSet::from_iter(nominees);
 			MockNominator::set_nominees(if nominees.is_empty() { None } else { Some(nominees) });
 		});
 		self

@@ -228,7 +228,7 @@ impl Engine {
 
 						// Participate in signing ceremony if requested.
 						// We only need one node to submit the unsigned transaction.
-						if let Some(node_id) = signers.get(0) { if node_id == &self.node_id {
+						if let Some(node_id) = signers.iter().next() { if node_id == &self.node_id {
 							state_chain_runtime::EthereumThresholdSigner::signature_success(
 								Origin::none(),
 								*ceremony_id,
