@@ -57,7 +57,8 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
         mut message_receiver: UnboundedReceiver<(AccountId, Ceremony::Data)>,
         mut request_receiver: oneshot::Receiver<PreparedRequest<Ceremony>>,
         logger: slog::Logger,
-    ) -> CeremonyId {
+    ) -> anyhow::Result<CeremonyId> {
+        //CeremonyId {
         // We always create unauthorised first, it can get promoted to
         // an authorised one with a ceremony request
         let mut runner = Self::new_unauthorised(ceremony_id, &logger);
@@ -100,7 +101,7 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
             // There is no way to report this to the SC yet, so just ignore it.
         }
 
-        ceremony_id
+        Ok(ceremony_id)
     }
 
     /// Create ceremony state without a ceremony request (which is expected to arrive

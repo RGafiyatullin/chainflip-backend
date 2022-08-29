@@ -14,6 +14,7 @@ use crate::multisig::client::CeremonyRequestDetails;
 use crate::multisig::crypto::ECScalar;
 use crate::multisig::crypto::{CryptoScheme, ECPoint, Rng};
 use crate::multisig_p2p::OutgoingMultisigStageMessages;
+use crate::task_scope::{Scope, ScopedJoinHandle};
 use cf_traits::AuthorityCount;
 use state_chain_runtime::AccountId;
 
@@ -301,7 +302,11 @@ impl<C: CryptoScheme> CeremonyManager<C> {
         }
     }
 
-    async fn on_request(&mut self, request: CeremonyRequest<C>) {
+    async fn on_request<'a>(
+        &mut self,
+        request: CeremonyRequest<C>,
+        scope: &Scope<'a, anyhow::Result<()>, true>,
+    ) {
         // Always update the latest ceremony id, even if we are not participating
         self.update_latest_ceremony_id(request.ceremony_id);
 
@@ -311,6 +316,7 @@ impl<C: CryptoScheme> CeremonyManager<C> {
                 details.participants,
                 details.rng,
                 details.result_sender,
+                scope,
             ),
             Some(CeremonyRequestDetails::Sign(details)) => {
                 self.on_request_to_sign(
@@ -320,28 +326,30 @@ impl<C: CryptoScheme> CeremonyManager<C> {
                     details.keygen_result_info,
                     details.rng,
                     details.result_sender,
+                    scope,
                 );
             }
             None => { /* Not participating in the ceremony, so do nothing */ }
         }
     }
 
-    pub async fn run(
+    pub async fn run<'a>(
         mut self,
         mut ceremony_request_receiver: UnboundedReceiver<CeremonyRequest<C>>,
         mut incoming_p2p_message_receiver: UnboundedReceiver<(AccountId, Vec<u8>)>,
+        scope: &Scope<'a, anyhow::Result<()>, true>,
     ) {
         loop {
             tokio::select! {
                 Some(request) = ceremony_request_receiver.recv() => {
-                    self.on_request(request).await;
+                    self.on_request(request, scope).await;
                 }
                 Some((sender_id, data)) = incoming_p2p_message_receiver.recv() => {
 
                     // At this point we know the messages to be for the
                     // appropriate curve (as defined by `C`)
                     match bincode::deserialize(&data) {
-                        Ok(message) => self.process_p2p_message(sender_id, message),
+                        Ok(message) => self.process_p2p_message(sender_id, message, scope),
                         Err(_) => {
                             slog::warn!(self.logger, "Failed to deserialize message from: {}", sender_id);
                         },
@@ -358,12 +366,13 @@ impl<C: CryptoScheme> CeremonyManager<C> {
     }
 
     /// Process a keygen request
-    pub fn on_keygen_request(
+    pub fn on_keygen_request<'a>(
         &mut self,
         ceremony_id: CeremonyId,
         participants: Vec<AccountId>,
         rng: Rng,
         result_sender: CeremonyResultSender<KeygenCeremony<C>>,
+        scope: &Scope<'a, anyhow::Result<()>, true>,
     ) {
         assert!(
             !participants.is_empty(),
@@ -401,9 +410,9 @@ impl<C: CryptoScheme> CeremonyManager<C> {
             }
         };
 
-        let ceremony_handle = self
-            .keygen_states
-            .get_state_or_create_unauthorized(ceremony_id, &self.logger);
+        let ceremony_handle =
+            self.keygen_states
+                .get_state_or_create_unauthorized(ceremony_id, scope, &self.logger);
 
         ceremony_handle
             .on_request(request)
@@ -412,7 +421,7 @@ impl<C: CryptoScheme> CeremonyManager<C> {
     }
 
     /// Process a request to sign
-    pub fn on_request_to_sign(
+    pub fn on_request_to_sign<'a>(
         &mut self,
         ceremony_id: CeremonyId,
         signers: Vec<AccountId>,
@@ -420,6 +429,7 @@ impl<C: CryptoScheme> CeremonyManager<C> {
         key_info: KeygenResultInfo<C::Point>,
         rng: Rng,
         result_sender: CeremonyResultSender<SigningCeremony<C>>,
+        scope: &Scope<'a, anyhow::Result<()>, true>,
     ) {
         assert!(!signers.is_empty(), "Request to sign has no signers");
 
@@ -456,9 +466,9 @@ impl<C: CryptoScheme> CeremonyManager<C> {
         };
 
         // We have the key and have received a request to sign
-        let ceremony_handle = self
-            .signing_states
-            .get_state_or_create_unauthorized(ceremony_id, &self.logger);
+        let ceremony_handle =
+            self.signing_states
+                .get_state_or_create_unauthorized(ceremony_id, scope, &self.logger);
 
         ceremony_handle
             .on_request(request)
@@ -467,10 +477,11 @@ impl<C: CryptoScheme> CeremonyManager<C> {
     }
 
     /// Process message from another validator
-    pub fn process_p2p_message(
+    pub fn process_p2p_message<'a>(
         &mut self,
         sender_id: AccountId,
         message: MultisigMessage<C::Point>,
+        scope: &Scope<'a, anyhow::Result<()>, true>,
     ) {
         match message {
             MultisigMessage {
@@ -481,6 +492,7 @@ impl<C: CryptoScheme> CeremonyManager<C> {
                 ceremony_id,
                 data,
                 self.latest_ceremony_id,
+                scope,
                 &self
                     .logger
                     .new(slog::o!(CEREMONY_ID_KEY => ceremony_id, CEREMONY_TYPE_KEY => "keygen")),
@@ -493,6 +505,7 @@ impl<C: CryptoScheme> CeremonyManager<C> {
                 ceremony_id,
                 data,
                 self.latest_ceremony_id,
+                scope,
                 &self
                     .logger
                     .new(slog::o!(CEREMONY_ID_KEY => ceremony_id, CEREMONY_TYPE_KEY => "signing")),
@@ -586,19 +599,20 @@ impl<Ceremony: CeremonyTrait> CeremonyStates<Ceremony> {
     }
 
     /// Process ceremony data arriving from a peer,
-    fn process_data(
+    fn process_data<'a>(
         &mut self,
         sender_id: AccountId,
         ceremony_id: CeremonyId,
         data: Ceremony::Data,
         _latest_ceremony_id: CeremonyId,
+        scope: &Scope<'a, anyhow::Result<()>, true>,
         logger: &slog::Logger,
     ) {
         slog::debug!(logger, "Received data {}", &data);
 
         // TODO: Check ceremony id here, See issue #1972
 
-        let ceremony_handle = self.get_state_or_create_unauthorized(ceremony_id, logger);
+        let ceremony_handle = self.get_state_or_create_unauthorized(ceremony_id, scope, logger);
 
         ceremony_handle
             .message_sender
@@ -608,13 +622,14 @@ impl<Ceremony: CeremonyTrait> CeremonyStates<Ceremony> {
 
     /// Returns the state for the given ceremony id if it exists,
     /// otherwise creates a new unauthorized one
-    fn get_state_or_create_unauthorized(
+    fn get_state_or_create_unauthorized<'a>(
         &mut self,
         ceremony_id: CeremonyId,
+        scope: &Scope<'a, anyhow::Result<()>, true>,
         logger: &slog::Logger,
     ) -> &mut CeremonyHandle<Ceremony> {
         self.inner.entry(ceremony_id).or_insert_with(|| {
-            let (ceremony_handle, task_handle) = CeremonyHandle::spawn(ceremony_id, logger);
+            let (ceremony_handle, task_handle) = CeremonyHandle::spawn(ceremony_id, scope, logger);
 
             self.ceremony_futures.push(task_handle);
 
@@ -649,15 +664,17 @@ struct CeremonyHandle<Ceremony: CeremonyTrait> {
     pub request_sender: Option<oneshot::Sender<PreparedRequest<Ceremony>>>,
 }
 
-impl<Ceremony: CeremonyTrait> CeremonyHandle<Ceremony> {
+impl<'a, Ceremony: CeremonyTrait> CeremonyHandle<Ceremony> {
     fn spawn(
         cid: CeremonyId,
+        scope: &Scope<'a, anyhow::Result<()>, true>,
         logger: &slog::Logger,
-    ) -> (Self, tokio::task::JoinHandle<CeremonyId>) {
+    ) -> (Self, ScopedJoinHandle<CeremonyId>) {
+        //tokio::task::JoinHandle<CeremonyId>) {
         let (msg_s, msg_r) = mpsc::unbounded_channel();
         let (req_s, req_r) = oneshot::channel();
 
-        let task_handle = tokio::spawn(CeremonyRunner::<Ceremony>::run(
+        let task_handle = scope.spawn_with_handle(CeremonyRunner::<Ceremony>::run(
             cid,
             msg_r,
             req_r,
