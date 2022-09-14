@@ -241,3 +241,62 @@ async fn should_not_create_unauthorized_ceremony_with_invalid_ceremony_id() {
     .await
     .unwrap_err();
 }
+
+#[tokio::test]
+async fn should_not_timeout_unauthorized_ceremony() {
+    let latest_ceremony_id = 1;
+
+    // Create a new ceremony manager and set the latest_ceremony_id
+    let mut ceremony_manager = CeremonyManager::<EthSigning>::new(
+        ACCOUNT_IDS[0].clone(),
+        tokio::sync::mpsc::unbounded_channel().0,
+        latest_ceremony_id,
+        &new_test_logger(),
+    );
+
+    // Junk stage 1 data to use for the test
+    let stage_1_data = MultisigData::Keygen(KeygenData::HashComm1(client::keygen::HashComm1(
+        sp_core::H256::default(),
+    )));
+
+    with_task_scope(|scope| {
+        async {
+            // Process a stage 1 message with a ceremony id that is in the past
+            ceremony_manager.process_p2p_message(
+                ACCOUNT_IDS[0].clone(),
+                MultisigMessage {
+                    ceremony_id: latest_ceremony_id + 1,
+                    data: stage_1_data.clone(),
+                },
+                scope,
+            );
+
+            // tokio::time::advance or set the timeout to 0
+            // cant set timeout to 0 because we don't have access to the ceremony runner instance
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap_err();
+}
+
+#[tokio::test]
+async fn should_timeout_authorized_ceremony() {
+    // Create a new ceremony manager with the non_participating_id
+    let (p2p_sender, _p2p_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut ceremony_manager = CeremonyManager::<EthSigning>::new(
+        ACCOUNT_IDS[0].clone(),
+        p2p_sender,
+        INITIAL_LATEST_CEREMONY_ID,
+        &new_test_logger(),
+    );
+
+    // Send a signing request where participants doesn't include non_participating_id
+    let _result_receiver = run_on_request_to_sign(
+        &mut ceremony_manager,
+        BTreeSet::from_iter(ACCOUNT_IDS.iter().cloned()),
+    )
+    .await;
+}

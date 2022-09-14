@@ -304,7 +304,11 @@ impl<C: CryptoScheme> CeremonyManager<C> {
                     scope,
                 );
             }
-            None => { /* Not participating in the ceremony, so do nothing */ }
+            None => {
+                // Not participating in the ceremony, so we must abort any ceremonies with this id
+                self.signing_states.abort_any_state(request.ceremony_id);
+                self.keygen_states.abort_any_state(request.ceremony_id);
+            }
         }
     }
 
@@ -332,10 +336,10 @@ impl<C: CryptoScheme> CeremonyManager<C> {
                             }
                         }
                         Some((id, outcome)) = self.signing_states.ceremony_futures.next() => {
-                            self.signing_states.finalize_ceremony(id, outcome);
+                            self.signing_states.finalize_authorised_ceremony(id, outcome);
                         }
                         Some((id, outcome)) = self.keygen_states.ceremony_futures.next() => {
-                            self.keygen_states.finalize_ceremony(id, outcome);
+                            self.keygen_states.finalize_authorised_ceremony(id, outcome);
                         }
                     }
                 }
@@ -636,8 +640,19 @@ impl<Ceremony: CeremonyTrait> CeremonyStates<Ceremony> {
         })
     }
 
+    fn abort_any_state(&mut self, ceremony_id: CeremonyId) {
+        if let Some(ceremony_handle) = self.ceremony_handles.get_mut(&ceremony_id) {
+            ceremony_handle
+                .send_abort_command()
+                .with_context(|| {
+                    format!("Invalid ceremony request with ceremony id {}", ceremony_id)
+                })
+                .unwrap();
+        }
+    }
+
     /// Send the outcome of the ceremony and remove its state
-    fn finalize_ceremony(
+    fn finalize_authorised_ceremony(
         &mut self,
         ceremony_id: CeremonyId,
         ceremony_outcome: CeremonyOutcome<Ceremony>,
@@ -652,8 +667,11 @@ impl<Ceremony: CeremonyTrait> CeremonyStates<Ceremony> {
                 let _result = result_sender.send(ceremony_outcome);
             }
             CeremonyRequestState::Unauthorised(_) => {
-                // Only caused by `CeremonyFailureReason::ExpiredBeforeBeingAuthorized`,
-                // We do not report timeout of unauthorised ceremonies
+                panic!("Expected an authorised ceremony");
+            }
+            CeremonyRequestState::Aborted => {
+                // Ceremony was aborted, ignore any outcome.
+                slog::debug!(logger, ""); // TODO JAMIE: log the error here
             }
         }
     }
@@ -686,10 +704,16 @@ struct CeremonyHandle<Ceremony: CeremonyTrait> {
 enum CeremonyRequestState<Ceremony: CeremonyTrait> {
     /// Initial state before we have received the request from the SC.
     /// Contains the oneshot channel used to relay the request to the ceremony task.
-    Unauthorised(oneshot::Sender<PreparedRequest<Ceremony>>),
+    Unauthorised(oneshot::Sender<CeremonyRequestCommand<Ceremony>>),
     /// State after receiving the request from the SC.
     /// Contains the result sender that is used to send the ceremony outcome.
     Authorised(CeremonyResultSender<Ceremony>),
+    Aborted,
+}
+
+pub enum CeremonyRequestCommand<Ceremony: CeremonyTrait> {
+    Authorize(PreparedRequest<Ceremony>),
+    Abort,
 }
 
 impl<Ceremony: CeremonyTrait> CeremonyHandle<Ceremony> {
@@ -727,13 +751,30 @@ impl<Ceremony: CeremonyTrait> CeremonyHandle<Ceremony> {
     ) -> Result<()> {
         // Transition to an authorized state by consuming the
         // request sender and storing the result sender
-        if let CeremonyRequestState::Unauthorised(request_sender) = std::mem::replace(
+        match std::mem::replace(
             &mut self.request_state,
             CeremonyRequestState::Authorised(result_sender),
         ) {
-            let _res = request_sender.send(request);
+            CeremonyRequestState::Unauthorised(request_sender) => {
+                let _res = request_sender.send(CeremonyRequestCommand::Authorize(request));
+                Ok(())
+            }
+            CeremonyRequestState::Authorised(_) => {
+                // Already in an authorised state, a request has already been sent to a ceremony with this id
+                bail!("Duplicate ceremony id");
+            }
+            CeremonyRequestState::Aborted => {
+                bail!("Ceremony unexpectedly in aborted state");
+            }
+        }
+    }
+
+    fn send_abort_command(&mut self) -> Result<()> {
+        if let CeremonyRequestState::Unauthorised(request_sender) =
+            std::mem::replace(&mut self.request_state, CeremonyRequestState::Aborted)
+        {
+            let _res = request_sender.send(CeremonyRequestCommand::Abort);
         } else {
-            // Already in an authorised state, a request has already been sent to a ceremony with this id
             bail!("Duplicate ceremony id");
         }
 

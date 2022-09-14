@@ -20,7 +20,9 @@ use crate::{
 use state_chain_runtime::{constants::common::MAX_STAGE_DURATION_SECONDS, AccountId};
 
 use super::{
-    ceremony_manager::{CeremonyOutcome, CeremonyTrait, DynStage, PreparedRequest},
+    ceremony_manager::{
+        CeremonyOutcome, CeremonyRequestCommand, CeremonyTrait, DynStage, PreparedRequest,
+    },
     common::{CeremonyFailureReason, PreProcessStageDataCheck},
 };
 
@@ -53,7 +55,7 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
     pub async fn run(
         ceremony_id: CeremonyId,
         mut message_receiver: UnboundedReceiver<(AccountId, Ceremony::Data)>,
-        mut request_receiver: oneshot::Receiver<PreparedRequest<Ceremony>>,
+        mut request_receiver: oneshot::Receiver<CeremonyRequestCommand<Ceremony>>,
         logger: slog::Logger,
     ) -> Result<(CeremonyId, CeremonyOutcome<Ceremony>)> {
         // We always create unauthorised first, it can get promoted to
@@ -71,19 +73,24 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
                 }
                 request = &mut request_receiver => {
 
-                    let PreparedRequest { initial_stage } = request.expect("Ceremony request channel was dropped unexpectedly");
-
-                    if let Some(result) = runner.on_ceremony_request(initial_stage).await {
-                        break result;
+                    match request.expect("Ceremony request channel was dropped unexpectedly") {
+                        CeremonyRequestCommand::Authorize(PreparedRequest { initial_stage }) => {
+                            if let Some(result) = runner.on_ceremony_request(initial_stage).await {
+                                break result;
+                            }
+                        }
+                        CeremonyRequestCommand::Abort => {
+                            break Err((BTreeSet::default(), CeremonyFailureReason::NotParticipatingInUnauthorisedCeremony));
+                        }
                     }
 
                 }
                 () = runner.timeout_handle.as_mut() => {
-
-                    if let Some(result) = runner.on_timeout().await {
-                        break result;
+                    if runner.stage.is_some() {
+                       if let Some(result) = runner.on_timeout().await {
+                            break result;
+                        }
                     }
-
                 }
             }
         };
@@ -297,54 +304,35 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
     }
 
     async fn on_timeout(&mut self) -> OptionalCeremonyReturn<Ceremony> {
-        match &self.stage {
-            None => {
-                // Report the parties that tried to initiate the ceremony.
-                let reported_ids = self
-                    .delayed_messages
-                    .iter()
-                    .map(|(id, _)| id.clone())
-                    .collect();
+        if let Some(stage) = &self.stage {
+            // We can't simply abort here as we don't know whether other
+            // participants are going to do the same (e.g. if a malicious
+            // node targeted us by communicating with everyone but us, it
+            // would look to the rest of the network like we are the culprit).
+            // Instead, we delegate the responsibility to the concrete stage
+            // implementation to try to recover or agree on who to report.
 
-                slog::warn!(
-                    self.logger,
-                    "Ceremony expired before being authorized, reporting parties: {}",
-                    format_iterator(&reported_ids)
-                );
-
-                Some(Err((
-                    reported_ids,
-                    CeremonyFailureReason::ExpiredBeforeBeingAuthorized,
-                )))
-            }
-            Some(stage) => {
-                // We can't simply abort here as we don't know whether other
-                // participants are going to do the same (e.g. if a malicious
-                // node targeted us by communicating with everyone but us, it
-                // would look to the rest of the network like we are the culprit).
-                // Instead, we delegate the responsibility to the concrete stage
-                // implementation to try to recover or agree on who to report.
-
-                slog::warn!(
+            slog::warn!(
                         self.logger,
                         "Ceremony stage timed out before all messages collected; trying to finalize current stage anyway"
                     );
 
-                // Log the account ids of the missing messages
-                let missing_messages_from_accounts = stage
-                    .ceremony_common()
-                    .validator_mapping
-                    .get_ids(stage.awaited_parties());
-                slog::debug!(
-                    self.logger,
-                    "Stage `{}` is missing messages from {} parties",
-                    stage.get_stage_name(),
-                    missing_messages_from_accounts.len();
-                    "missing_ids" => format_iterator(missing_messages_from_accounts).to_string()
-                );
+            // Log the account ids of the missing messages
+            let missing_messages_from_accounts = stage
+                .ceremony_common()
+                .validator_mapping
+                .get_ids(stage.awaited_parties());
+            slog::debug!(
+                self.logger,
+                "Stage `{}` is missing messages from {} parties",
+                stage.get_stage_name(),
+                missing_messages_from_accounts.len();
+                "missing_ids" => format_iterator(missing_messages_from_accounts).to_string()
+            );
 
-                self.finalize_current_stage().await
-            }
+            self.finalize_current_stage().await
+        } else {
+            panic!("Unauthorised ceremonies cannot timeout");
         }
     }
 }
