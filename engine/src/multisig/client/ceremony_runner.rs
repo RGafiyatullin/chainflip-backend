@@ -55,14 +55,19 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
     pub async fn run(
         ceremony_id: CeremonyId,
         mut message_receiver: UnboundedReceiver<(AccountId, Ceremony::Data)>,
-        mut request_receiver: oneshot::Receiver<CeremonyRequestCommand<Ceremony>>,
+        request_receiver: oneshot::Receiver<CeremonyRequestCommand<Ceremony>>,
         logger: slog::Logger,
     ) -> Result<(CeremonyId, CeremonyOutcome<Ceremony>)> {
         // We always create unauthorised first, it can get promoted to
         // an authorised one with a ceremony request
         let mut runner = Self::new_unauthorised(ceremony_id, &logger);
 
+        let mut request_receiver = FutureExt::fuse(request_receiver);
+
+        println!("Ceremony runner entering run loop"); // TODO JAMIE: remove me
+
         let outcome = loop {
+            println!("running select macro");
             tokio::select! {
                 Some((sender_id, message)) = message_receiver.recv() => {
 
@@ -72,7 +77,7 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
 
                 }
                 request = &mut request_receiver => {
-
+                    println!("Got CeremonyRequestCommand"); // TODO JAMIE: remove me
                     match request.expect("Ceremony request channel was dropped unexpectedly") {
                         CeremonyRequestCommand::Authorize(PreparedRequest { initial_stage }) => {
                             if let Some(result) = runner.on_ceremony_request(initial_stage).await {
@@ -88,6 +93,7 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
                 () = runner.timeout_handle.as_mut() => {
                     if runner.stage.is_some() {
                        if let Some(result) = runner.on_timeout().await {
+                            println!("Ceremony timeout"); // TODO JAMIE: remove me
                             break result;
                         }
                     }

@@ -336,10 +336,10 @@ impl<C: CryptoScheme> CeremonyManager<C> {
                             }
                         }
                         Some((id, outcome)) = self.signing_states.ceremony_futures.next() => {
-                            self.signing_states.finalize_authorised_ceremony(id, outcome);
+                            self.signing_states.finalize_ceremony(id, outcome, &self.logger);
                         }
                         Some((id, outcome)) = self.keygen_states.ceremony_futures.next() => {
-                            self.keygen_states.finalize_authorised_ceremony(id, outcome);
+                            self.keygen_states.finalize_ceremony(id, outcome, &self.logger);
                         }
                     }
                 }
@@ -652,10 +652,11 @@ impl<Ceremony: CeremonyTrait> CeremonyStates<Ceremony> {
     }
 
     /// Send the outcome of the ceremony and remove its state
-    fn finalize_authorised_ceremony(
+    fn finalize_ceremony(
         &mut self,
         ceremony_id: CeremonyId,
         ceremony_outcome: CeremonyOutcome<Ceremony>,
+        logger: &slog::Logger,
     ) {
         match self
             .ceremony_handles
@@ -667,11 +668,14 @@ impl<Ceremony: CeremonyTrait> CeremonyStates<Ceremony> {
                 let _result = result_sender.send(ceremony_outcome);
             }
             CeremonyRequestState::Unauthorised(_) => {
-                panic!("Expected an authorised ceremony");
+                panic!("Cannot finalize an unauthorised ceremony");
             }
             CeremonyRequestState::Aborted => {
                 // Ceremony was aborted, ignore any outcome.
-                slog::debug!(logger, ""); // TODO JAMIE: log the error here
+                slog::debug!(
+                    logger,
+                    "Unauthorised ceremony aborted due to non-participation"; CEREMONY_ID_KEY => ceremony_id
+                );
             }
         }
     }
@@ -756,7 +760,11 @@ impl<Ceremony: CeremonyTrait> CeremonyHandle<Ceremony> {
             CeremonyRequestState::Authorised(result_sender),
         ) {
             CeremonyRequestState::Unauthorised(request_sender) => {
-                let _res = request_sender.send(CeremonyRequestCommand::Authorize(request));
+                println!("Sent CeremonyRequestCommand::Authorize");
+                request_sender
+                    .send(CeremonyRequestCommand::Authorize(request))
+                    .map_err(|_| anyhow::anyhow!("Failed to send ceremony request"))
+                    .unwrap();
                 Ok(())
             }
             CeremonyRequestState::Authorised(_) => {

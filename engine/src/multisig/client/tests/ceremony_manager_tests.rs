@@ -6,8 +6,11 @@ use crate::{
     logging::test_utils::new_test_logger,
     multisig::{
         client::{
-            self, ceremony_manager::CeremonyManager, common::SigningFailureReason,
-            keygen::KeygenData, CeremonyFailureReason, MultisigData,
+            self,
+            ceremony_manager::CeremonyManager,
+            common::{BroadcastFailureReason, CeremonyStageName, SigningFailureReason},
+            keygen::KeygenData,
+            CeremonyFailureReason, MultisigData,
         },
         crypto::{CryptoScheme, Rng},
         eth::EthSigning,
@@ -20,6 +23,7 @@ use client::MultisigMessage;
 use futures::{Future, FutureExt};
 use rand_legacy::SeedableRng;
 use sp_runtime::AccountId32;
+use state_chain_runtime::constants::common::MAX_STAGE_DURATION_SECONDS;
 use tokio::sync::oneshot;
 use utilities::threshold_from_share_count;
 
@@ -271,8 +275,10 @@ async fn should_not_timeout_unauthorized_ceremony() {
                 scope,
             );
 
-            // tokio::time::advance or set the timeout to 0
-            // cant set timeout to 0 because we don't have access to the ceremony runner instance
+            tokio::time::advance(tokio::time::Duration::from_secs(
+                (MAX_STAGE_DURATION_SECONDS as u64) * 2,
+            ))
+            .await;
 
             Ok(())
         }
@@ -284,19 +290,101 @@ async fn should_not_timeout_unauthorized_ceremony() {
 
 #[tokio::test]
 async fn should_timeout_authorized_ceremony() {
-    // Create a new ceremony manager with the non_participating_id
-    let (p2p_sender, _p2p_receiver) = tokio::sync::mpsc::unbounded_channel();
-    let mut ceremony_manager = CeremonyManager::<EthSigning>::new(
-        ACCOUNT_IDS[0].clone(),
-        p2p_sender,
-        INITIAL_LATEST_CEREMONY_ID,
-        &new_test_logger(),
-    );
+    with_task_scope(|scope| {
+        let future: Pin<Box<dyn Future<Output = Result<()>> + Send>> = async {
+            // Create a new ceremony manager with the non_participating_id
+            let (p2p_sender, _p2p_receiver) = tokio::sync::mpsc::unbounded_channel();
+            let mut ceremony_manager = CeremonyManager::<EthSigning>::new(
+                ACCOUNT_IDS[0].clone(),
+                p2p_sender,
+                INITIAL_LATEST_CEREMONY_ID,
+                &new_test_logger(),
+            );
 
-    // Send a signing request where participants doesn't include non_participating_id
-    let _result_receiver = run_on_request_to_sign(
-        &mut ceremony_manager,
-        BTreeSet::from_iter(ACCOUNT_IDS.iter().cloned()),
-    )
-    .await;
+            // Send a signing request
+            let (result_sender, mut result_receiver) = oneshot::channel();
+            ceremony_manager.on_request_to_sign(
+                DEFAULT_SIGNING_CEREMONY_ID,
+                BTreeSet::from_iter(ACCOUNT_IDS.iter().cloned()),
+                MESSAGE_HASH.clone(),
+                get_key_data_for_test(BTreeSet::from_iter(ACCOUNT_IDS.iter().cloned())),
+                Rng::from_seed(DEFAULT_SIGNING_SEED),
+                result_sender,
+                scope,
+            );
+
+            //tokio::time::sleep(std::time::Duration::from_secs(32)).await;
+
+            //
+            tokio::time::pause();
+            tokio::time::advance(tokio::time::Duration::from_secs(
+                (MAX_STAGE_DURATION_SECONDS as u64) * 2,
+            ))
+            .await;
+            tokio::time::resume();
+            println!("advanced time");
+
+            //tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+            let (_ceremony_request_sender, ceremony_request_receiver) =
+                tokio::sync::mpsc::unbounded_channel();
+            let (_p2p_message_sender, p2p_message_receiver) =
+                tokio::sync::mpsc::unbounded_channel();
+            let _res = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                ceremony_manager.run(ceremony_request_receiver, p2p_message_receiver),
+            )
+            .await;
+            println!("ran ceremony manager");
+
+            assert_eq!(
+                result_receiver
+                    .try_recv()
+                    .expect("Failed to receive ceremony result"),
+                Err((
+                    BTreeSet::default(),
+                    CeremonyFailureReason::BroadcastFailure(
+                        BroadcastFailureReason::InsufficientVerificationMessages,
+                        CeremonyStageName::VerifyCommitmentsBroadcast2
+                    ),
+                ))
+            );
+
+            println!("Test passed :)");
+
+            anyhow::bail!("End the future so we can complete the test");
+        }
+        .boxed();
+        future
+    })
+    .await
+    .unwrap_err();
+}
+
+// #[tokio::test]
+// async fn test() {
+//     with_task_scope(|scope| async { Ok(()) }.boxed())
+//         .await
+//         .unwrap();
+// }
+
+#[tokio::test]
+async fn oneshot_test() {
+    let (tx1, rx1) = tokio::sync::oneshot::channel();
+
+    tokio::spawn(async move {
+        let _ = tx1.send("one");
+    });
+
+    use futures::FutureExt;
+    let mut rx1 = rx1.fuse();
+
+    loop {
+        println!("loop");
+        tokio::select! {
+            val = &mut rx1 => {
+                println!("rx1  {:?}", val);
+            }
+        }
+    }
 }
