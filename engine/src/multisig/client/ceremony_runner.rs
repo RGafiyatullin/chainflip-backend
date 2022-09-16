@@ -91,9 +91,10 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
 
                 }
                 () = runner.timeout_handle.as_mut() => {
+                    println!("timeout_handle triggered {:?}",tokio::time::Instant::now());
                     if runner.stage.is_some() {
-                       if let Some(result) = runner.on_timeout().await {
-                            println!("Ceremony timeout"); // TODO JAMIE: remove me
+                        println!("Ceremony timeout"); // TODO JAMIE: remove me
+                        if let Some(result) = runner.on_timeout().await {
                             break result;
                         }
                     }
@@ -177,6 +178,7 @@ impl<Ceremony: CeremonyTrait> CeremonyRunner<Ceremony> {
                 self.process_delayed().await
             }
             StageResult::Error(bad_validators, reason) => {
+                println!("returning failure ceremony outcome");
                 Some(Err((validator_mapping.get_ids(bad_validators), reason)))
             }
             StageResult::Done(result) => {

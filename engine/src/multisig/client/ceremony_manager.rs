@@ -336,9 +336,11 @@ impl<C: CryptoScheme> CeremonyManager<C> {
                             }
                         }
                         Some((id, outcome)) = self.signing_states.ceremony_futures.next() => {
+                            println!("signing ceremony finished");
                             self.signing_states.finalize_ceremony(id, outcome, &self.logger);
                         }
                         Some((id, outcome)) = self.keygen_states.ceremony_futures.next() => {
+                            println!("keygen ceremony finished");
                             self.keygen_states.finalize_ceremony(id, outcome, &self.logger);
                         }
                     }

@@ -10,7 +10,8 @@ use crate::{
             ceremony_manager::CeremonyManager,
             common::{BroadcastFailureReason, CeremonyStageName, SigningFailureReason},
             keygen::KeygenData,
-            CeremonyFailureReason, MultisigData,
+            CeremonyFailureReason, CeremonyRequest, CeremonyRequestDetails, MultisigData,
+            SigningRequestDetails,
         },
         crypto::{CryptoScheme, Rng},
         eth::EthSigning,
@@ -290,101 +291,118 @@ async fn should_not_timeout_unauthorized_ceremony() {
 
 #[tokio::test]
 async fn should_timeout_authorized_ceremony() {
-    with_task_scope(|scope| {
-        let future: Pin<Box<dyn Future<Output = Result<()>> + Send>> = async {
-            // Create a new ceremony manager with the non_participating_id
-            let (p2p_sender, _p2p_receiver) = tokio::sync::mpsc::unbounded_channel();
-            let mut ceremony_manager = CeremonyManager::<EthSigning>::new(
-                ACCOUNT_IDS[0].clone(),
-                p2p_sender,
-                INITIAL_LATEST_CEREMONY_ID,
-                &new_test_logger(),
-            );
+    // we need to timeout 2 stages because the verification stage will try and recover, so the timeout is doubled.
+    let timeout_millis = (MAX_STAGE_DURATION_SECONDS * 2 * 1000) as u64;
 
-            // Send a signing request
-            let (result_sender, mut result_receiver) = oneshot::channel();
-            ceremony_manager.on_request_to_sign(
-                DEFAULT_SIGNING_CEREMONY_ID,
-                BTreeSet::from_iter(ACCOUNT_IDS.iter().cloned()),
-                MESSAGE_HASH.clone(),
-                get_key_data_for_test(BTreeSet::from_iter(ACCOUNT_IDS.iter().cloned())),
-                Rng::from_seed(DEFAULT_SIGNING_SEED),
+    // Create a new ceremony manager
+    let (p2p_sender, _p2p_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let ceremony_manager = CeremonyManager::<EthSigning>::new(
+        ACCOUNT_IDS[0].clone(),
+        p2p_sender,
+        INITIAL_LATEST_CEREMONY_ID,
+        &new_test_logger(),
+    );
+
+    let (ceremony_request_sender, ceremony_request_receiver) =
+        tokio::sync::mpsc::unbounded_channel();
+    let (_p2p_message_sender, p2p_message_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (result_sender, mut result_receiver) = oneshot::channel();
+
+    let request_future = async move {
+        // Send a signing request
+        let _result = ceremony_request_sender.send(CeremonyRequest {
+            ceremony_id: INITIAL_LATEST_CEREMONY_ID + 1,
+            details: Some(CeremonyRequestDetails::Sign(SigningRequestDetails {
+                participants: BTreeSet::from_iter(ACCOUNT_IDS.iter().cloned()),
+                data: MESSAGE_HASH.clone(),
+                keygen_result_info: get_key_data_for_test(BTreeSet::from_iter(
+                    ACCOUNT_IDS.iter().cloned(),
+                )),
+                rng: Rng::from_seed(DEFAULT_SIGNING_SEED),
                 result_sender,
-                scope,
-            );
+            })),
+        });
 
-            //tokio::time::sleep(std::time::Duration::from_secs(32)).await;
+        // We have to wait a small amount of time for the request to spawn the task and start the timeout timer
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
 
-            //
-            tokio::time::pause();
-            tokio::time::advance(tokio::time::Duration::from_secs(
-                (MAX_STAGE_DURATION_SECONDS as u64) * 2,
-            ))
-            .await;
-            tokio::time::resume();
-            println!("advanced time");
+        // Advance time so ceremony times out
+        tokio::time::pause();
+        tokio::time::advance(tokio::time::Duration::from_millis(timeout_millis)).await;
+        tokio::time::resume();
+        println!("advanced time");
+    };
 
-            //tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    let ceremony_manager_future = tokio::time::timeout(
+        // This timeout needs to be larger then the amount of time advanced or else
+        // the advance of time will cause this timeout to trigger before running the future at all.
+        std::time::Duration::from_millis(timeout_millis + 1000),
+        async {
+            tokio::select! {
+                _ = ceremony_manager.run(ceremony_request_receiver, p2p_message_receiver) => {}
+                outcome = &mut result_receiver =>{
+                    assert_eq!(
+                        outcome.unwrap(),
+                        Err((
+                            BTreeSet::default(),
+                            CeremonyFailureReason::BroadcastFailure(
+                                BroadcastFailureReason::InsufficientVerificationMessages,
+                                CeremonyStageName::VerifyCommitmentsBroadcast2
+                            ),
+                        ))
+                    );
+                }
+            }
+        },
+    );
 
-            let (_ceremony_request_sender, ceremony_request_receiver) =
-                tokio::sync::mpsc::unbounded_channel();
-            let (_p2p_message_sender, p2p_message_receiver) =
-                tokio::sync::mpsc::unbounded_channel();
-            let _res = tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                ceremony_manager.run(ceremony_request_receiver, p2p_message_receiver),
-            )
-            .await;
-            println!("ran ceremony manager");
+    let (_, ceremony_manager_result) = tokio::join!(request_future, ceremony_manager_future);
 
-            assert_eq!(
-                result_receiver
-                    .try_recv()
-                    .expect("Failed to receive ceremony result"),
-                Err((
-                    BTreeSet::default(),
-                    CeremonyFailureReason::BroadcastFailure(
-                        BroadcastFailureReason::InsufficientVerificationMessages,
-                        CeremonyStageName::VerifyCommitmentsBroadcast2
-                    ),
-                ))
-            );
-
-            println!("Test passed :)");
-
-            anyhow::bail!("End the future so we can complete the test");
-        }
-        .boxed();
-        future
-    })
-    .await
-    .unwrap_err();
+    // Make sure that an outcome was received
+    utilities::assert_ok!(ceremony_manager_result);
 }
 
-// #[tokio::test]
-// async fn test() {
-//     with_task_scope(|scope| async { Ok(()) }.boxed())
-//         .await
-//         .unwrap();
-// }
-
 #[tokio::test]
-async fn oneshot_test() {
-    let (tx1, rx1) = tokio::sync::oneshot::channel();
+async fn test_time_advance() {
+    let ceremony_runner_run = async {
+        let mut timer = Box::pin(tokio::time::sleep(std::time::Duration::from_secs(10)));
 
-    tokio::spawn(async move {
-        let _ = tx1.send("one");
-    });
-
-    use futures::FutureExt;
-    let mut rx1 = rx1.fuse();
-
-    loop {
-        println!("loop");
+        println!("starting");
         tokio::select! {
-            val = &mut rx1 => {
-                println!("rx1  {:?}", val);
+            () = timer.as_mut() => {
+                println!("triggered");
             }
         }
-    }
+        Ok(())
+    };
+
+    let ceremony_manager_run = async {
+        with_task_scope(|scope| {
+            async {
+                let _handle = scope.spawn_with_handle(ceremony_runner_run);
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                Ok(())
+            }
+            .boxed()
+        })
+        .await
+    };
+
+    let request_future = async {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        println!("advancing time");
+
+        tokio::time::pause();
+        tokio::time::advance(tokio::time::Duration::from_secs(20)).await;
+        tokio::time::resume();
+
+        println!("done advancing time");
+
+        //tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+    };
+
+    let (_, _) = tokio::join!(request_future, ceremony_manager_run);
+
+    println!("test over");
 }
