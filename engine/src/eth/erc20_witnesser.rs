@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, pin::Pin, sync::Arc};
 
 use async_trait::async_trait;
 use cf_primitives::{Asset, EpochIndex};
@@ -11,7 +11,8 @@ use web3::{
 use crate::state_chain_observer::client::{StateChainClient, StateChainRpcApi};
 
 use super::{
-    event::Event, rpc::EthRpcApi, utils, DecodeLogClosure, EthContractWitnesser, SignatureAndEvent,
+    contract_witnesser::ContractStateUpdate, event::Event, rpc::EthRpcApi, utils, DecodeLogClosure,
+    EthContractWitnesser, SignatureAndEvent,
 };
 
 // These are the two events that must be supported as part of the ERC20 standard
@@ -41,18 +42,62 @@ pub struct Erc20Witnesser {
     pub deployed_address: H160,
     asset: Asset,
     contract: ethabi::Contract,
-    monitored_addresses: BTreeSet<H160>,
 }
 
 impl Erc20Witnesser {
     /// Loads the contract abi to get the event definitions
-    pub fn new(deployed_address: H160, asset: Asset, monitored_addresses: BTreeSet<H160>) -> Self {
+    pub fn new(deployed_address: H160, asset: Asset) -> Self {
         Self {
             deployed_address,
             asset,
             contract: ethabi::Contract::load(std::include_bytes!("abis/ERC20.json").as_ref())
                 .unwrap(),
+        }
+    }
+}
+
+pub struct Erc20WitnesserState {
+    monitored_addresses: BTreeSet<H160>,
+    address_receiver: tokio::sync::mpsc::UnboundedReceiver<H160>,
+}
+
+impl Erc20WitnesserState {
+    pub fn new(
+        monitored_addresses: BTreeSet<H160>,
+        address_receiver: tokio::sync::mpsc::UnboundedReceiver<H160>,
+    ) -> Self {
+        Self {
             monitored_addresses,
+            address_receiver,
+        }
+    }
+}
+
+impl ContractStateUpdate for Erc20WitnesserState {
+    type Item = H160;
+
+    type Event = Erc20Event;
+
+    fn next_item_to_update(
+        &mut self,
+    ) -> Pin<Box<dyn futures::Future<Output = Option<Self::Item>> + Send + '_>> {
+        Box::pin(self.address_receiver.recv())
+    }
+
+    fn update_state(&mut self, new_address: Self::Item) {
+        self.monitored_addresses.insert(new_address);
+    }
+
+    fn should_act_on(&self, event: &Self::Event) -> bool {
+        if let Erc20Event::Transfer {
+            from: _,
+            to,
+            value: _,
+        } = event
+        {
+            self.monitored_addresses.contains(to)
+        } else {
+            false
         }
     }
 }
@@ -66,20 +111,30 @@ impl EthContractWitnesser for Erc20Witnesser {
         "ERC20"
     }
 
-    async fn handle_event<RpcClient, EthRpcClient>(
+    async fn handle_event<RpcClient, EthRpcClient, ContractWitnesserState>(
         &self,
-        epoch: EpochIndex,
+        _epoch: EpochIndex,
         _block_number: u64,
         event: Event<Self::EventParameters>,
-        state_chain_client: Arc<StateChainClient<RpcClient>>,
+        filter_state: &ContractWitnesserState,
+        _state_chain_client: Arc<StateChainClient<RpcClient>>,
         _eth_rpc: &EthRpcClient,
         logger: &slog::Logger,
     ) -> Result<()>
     where
         RpcClient: 'static + StateChainRpcApi + Sync + Send,
         EthRpcClient: EthRpcApi + Sync + Send,
+        ContractWitnesserState: Send + Sync + ContractStateUpdate<Event = Self::EventParameters>,
     {
-        todo!("Handle the events");
+        if filter_state.should_act_on(&event.event_parameters) {
+            slog::info!(
+                logger,
+                "Definitely act on this event: {:?}. Asset: {:?}",
+                event,
+                self.asset
+            );
+        }
+        Ok(())
     }
 
     fn get_contract_address(&self) -> H160 {
@@ -121,7 +176,7 @@ impl EthContractWitnesser for Erc20Witnesser {
 // approval: 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925
 #[test]
 fn generate_signatures() {
-    let contract = Erc20Witnesser::new(H160::default(), Asset::Flip, Default::default()).contract;
+    let contract = Erc20Witnesser::new(H160::default(), Asset::Flip).contract;
 
     let transfer = SignatureAndEvent::new(&contract, "Transfer").unwrap();
     println!("transfer: {:?}", transfer.signature);
@@ -138,12 +193,12 @@ mod tests {
     #[test]
     fn test_load_contract() {
         let address = H160::default();
-        Erc20Witnesser::new(address, Asset::Flip, Default::default());
+        Erc20Witnesser::new(address, Asset::Flip);
     }
 
     #[test]
     fn test_transfer_log_parsing() {
-        let erc20_witnesser = Erc20Witnesser::new(H160::default(), Asset::Flip, Default::default());
+        let erc20_witnesser = Erc20Witnesser::new(H160::default(), Asset::Flip);
         let decode_log = erc20_witnesser.decode_log_closure().unwrap();
 
         let transfer_event_signature =
@@ -194,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_approval_log_parsing() {
-        let erc20_witnesser = Erc20Witnesser::new(H160::default(), Asset::Flip, Default::default());
+        let erc20_witnesser = Erc20Witnesser::new(H160::default(), Asset::Flip);
         let decode_log = erc20_witnesser.decode_log_closure().unwrap();
 
         let approval_event_signature =
