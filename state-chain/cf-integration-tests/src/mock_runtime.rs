@@ -83,7 +83,7 @@ impl ExtBuilder {
 					})
 					.collect::<Vec<_>>(),
 			},
-			flip: FlipConfig { total_issuance: TOTAL_ISSUANCE },
+			flip: FlipConfig { total_issuance: TOTAL_ISSUANCE, alice_fund: None },
 			staking: StakingConfig {
 				genesis_stakers: self.accounts.clone(),
 				minimum_stake: DEFAULT_MIN_STAKE,

@@ -211,19 +211,30 @@ pub mod pallet {
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
 		pub total_issuance: T::Balance,
+		pub alice_fund: Option<(T::AccountId, T::Balance)>,
 	}
 
 	#[cfg(feature = "std")]
 	impl<T: Config> Default for GenesisConfig<T> {
 		fn default() -> Self {
 			use sp_runtime::traits::Zero;
-			Self { total_issuance: Zero::zero() }
+			Self { total_issuance: Zero::zero(), alice_fund: None }
 		}
 	}
 
 	#[pallet::genesis_build]
 	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
 		fn build(&self) {
+			// TEMP:
+			/// Generate a crypto pair from seed.
+			use sp_runtime::traits::Zero;
+			if let Some((alice, amount)) = &self.alice_fund {
+				Account::<T>::insert(
+					alice,
+					FlipAccount::<T::Balance> { stake: *amount, bond: Zero::zero() },
+				);
+			}
+
 			TotalIssuance::<T>::set(self.total_issuance);
 			OffchainFunds::<T>::set(self.total_issuance);
 			SlashingRate::<T>::set(Default::default());

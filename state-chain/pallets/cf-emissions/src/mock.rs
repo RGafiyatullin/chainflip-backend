@@ -252,7 +252,7 @@ pub fn new_test_ext(validators: Vec<u64>, issuance: Option<u128>) -> sp_io::Test
 	let total_issuance = issuance.unwrap_or(1_000_000_000u128);
 	let config = GenesisConfig {
 		system: Default::default(),
-		flip: FlipConfig { total_issuance },
+		flip: FlipConfig { total_issuance, alice_fund: None },
 		emissions: {
 			EmissionsConfig {
 				current_authority_emission_inflation: 2720,

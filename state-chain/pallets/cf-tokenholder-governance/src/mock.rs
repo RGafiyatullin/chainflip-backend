@@ -223,7 +223,10 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		(BROKE_PAUL, ProposalFee::get() - 1),
 	];
 	let total_issuance = stakes.iter().map(|(_, stake)| stake).sum();
-	let config = GenesisConfig { system: Default::default(), flip: FlipConfig { total_issuance } };
+	let config = GenesisConfig {
+		system: Default::default(),
+		flip: FlipConfig { total_issuance, alice_fund: None },
+	};
 
 	let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
 

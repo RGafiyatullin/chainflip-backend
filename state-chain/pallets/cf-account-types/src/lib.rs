@@ -55,13 +55,14 @@ pub mod pallet {
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config<I>, I: 'static = ()> {
 		pub genesis_authorities: Vec<T::AccountId>,
+		pub lp: Option<T::AccountId>,
 		pub _phantom: PhantomData<I>,
 	}
 
 	#[cfg(feature = "std")]
 	impl<T: Config<I>, I: 'static> Default for GenesisConfig<T, I> {
 		fn default() -> Self {
-			Self { genesis_authorities: Default::default(), _phantom: PhantomData }
+			Self { genesis_authorities: Default::default(), lp: None, _phantom: PhantomData }
 		}
 	}
 
@@ -70,6 +71,10 @@ pub mod pallet {
 		fn build(&self) {
 			for authority in &self.genesis_authorities {
 				AccountRoles::<T, I>::insert(authority, AccountRole::Validator);
+			}
+
+			if let Some(lp) = &self.lp {
+				AccountRoles::<T, I>::insert(lp, AccountRole::LiquidityProvider);
 			}
 		}
 	}

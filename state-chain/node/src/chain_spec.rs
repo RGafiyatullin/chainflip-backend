@@ -46,7 +46,7 @@ pub fn get_account_id_from_seed<TPublic: Public>(seed: &str) -> AccountId
 where
 	AccountPublic: From<<TPublic::Pair as Pair>::Public>,
 {
-	AccountPublic::from(get_from_seed::<TPublic>(seed)).into_account()
+	<Signature as Verify>::Signer::from(get_from_seed::<TPublic>(seed)).into_account()
 }
 
 /// generate session keys from Aura and Grandpa keys
@@ -597,6 +597,7 @@ fn testnet_genesis(
 	GenesisConfig {
 		account_types: AccountTypesConfig {
 			genesis_authorities: authority_ids.clone(),
+			lp: Some(authority_keys_from_seed("Alice").0),
 			_phantom: PhantomData,
 		},
 		system: SystemConfig {
@@ -629,7 +630,10 @@ fn testnet_genesis(
 				.map(|x| (x.0.clone(), x.0.clone(), session_keys(x.1.clone(), x.2.clone())))
 				.collect::<Vec<_>>(),
 		},
-		flip: FlipConfig { total_issuance: TOTAL_ISSUANCE },
+		flip: FlipConfig {
+			total_issuance: TOTAL_ISSUANCE,
+			alice_fund: Some((authority_keys_from_seed("Alice").0, 50000)),
+		},
 		staking: StakingConfig {
 			genesis_stakers: genesis_stakers
 				.iter()

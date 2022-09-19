@@ -122,7 +122,7 @@ pub fn check_balance_integrity() -> bool {
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	let config = GenesisConfig {
 		system: Default::default(),
-		flip: FlipConfig { total_issuance: 1_000 },
+		flip: FlipConfig { total_issuance: 1_000, alice_fund: None },
 		transaction_payment: Default::default(),
 	};
 
