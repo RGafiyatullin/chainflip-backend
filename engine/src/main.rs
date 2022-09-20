@@ -88,7 +88,7 @@ fn main() -> anyhow::Result<()> {
 
             let (
                 epoch_start_sender,
-                [epoch_start_receiver_1, epoch_start_receiver_2, epoch_start_receiver_3, epoch_start_receiver_4, epoch_start_receiver_5]
+                [epoch_start_receiver_1, epoch_start_receiver_2, epoch_start_receiver_3, epoch_start_receiver_4, epoch_start_receiver_5, epoch_start_receiver_6]
             ) = build_broadcast_channel(10);
 
             // validate chain ids
@@ -154,6 +154,14 @@ fn main() -> anyhow::Result<()> {
                 .context("Failed to get FLIP address from SC")?
                 .expect("FLIP address must exist at genesis");
 
+            let usdc_contract_address = state_chain_client
+                .get_storage_map::<pallet_cf_environment::SupportedEthAssets::<
+                    state_chain_runtime::Runtime,
+                >>(latest_block_hash, &Asset::Usdc)
+                .await
+                .context("Failed to get USDC address from SC")?
+                .expect("USDC address must exist at genesis");
+
             let latest_ceremony_id = state_chain_client
             .get_storage_value::<pallet_cf_validator::CeremonyIdCounter<state_chain_runtime::Runtime>>(
                 latest_block_hash,
@@ -185,7 +193,8 @@ fn main() -> anyhow::Result<()> {
             );
 
             let (eth_monitor_ingress_sender, eth_monitor_ingress_receiver) = tokio::sync::mpsc::unbounded_channel();
-            let (eth_monitor_erc20_ingress_sender, eth_monitor_erc20_ingress_receiver) = tokio::sync::mpsc::unbounded_channel();
+            let (eth_monitor_flip_ingress_sender, eth_monitor_flip_ingress_receiver) = tokio::sync::mpsc::unbounded_channel();
+            let (eth_monitor_usdc_ingress_sender, eth_monitor_usdc_ingress_receiver) = tokio::sync::mpsc::unbounded_channel();
 
             scope.spawn(async move {
                 muxer_future.await;
@@ -247,7 +256,19 @@ fn main() -> anyhow::Result<()> {
                     eth_ws_rpc_client.clone(),
                     eth_http_rpc_client.clone(),
                     epoch_start_receiver_5,
-                    Erc20WitnesserState::new(Default::default(), eth_monitor_erc20_ingress_receiver),
+                    Erc20WitnesserState::new(Default::default(), eth_monitor_flip_ingress_receiver),
+                    false,
+                    state_chain_client.clone(),
+                    &root_logger,
+                )
+            );
+            scope.spawn(
+                eth::contract_witnesser::start(
+                    Erc20Witnesser::new(usdc_contract_address.into(), Asset::Usdc),
+                    eth_ws_rpc_client.clone(),
+                    eth_http_rpc_client.clone(),
+                    epoch_start_receiver_6,
+                    Erc20WitnesserState::new(Default::default(), eth_monitor_usdc_ingress_receiver),
                     false,
                     state_chain_client.clone(),
                     &root_logger,
@@ -286,7 +307,8 @@ fn main() -> anyhow::Result<()> {
                 account_peer_mapping_change_sender,
                 epoch_start_sender,
                 eth_monitor_ingress_sender,
-                eth_monitor_erc20_ingress_sender,
+                eth_monitor_flip_ingress_sender,
+                eth_monitor_usdc_ingress_sender,
                 cfe_settings_update_sender,
                 latest_block_hash,
                 root_logger.clone()
