@@ -632,7 +632,7 @@ fn testnet_genesis(
 		},
 		flip: FlipConfig {
 			total_issuance: TOTAL_ISSUANCE,
-			alice_fund: Some((authority_keys_from_seed("Alice").0, 50000)),
+			alice_fund: Some((authority_keys_from_seed("Alice").0, 500000000000000000000)),
 		},
 		staking: StakingConfig {
 			genesis_stakers: genesis_stakers
