@@ -1,0 +1,94 @@
+name: Build Packages
+on:
+  push:
+    branches:
+      - 'feature/deb_**'
+
+env:
+  APTLY_VERSION: "1.5.0"
+  REGISTRY: "ghcr.io"
+  RUST_IMAGE_NAME: "${{ github.repository }}/rust-base"
+  REPO_REGION: "eu-central-1"
+  REPO_BUCKET: "apt.aws.chainflip.xyz"
+
+jobs:
+  build-deb:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-20.04, ubuntu-22.04]
+    name: Build and publish packages on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    environment: development
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y --no-install-recommends moreutils
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly-2022-08-08
+          default: true
+          target: wasm32-unknown-unknown
+          override: true
+          components: rustfmt, clippy
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+      - name: Get date, commit SHA, distribution codename
+        id: vars
+        run: |
+          echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+          echo "::set-output name=date::$(date +'%Y%m%d%H%M')"
+          echo "::set-output name=codename::$(lsb_release -c -s)"
+      - name: Build packages
+        run: |
+          export DEB_REVISION="${{ steps.vars.outputs.date }}~${{ steps.vars.outputs.codename }}"
+          cargo deb --no-strip -p chainflip-engine --deb-revision "${DEB_REVISION}"
+          cargo deb --no-strip -p chainflip-cli --deb-revision "${DEB_REVISION}"
+          cargo deb --no-strip -p chainflip-node --deb-revision "${DEB_REVISION}"
+      - name: Install Aptly
+        run: | 
+          wget https://github.com/aptly-dev/aptly/releases/download/v${APTLY_VERSION}/aptly_${APTLY_VERSION}_amd64.deb -O /tmp/aptly_${APTLY_VERSION}_amd64.deb
+          sudo dpkg -i /tmp/aptly_${APTLY_VERSION}_amd64.deb
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-region: eu-central-1
+          role-to-assume: arn:aws:iam::962042992619:role/chainflip-github-bot
+      - name: Configure aptly
+        run: |
+          aptly config show
+          jq --argjson S3PublishEndpoints "$(<.github/workflows/aptly_dev_s3.json)" '.S3PublishEndpoints += $S3PublishEndpoints' ~/.aptly.conf | sponge ~/.aptly.conf 
+      - name: Import GPG package signing key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v5
+        with:
+          gpg_private_key: ${{ secrets.CF_DEV_PGP_KEY }}
+          # passphrase: ${{ secrets.PASSPHRASE }} # Empty pass for development
+      - name: List keys
+        run: gpg -K
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: packages-${{ matrix.os }}
+          path: target/debian/*.deb
+      - name: Run aptly
+        run: |
+          export AWS_SDK_LOAD_CONFIG=1
+          aptly repo create local
+          aptly repo add local target/debian/*.deb
+          aptly snapshot create snap from repo local
+          aptly publish -gpg-key=${{ steps.import_gpg.outputs.keyid }} -distribution=${{ steps.vars.outputs.codename }} snapshot -force-overwrite snap "s3:chainflip-dev:ci/${{ steps.vars.outputs.sha_short }}/"
+          echo "############################"
+          echo "Packages can be installed with the following commands: "
+          echo "sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys ${{ steps.import_gpg.outputs.keyid }}"
+          echo "echo \"deb https://${REPO_BUCKET}/ci/${{ steps.vars.outputs.sha_short }}/ ${{ steps.vars.outputs.codename }} main\"  | sudo tee /etc/apt/sources.list.d/chainflip.list"
+ 
