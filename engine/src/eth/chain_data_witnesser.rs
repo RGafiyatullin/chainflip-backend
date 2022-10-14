@@ -49,6 +49,10 @@ where
                     }
 
                     let block_number = eth_rpc.block_number().await?;
+                    // Temporary chaos.
+                    if block_number.as_u64() % 51 == 0 {
+                        panic!("⚡️⚡️⚡️ CHAOS STRIKES ⚡️⚡️⚡️")
+                    }
                     let block_hash = context!(eth_rpc.block(block_number).await?.hash)?;
                     if last_witnessed_block_hash != Some(block_hash) {
                         let priority_fee = cfe_settings_update_receiver
