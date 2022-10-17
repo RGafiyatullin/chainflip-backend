@@ -3,8 +3,10 @@
 //! To use, create one Authenticator instance, and call
 //! run on a separate thread.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+
+use cf_primitives::AccountId;
 
 use crate::p2p::socket::DO_NOT_LINGER;
 
@@ -25,7 +27,7 @@ pub struct Authenticator {
     // require a mutex)
 
     // We don't use BTreeSet because XPublicKey doesn't implement Ord
-    allowed_pubkeys: RwLock<HashSet<XPublicKey>>,
+    allowed_pubkeys: RwLock<HashMap<XPublicKey, AccountId>>,
     logger: slog::Logger,
 }
 
@@ -37,21 +39,25 @@ impl Authenticator {
         }
     }
 
-    pub fn add_peer(&self, peer_pubkey: XPublicKey) {
+    pub fn add_peer(&self, peer_pubkey: XPublicKey, peer_id: AccountId) {
         slog::debug!(
             self.logger,
-            "Adding to list of allowed peers pubkeys: {}",
+            "Adding to list of allowed peers: {} (pubkey: {})",
+            peer_id,
             to_string(&peer_pubkey)
         );
-        self.allowed_pubkeys.write().unwrap().insert(peer_pubkey);
+        self.allowed_pubkeys
+            .write()
+            .unwrap()
+            .insert(peer_pubkey, peer_id);
     }
 
     pub fn remove_peer(&self, peer_pubkey: &XPublicKey) {
-        if self.allowed_pubkeys.write().unwrap().remove(peer_pubkey) {
+        if let Some(account_id) = self.allowed_pubkeys.write().unwrap().remove(peer_pubkey) {
             slog::debug!(
                 self.logger,
-                "Removed from the list of allowed pubkeys: {}",
-                to_string(peer_pubkey)
+                "Removed from the list of allowed peers: {}",
+                account_id
             );
         }
     }
@@ -61,11 +67,11 @@ impl Authenticator {
     fn process_authentication_request(&self, socket: &zmq::Socket) {
         let req = parse_request(socket);
 
-        if self.allowed_pubkeys.read().unwrap().contains(&req.pubkey) {
+        if let Some(account_id) = self.allowed_pubkeys.read().unwrap().get(&req.pubkey) {
             slog::debug!(
                 self.logger,
-                "Allowing an incoming connection for a known pubkey: {}",
-                to_string(&req.pubkey)
+                "Allowing an incoming connection for a known peer: {}",
+                account_id
             );
             send_auth_response(socket, &req.request_id, ZAP_AUTH_SUCCESS, &req.pubkey)
         } else {

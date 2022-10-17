@@ -441,7 +441,8 @@ impl P2PContext {
         }
 
         let peer_pubkey = &peer.pubkey;
-        self.authenticator.add_peer(*peer_pubkey);
+        self.authenticator
+            .add_peer(*peer_pubkey, peer.account_id.clone());
 
         slog::trace!(
             self.logger,
