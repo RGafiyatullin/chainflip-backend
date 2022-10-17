@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use auth::Authenticator;
 use serde::{Deserialize, Serialize};
@@ -257,6 +258,10 @@ impl P2PContext {
         mut peer_update_receiver: UnboundedReceiver<PeerUpdate>,
         mut reconnect_receiver: UnboundedReceiver<AccountId>,
     ) {
+        const PING_INTERVAL: Duration = Duration::from_secs(30);
+        let mut ping_interval = utilities::make_periodic_tick(PING_INTERVAL, false);
+        let mut ping_counter = 0u64;
+
         loop {
             tokio::select! {
                 Some(messages) = outgoing_message_receiver.recv() => {
@@ -273,7 +278,19 @@ impl P2PContext {
                 Some(account_id) = reconnect_receiver.recv() => {
                     self.reconnect_to_peer(account_id);
                 }
+                _ = ping_interval.tick() => {
+                    ping_counter += 1;
+                    self.ping_all_other_nodes(ping_counter);
+                }
             }
+        }
+    }
+
+    fn ping_all_other_nodes(&self, counter: u64) {
+        for (account_id, socket) in &self.active_connections {
+            slog::debug!(self.logger, "Sending ping to {} [{}]", account_id, counter);
+            let message = format!("Ping {}", counter);
+            socket.send(message.into_bytes());
         }
     }
 
@@ -318,8 +335,16 @@ impl P2PContext {
         if let Some(acc_id) = self.x25519_to_account_id.get(&pubkey) {
             slog::trace!(self.logger, "Received a message from {}", acc_id);
             self.incoming_message_sender
-                .send((acc_id.clone(), payload))
+                .send((acc_id.clone(), payload.clone()))
                 .unwrap();
+
+            let message = String::from_utf8(payload).expect("expected utf8 message");
+            slog::debug!(
+                self.logger,
+                "Received message: <{}> from {}",
+                message,
+                acc_id
+            );
         } else {
             slog::warn!(
                 self.logger,
