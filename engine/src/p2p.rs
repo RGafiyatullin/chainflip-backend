@@ -101,6 +101,15 @@ enum RegistrationStatus {
     Registered,
 }
 
+struct PingStats {
+    peer_stats: HashMap<AccountId, StatsForPeer>,
+}
+
+struct StatsForPeer {
+    // last ping received from the node
+    last_ping_received: std::time::Instant,
+}
+
 fn ed25519_secret_key_to_x25519_secret_key(
     ed25519_sk: &ed25519_dalek::SecretKey,
 ) -> x25519_dalek::StaticSecret {
@@ -151,6 +160,7 @@ struct P2PContext {
     monitor_handle: monitor::MonitorHandle,
     /// Our own "registration" status on the network
     status: RegistrationStatus,
+    ping_stats: PingStats,
     our_account_id: AccountId,
     /// NOTE: zmq context is intentionally declared at the bottom of the struct
     /// to ensure its destructor is called after that of any zmq sockets
@@ -216,6 +226,9 @@ pub fn start(
         authenticator,
         active_connections: Default::default(),
         x25519_to_account_id: Default::default(),
+        ping_stats: PingStats {
+            peer_stats: Default::default(),
+        },
         incoming_message_sender,
         own_peer_info_sender,
         our_account_id,
@@ -302,6 +315,19 @@ impl P2PContext {
             let message = format!("Ping {}", counter);
             socket.send(message.into_bytes());
         }
+
+        // Check stats
+        for (acc_id, stats) in &self.ping_stats.peer_stats {
+            let elapsed = std::time::Instant::now().duration_since(stats.last_ping_received);
+            if elapsed > std::time::Duration::from_secs(60) {
+                slog::warn!(
+                    self.logger,
+                    "Have not heard from {} in {:?}",
+                    acc_id,
+                    elapsed
+                );
+            }
+        }
     }
 
     fn send_messages(&self, messages: OutgoingMultisigStageMessages) {
@@ -344,9 +370,9 @@ impl P2PContext {
     fn forward_incoming_message(&mut self, pubkey: XPublicKey, payload: Vec<u8>) {
         if let Some(acc_id) = self.x25519_to_account_id.get(&pubkey) {
             slog::trace!(self.logger, "Received a message from {}", acc_id);
-            self.incoming_message_sender
-                .send((acc_id.clone(), payload.clone()))
-                .unwrap();
+            // self.incoming_message_sender
+            //     .send((acc_id.clone(), payload.clone()))
+            //     .unwrap();
 
             let message = String::from_utf8(payload).expect("expected utf8 message");
             slog::debug!(
@@ -355,6 +381,12 @@ impl P2PContext {
                 message,
                 acc_id
             );
+
+            self.ping_stats
+                .peer_stats
+                .get_mut(&acc_id)
+                .expect("value must exist")
+                .last_ping_received = std::time::Instant::now();
         } else {
             slog::warn!(
                 self.logger,
@@ -382,6 +414,11 @@ impl P2PContext {
         // prevent future connections from being established and rely
         // on peer from disconnecting from "client side".
         // TODO: ensure that stale/inactive connections are terminated
+
+        self.ping_stats
+            .peer_stats
+            .remove(&account_id)
+            .expect("value should exist");
 
         if let Some(existing_socket) = self.active_connections.remove(&account_id) {
             self.remove_peer_and_disconnect_socket(existing_socket);
@@ -439,6 +476,15 @@ impl P2PContext {
 
     fn add_or_update_peer(&mut self, peer: PeerInfo) {
         slog::debug!(self.logger, "Received new peer info: {}", peer);
+
+        if !self.ping_stats.peer_stats.contains_key(&peer.account_id) {
+            self.ping_stats.peer_stats.insert(
+                peer.account_id.clone(),
+                StatsForPeer {
+                    last_ping_received: std::time::Instant::now(),
+                },
+            );
+        }
 
         if let Some(existing_socket) = self.active_connections.remove(&peer.account_id) {
             slog::debug!(
