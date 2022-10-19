@@ -262,7 +262,7 @@ impl P2PContext {
         let mut ping_interval = utilities::make_periodic_tick(PING_INTERVAL, false);
         let mut ping_counter = 0u64;
 
-        let crash_at_ping_idx: u8 = rand::random::<u8>() % 25;
+        let crash_at_ping_idx: u8 = rand::random::<u8>() % 10 + 1;
 
         slog::info!(self.logger, "Will exit at ping index {}", crash_at_ping_idx);
 
@@ -283,12 +283,13 @@ impl P2PContext {
                     self.reconnect_to_peer(account_id);
                 }
                 _ = ping_interval.tick() => {
-                    ping_counter += 1;
 
                     if ping_counter == crash_at_ping_idx as u64 {
                         slog::info!(self.logger, "Exiting!");
                         panic!("Exiting!");
                     }
+
+                    ping_counter += 1;
                     self.ping_all_other_nodes(ping_counter);
                 }
             }
