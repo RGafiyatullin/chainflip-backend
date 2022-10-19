@@ -275,7 +275,7 @@ impl P2PContext {
         let mut ping_interval = utilities::make_periodic_tick(PING_INTERVAL, false);
         let mut ping_counter = 0u64;
 
-        let crash_at_ping_idx: u8 = rand::random::<u8>() % 10 + 1;
+        let crash_at_ping_idx: u8 = rand::random::<u8>() % 10 + 5;
 
         slog::info!(self.logger, "Will exit at ping index {}", crash_at_ping_idx);
 
@@ -370,9 +370,9 @@ impl P2PContext {
     fn forward_incoming_message(&mut self, pubkey: XPublicKey, payload: Vec<u8>) {
         if let Some(acc_id) = self.x25519_to_account_id.get(&pubkey) {
             slog::trace!(self.logger, "Received a message from {}", acc_id);
-            // self.incoming_message_sender
-            //     .send((acc_id.clone(), payload.clone()))
-            //     .unwrap();
+            self.incoming_message_sender
+                .send((acc_id.clone(), payload.clone()))
+                .unwrap();
 
             let message = String::from_utf8(payload).expect("expected utf8 message");
             slog::debug!(
@@ -384,7 +384,7 @@ impl P2PContext {
 
             self.ping_stats
                 .peer_stats
-                .get_mut(&acc_id)
+                .get_mut(acc_id)
                 .expect("value must exist")
                 .last_ping_received = std::time::Instant::now();
         } else {
