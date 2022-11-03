@@ -4,7 +4,7 @@ mod tests;
 use anyhow::{bail, Context, Result};
 use futures::FutureExt;
 use std::{
-	collections::{hash_map, BTreeSet, HashMap},
+	collections::{hash_map, BTreeMap, BTreeSet, HashMap},
 	fmt::{Debug, Display},
 	marker::PhantomData,
 	sync::Arc,
@@ -112,6 +112,7 @@ pub struct CeremonyManager<C: CryptoScheme> {
 	allowing_high_pubkey: bool,
 	latest_ceremony_id: CeremonyId,
 	logger: slog::Logger,
+	request_buffer: BTreeMap<CeremonyId, CeremonyRequest<C>>,
 }
 
 // A CeremonyStage for either keygen or signing
@@ -262,50 +263,71 @@ impl<C: CryptoScheme> CeremonyManager<C> {
 			allowing_high_pubkey: false,
 			latest_ceremony_id,
 			logger: logger.clone(),
+			request_buffer: BTreeMap::new(),
 		}
 	}
 
-	async fn on_request(
-		&mut self,
+	fn on_request<'a>(
+		&'a mut self,
 		request: CeremonyRequest<C>,
-		scope: &Scope<'_, anyhow::Result<()>, true>,
-	) {
-		// Always update the latest ceremony id, even if we are not participating
-		self.update_latest_ceremony_id(request.ceremony_id);
+		scope: &'a Scope<'_, anyhow::Result<()>, true>,
+	) -> futures::future::BoxFuture<'a, ()> {
+		async {
+			if request.ceremony_id > self.latest_ceremony_id + 1 {
+				// The ceremony is out of order, buffer it instead of processing it.
+				// The ceremony will be processed later in order.
+				self.request_buffer.insert(request.ceremony_id, request);
+				assert!(
+					self.request_buffer.len() < CEREMONY_ID_WINDOW as usize,
+					"Missing ceremony request with id {}",
+					self.latest_ceremony_id + 1
+				);
+				return
+			}
 
-		match request.details {
-			Some(CeremonyRequestDetails::Keygen(details)) => self.on_keygen_request(
-				request.ceremony_id,
-				details.participants,
-				details.rng,
-				details.result_sender,
-				scope,
-			),
-			Some(CeremonyRequestDetails::Sign(details)) => {
-				self.on_request_to_sign(
+			// Always update the latest ceremony id, even if we are not participating
+			self.update_latest_ceremony_id(request.ceremony_id);
+
+			match request.details {
+				Some(CeremonyRequestDetails::Keygen(details)) => self.on_keygen_request(
 					request.ceremony_id,
 					details.participants,
-					details.data,
-					details.keygen_result_info,
 					details.rng,
 					details.result_sender,
 					scope,
-				);
-			},
-			None => {
-				// Because unauthorised ceremonies don't timeout, We must check the id of ceremonies
-				// that we are not participating in and cleanup any unauthorised ceremonies that may
-				// have been created by a bad p2p message.
-				if self.signing_states.cleanup_unauthorised_ceremony(&request.ceremony_id) {
-					SigningFailureReason::NotParticipatingInUnauthorisedCeremony
-						.log(&BTreeSet::default(), &self.logger);
-				}
-				if self.keygen_states.cleanup_unauthorised_ceremony(&request.ceremony_id) {
-					KeygenFailureReason::NotParticipatingInUnauthorisedCeremony
-						.log(&BTreeSet::default(), &self.logger);
-				}
-			},
+				),
+				Some(CeremonyRequestDetails::Sign(details)) => {
+					self.on_request_to_sign(
+						request.ceremony_id,
+						details.participants,
+						details.data,
+						details.keygen_result_info,
+						details.rng,
+						details.result_sender,
+						scope,
+					);
+				},
+				None => {
+					// Because unauthorised ceremonies don't timeout, We must check the id of
+					// ceremonies that we are not participating in and cleanup any unauthorised
+					// ceremonies that may have been created by a bad p2p message.
+					if self.signing_states.cleanup_unauthorised_ceremony(&request.ceremony_id) {
+						SigningFailureReason::NotParticipatingInUnauthorisedCeremony
+							.log(&BTreeSet::default(), &self.logger);
+					}
+					if self.keygen_states.cleanup_unauthorised_ceremony(&request.ceremony_id) {
+						KeygenFailureReason::NotParticipatingInUnauthorisedCeremony
+							.log(&BTreeSet::default(), &self.logger);
+					}
+				},
+			}
+
+			// Process the next ceremony id if it has been buffered
+			if let Some(request) = self.request_buffer.remove(&(request.ceremony_id + 1)) {
+				self.on_request(request, scope).await;
+			}
 		}
+		.boxed()
 	}
 
 	pub async fn run(

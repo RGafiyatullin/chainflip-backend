@@ -453,3 +453,45 @@ async fn should_route_p2p_message() {
 		OutgoingMultisigStageMessages::Broadcast(..)
 	))
 }
+
+#[tokio::test]
+async fn should_handle_requests_out_of_order() {
+	let our_account_id_idx = 0;
+	let unknown_signer_idx = 1;
+
+	let unknown_signer_id = AccountId::new([0; 32]);
+	assert!(!ACCOUNT_IDS.contains(&unknown_signer_id));
+	let mut participants = ACCOUNT_IDS.clone();
+	participants[unknown_signer_idx] = unknown_signer_id;
+	let participants = BTreeSet::from_iter(participants.into_iter());
+
+	let (ceremony_request_sender, _incoming_p2p_sender, _outgoing_p2p_receiver) =
+		spawn_ceremony_manager(ACCOUNT_IDS[our_account_id_idx].clone(), INITIAL_LATEST_CEREMONY_ID);
+
+	// Send a request with a ceremony id that is in the future by 1
+	let mut result_receiver_1 = send_signing_request(
+		&ceremony_request_sender,
+		participants.clone(),
+		INITIAL_LATEST_CEREMONY_ID + 2,
+	);
+
+	// Send a request with the correct next ceremony id
+	let mut result_receiver_2 = send_signing_request(
+		&ceremony_request_sender,
+		participants,
+		INITIAL_LATEST_CEREMONY_ID + 1,
+	);
+
+	// A short delay to allow the ceremony runner to process the requests
+	tokio::time::sleep(Duration::from_millis(50)).await;
+
+	// check that BOTH of the requests were processed and receive a result
+	assert_eq!(
+		result_receiver_1.try_recv().unwrap(),
+		Err((BTreeSet::default(), SigningFailureReason::InvalidParticipants))
+	);
+	assert_eq!(
+		result_receiver_2.try_recv().unwrap(),
+		Err((BTreeSet::default(), SigningFailureReason::InvalidParticipants))
+	);
+}
