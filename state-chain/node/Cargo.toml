@@ -23,9 +23,9 @@ path = '../runtime'
 [dependencies]
 # Local dependencies
 cf-chains = {path = "../chains"}
-utilities = {path = '../../utilities'}
+cf-primitives = {path = '../primitives'}
 custom-rpc = {path = '../custom-rpc'}
-cf-primitives = { path = '../primitives' }
+utilities = {path = '../../utilities'}
 
 # Added by Chainflip
 futures = {version = '0.3.4'}
@@ -33,72 +33,79 @@ hex = '0.4'
 hex-literal = '0.3.1'
 
 # Substrate-node-template dependencies
-clap = { version = "3.1.18", features = ["derive"] }
+clap = {version = "3.1.18", features = ["derive"]}
 
-sc-cli = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01', features = ["wasmtime"] }
-sp-core = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-executor = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01', features = ["wasmtime"]  }
-sc-service = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01', features = ["wasmtime"]  }
-sc-telemetry = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-keystore = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-transaction-pool = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-transaction-pool-api = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-consensus-aura = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-consensus-aura = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-consensus = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-consensus = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-finality-grandpa = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-finality-grandpa-rpc = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-finality-grandpa = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-client-api = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-runtime = { version = "6.0.0", git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-timestamp = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-inherents = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-keyring = { version = "6.0.0", git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-frame-system = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-pallet-transaction-payment = { default-features = false, git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
+frame-system = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+pallet-transaction-payment = {default-features = false, git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-cli = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01', features = ["wasmtime"]}
+sc-client-api = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-consensus = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-consensus-aura = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-executor = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01', features = ["wasmtime"]}
+sc-finality-grandpa = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-finality-grandpa-rpc = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-keystore = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-service = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01', features = ["wasmtime"]}
+sc-telemetry = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-transaction-pool = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-transaction-pool-api = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-consensus = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-consensus-aura = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-core = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-finality-grandpa = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-inherents = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-keyring = {version = "6.0.0", git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-runtime = {version = "6.0.0", git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-timestamp = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
 
 # These dependencies are used for the node template's RPCs
-jsonrpsee = { version = "0.13.0", features = ["full"] }
-sc-rpc = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-api = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-rpc-api = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-blockchain = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sp-block-builder = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-sc-basic-authorship = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-substrate-frame-rpc-system = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-pallet-transaction-payment-rpc = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
+jsonrpsee = {version = "0.13.0", features = ["full"]}
+pallet-transaction-payment-rpc = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-basic-authorship = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-rpc = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sc-rpc-api = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-api = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-block-builder = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+sp-blockchain = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+substrate-frame-rpc-system = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
 
 # These dependencies are used for runtime benchmarking
-frame-benchmarking = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
-frame-benchmarking-cli = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
+frame-benchmarking = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
+frame-benchmarking-cli = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
 
 # CLI-specific dependencies
-try-runtime-cli = { optional = true, git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
+try-runtime-cli = {optional = true, git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
 
 [build-dependencies]
-substrate-build-script-utils = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }
+substrate-build-script-utils = {git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01'}
 
 [features]
-default = []
-runtime-benchmarks = ['state-chain-runtime/runtime-benchmarks']
 cli = [
   'try-runtime-cli',
 ]
+default = []
+ibiza = [
+  "state-chain-runtime/ibiza"
+]
+runtime-benchmarks = ['state-chain-runtime/runtime-benchmarks']
 try-runtime = [
   "state-chain-runtime/try-runtime",
   "try-runtime-cli",
 ]
-ibiza = [
-  "state-chain-runtime/ibiza"
-]
 
 [package.metadata.deb]
-depends = "$auto"
+assets = [
+  ["target/release/chainflip-node", "usr/bin/", "755"],
+  ["chainspecs/perseverance.chainspec.json", "etc/chainflip/chainspecs/perseverance.json", "644"],
+  ["chainspecs/sisyphos.chainspec.json", "etc/chainflip/chainspecs/sisyphos.chainspec.json", "644"],
+]
+depends = "$auto, systemd"
 extended-description = """\
 Chainflip Node Package"""
 features = ["runtime-benchmarks"]
 maintainer = "Chainflip Labs GmbH <dev@chainflip.io>"
+maintainer-scripts = "package/"
 name = "chainflip-node"
 priority = "required"
 section = "rust"
+systemd-units = {enable = false}

@@ -1,0 +1,19 @@
+[node_p2p]
+ip_address = "PLACEHOLDER"
+node_key_file = "/etc/chainflip/keys/node_key_file"
+port = "8078"
+
+[state_chain]
+signing_key_file = "/etc/chainflip/keys/signing_key_file"
+ws_endpoint = "ws://127.0.0.1:9944"
+
+[eth]
+# Ethereum RPC endpoints (websocket and http for redundancy).
+http_node_endpoint = "PLACEHOLDER"
+ws_node_endpoint = "PLACEHOLDER"
+
+# Ethereum private key file path. This file should contain a hex-encoded private key.
+private_key_file = "/etc/chainflip/keys/ethereum_key_file"
+
+[signing]
+db_file = "/etc/chainflip/data.db"

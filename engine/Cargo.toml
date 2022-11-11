@@ -5,14 +5,19 @@ name = "chainflip-engine"
 version = "0.5.0"
 
 [package.metadata.deb]
-depends = "$auto"
+assets = [
+  ["target/release/chainflip-engine", "usr/bin/", "755"],
+  ["package/Default.toml", "etc/chainflip/config/Default.toml", "600"],
+]
+depends = "$auto, systemd"
 extended-description = """\
 Chainflip Validator Engine Package"""
 maintainer = "Chainflip Labs GmbH <dev@chainflip.io>"
+maintainer-scripts = "package/"
 name = "chainflip-engine"
 priority = "required"
 section = "rust"
-
+systemd-units = {enable = false}
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -20,6 +25,8 @@ anyhow = "1.0"
 async-trait = "0.1.49"
 bincode = "1.3.3"
 bs58 = "0.4"
+chrono = "0.4.19"
+clap = {version = "3.1.18", features = ["derive"]}
 config = "0.13.1"
 crossbeam-channel = "0.5.1"
 fs_extra = "1.2.0"
@@ -29,19 +36,21 @@ futures-util = "0.3.14"
 hex = "0.4.3"
 httparse = "1.4.1"
 itertools = "0.10"
-clap = { version = "3.1.18", features = ["derive"] }
-chrono = "0.4.19"
 # have to use the older version until secp256k1 updates its dependency (https://github.com/rust-bitcoin/rust-secp256k1/issues/328)
-rand_legacy = { package = "rand", version = "0.6" }
 ipc-channel = "0.16.0"
+rand_legacy = {package = "rand", version = "0.6"}
 
 # Same version of jsonrpsee as substrate
-jsonrpsee = { version = "0.13.0", features = ["full"] }
+jsonrpsee = {version = "0.13.0", features = ["full"]}
 
-websocket = "0.24"
-ethbloom = "0.12.1"
+async-channel = "1.7.1"
 dyn-clone = "1.0.4"
+ethbloom = "0.12.1"
 lazy_static = "1.4"
+libp2p = "0.44"
+num-bigint = "0.4"
+num-derive = "0.3"
+num-traits = "0.2"
 parking_lot = "0.12"
 regex = "1"
 reqwest = {version = "0.11.4", features = ["json"]}
@@ -56,17 +65,14 @@ thiserror = "1.0.26"
 tokio = {version = "1.13.1", features = ["full", "test-util"]}
 tokio-stream = {version = "0.1.5", features = ["sync"]}
 url = "1.7.2"
-num-bigint = "0.4"
-num-traits = "0.2"
-num-derive = "0.3"
 web3 = {git = 'https://github.com/tomusdrw/rust-web3.git', rev = '8796c88', features = ['signing']}
+websocket = "0.24"
 zeroize = "1.5.4"
-libp2p = "0.44"
 # Required so that we can create a web3-compatible secret key.
-web3-secp256k1 = {package = 'secp256k1', version = '0.21'}
-generic-array= "0.14"
-public-ip = "0.2.2"
+generic-array = "0.14"
 lazy_format = "2.0"
+public-ip = "0.2.2"
+web3-secp256k1 = {package = 'secp256k1', version = '0.21'}
 # We will update curve25519-dalek when we can update schnorrkel
 curve25519-dalek = {version = "2.1", features = ["serde"]}
 typenum = "1.15"
@@ -77,32 +83,32 @@ typenum = "1.15"
 # in https://github.com/dalek-cryptography/curve25519-dalek/pull/338#issuecomment-772059572)
 # We might eventually update, but for now let's just
 # use the same version as polkadot.
-schnorrkel = "0.9.1"
-rayon = "1.5"
-pin-project = "1.0.11"
-zmq = {version ="0.9.2", features = ["vendored"]}
 ed25519-dalek = "*"
-x25519-dalek = {version ="*", features = ["serde"]}
+pin-project = "1.0.11"
 rand = "0.8.4"
+rayon = "1.5"
+schnorrkel = "0.9.1"
+x25519-dalek = {version = "*", features = ["serde"]}
+zmq = {version = "0.9.2", features = ["vendored"]}
 
 # Local deps
 cf-chains = {path = "../state-chain/chains"}
 cf-primitives = {path = "../state-chain/primitives"}
+chainflip-node = {path = "../state-chain/node"}
+custom-rpc = {path = "../state-chain/custom-rpc"}
 pallet-cf-broadcast = {path = "../state-chain/pallets/cf-broadcast"}
 pallet-cf-chain-tracking = {path = "../state-chain/pallets/cf-chain-tracking"}
 pallet-cf-environment = {path = "../state-chain/pallets/cf-environment"}
 pallet-cf-flip = {path = "../state-chain/pallets/cf-flip"}
 pallet-cf-governance = {path = "../state-chain/pallets/cf-governance"}
-pallet-cf-ingress = {path = "../state-chain/pallets/cf-ingress", optional = true }
+pallet-cf-ingress = {path = "../state-chain/pallets/cf-ingress", optional = true}
 pallet-cf-reputation = {path = "../state-chain/pallets/cf-reputation"}
 pallet-cf-staking = {path = "../state-chain/pallets/cf-staking"}
 pallet-cf-threshold-signature = {path = "../state-chain/pallets/cf-threshold-signature"}
 pallet-cf-validator = {path = "../state-chain/pallets/cf-validator"}
 pallet-cf-vaults = {path = "../state-chain/pallets/cf-vaults"}
 pallet-cf-witnesser = {path = "../state-chain/pallets/cf-witnesser"}
-custom-rpc = {path = "../state-chain/custom-rpc"}
 state-chain-runtime = {path = "../state-chain/runtime"}
-chainflip-node = {path = "../state-chain/node"}
 utilities = {path = "../utilities"}
 
 [dependencies.rocksdb]
@@ -112,7 +118,6 @@ version = "0.18.0"
 # https://github.com/rust-rocksdb/rust-rocksdb/pull/555
 default-features = false
 features = ["lz4"]
-
 
 # substrate deps
 [dependencies.codec]
@@ -156,17 +161,17 @@ git = 'https://github.com/chainflip-io/substrate.git'
 tag = 'chainflip-monthly-2022-06+01'
 
 [dev-dependencies]
+csv = "1.1.6"
 env_logger = "0.9.0"
+ethereum = "0.12"
 log = "0.4.16"
 mockall = "0.11.0"
-csv = "1.1.6"
-tempfile = "3.3.0"
-ethereum = "0.12"
 rlp = "0.5"
+tempfile = "3.3.0"
 
 [features]
-integration-test = []
 ibiza = [
-    'pallet-cf-ingress',
-    'state-chain-runtime/ibiza'
+  'pallet-cf-ingress',
+  'state-chain-runtime/ibiza',
 ]
+integration-test = []
