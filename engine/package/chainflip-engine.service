@@ -5,6 +5,8 @@ Description=Chainflip Validator Engine
 Restart=always
 RestartSec=30
 Type=simple
+User=chainflip
+Group=chainflip
 
 ExecStart=/usr/bin/chainflip-engine \
   --config-path /etc/chainflip/config/Default.toml

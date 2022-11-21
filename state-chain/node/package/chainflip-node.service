@@ -5,6 +5,8 @@ Description=Chainflip Validator Node
 Restart=always
 RestartSec=30
 Type=simple
+User=chainflip
+Group=chainflip
 
 ExecStart=/usr/bin/chainflip-node \
   --chain /etc/chainflip/chainspecs/perseverance.json \
