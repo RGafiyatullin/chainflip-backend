@@ -1,0 +1,11 @@
+#!/bin/sh
+
+set -e
+action="$1"
+
+if [ "$action" = "configure" ]; then
+  getent group chainflip >/dev/null 2>&1 || addgroup --system chainflip
+  getent passwd chainflip >/dev/null 2>&1 ||
+    adduser --system --home /home/chainflip --disabled-password \
+    --ingroup chainflip chainflip
+fi
