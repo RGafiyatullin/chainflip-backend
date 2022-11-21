@@ -146,15 +146,15 @@ pub async fn wait_for_claim_certificate(
 
 	let account_id = state_chain_client.account_id();
 
-	if let Some(pending_claim) = state_chain_client
+	if let Some(certificate) = state_chain_client
 		.base_rpc_client
 		.raw_rpc_client
-		.cf_pending_claim(account_id, None)
+		.cf_get_claim_certificate(account_id, None)
 		.await?
 	{
-		if let Some(cert) = pending_claim.encoded_cert {
-			return Ok(cert)
-		}
+		todo!();
+	} else {
+		println!("No certificate");
 	}
 
 	// Note that we subscribe to block stream before we check storage to
