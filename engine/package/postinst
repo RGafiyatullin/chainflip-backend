@@ -9,3 +9,5 @@ if [ "$action" = "configure" ]; then
     adduser --system --home /home/chainflip --disabled-password \
     --ingroup chainflip chainflip
 fi
+
+#DEBHELPER#
