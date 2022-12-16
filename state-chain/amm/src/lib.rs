@@ -48,7 +48,7 @@ const MAX_TICK_GROSS_LIQUIDITY: Liquidity = Liquidity::MAX / ((1 + MAX_TICK - MI
 
 const ONE_IN_PIPS: u32 = 100000;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Position {
 	liquidity: Liquidity,
 	last_fee_growth_inside: enum_map::EnumMap<Ticker, FeeGrowthQ128F128>,
@@ -115,13 +115,14 @@ impl Position {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TickInfo {
 	liquidity_delta: i128,
 	liquidity_gross: u128,
 	fee_growth_outside: enum_map::EnumMap<Ticker, FeeGrowthQ128F128>,
 }
 
+#[derive(Debug)]
 pub struct PoolState {
 	fee_pips: u32,
 	current_sqrt_price: SqrtPriceQ64F96,
@@ -132,7 +133,7 @@ pub struct PoolState {
 	positions: BTreeMap<(LiquidityProvider, Tick, Tick), Position>,
 }
 
-#[derive(Enum, Clone, Copy)]
+#[derive(Enum, Clone, Copy, Debug)]
 pub enum Ticker {
 	Base,
 	Pair,
@@ -311,6 +312,7 @@ impl SwapDirection for PairToBase {
 	}
 }
 
+#[derive(Debug)]
 pub enum MintError {
 	/// Invalid Tick range
 	InvalidTickRange,
@@ -318,12 +320,14 @@ pub enum MintError {
 	MaximumGrossLiquidity,
 }
 
+#[derive(Debug)]
 pub enum PositionError<T> {
 	/// Position referenced does not exist
 	NonExistent,
 	Other(T),
 }
 
+#[derive(Debug)]
 pub enum BurnError {
 	/// Position referenced does not contain the requested liquidity
 	PositionLacksLiquidity,
@@ -1268,5 +1272,55 @@ mod test {
 			276324
 		);
 		assert_eq!(PoolState::tick_at_sqrt_price(MAX_SQRT_PRICE - 1), MAX_TICK - 1);
+	}
+
+	#[test]
+	fn conservation_of_liquidity_base_to_pair() {
+		test_conservation_of_liquidity::<BaseToPair>();
+	}
+
+	#[test]
+	fn conservation_of_liquidity_pair_to_base() {
+		test_conservation_of_liquidity::<PairToBase>();
+	}
+
+	fn test_conservation_of_liquidity<SD: SwapDirection>() {
+		const INIT_TICK: Tick = -1200;
+		let mut pool = PoolState::new(100, PoolState::sqrt_price_at_tick(INIT_TICK));
+		const ID: LiquidityProvider = H256([0xcf; 32]);
+		const MINTED_LIQUIDITY: u128 = 1_000_000_000;
+		const SWAP_INPUT: u128 = 1_000;
+		let mut minted_capital = None;
+
+		// println!("MINTING: {:#?}", (INIT_TICK - 20, INIT_TICK + 20, MINTED_LIQUIDITY));
+		pool.mint(ID, INIT_TICK - 20, INIT_TICK + 20, MINTED_LIQUIDITY, |minted| {
+			minted_capital.replace(minted);
+			true
+		})
+		.unwrap();
+		let minted_capital = minted_capital.unwrap();
+
+		// println!("POOL: {:#?}", pool);
+		// println!("MINTED: {:?}", minted_capital);
+
+		let swap_output = pool.swap::<SD>(SWAP_INPUT.into());
+
+		// println!("POOL AFTER SWAP: {:#?}", pool);
+
+		let (returned_capital, fees) =
+			pool.burn(ID, INIT_TICK - 20, INIT_TICK + 20, MINTED_LIQUIDITY).unwrap();
+
+		// println!("POOL AFTER BURN: {:#?}", pool);
+		// println!("SWAPPED: {:?} for {:?}", SWAP_INPUT, swap_output);
+		// println!("RETURNED: {:?}", (returned_capital, fees));
+
+		assert_eq!(
+			minted_capital[SD::INPUT_TICKER] + U256::from(SWAP_INPUT),
+			returned_capital[SD::INPUT_TICKER] + fees[SD::INPUT_TICKER]
+		);
+		assert_eq!(
+			minted_capital[!SD::INPUT_TICKER],
+			returned_capital[!SD::INPUT_TICKER] + fees[!SD::INPUT_TICKER] + swap_output
+		);
 	}
 }
