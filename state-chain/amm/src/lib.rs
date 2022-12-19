@@ -854,7 +854,7 @@ impl PoolState {
 	) -> SqrtPriceQ64F96 {
 		// Will not overflow as function is not called if amount >= amount_required_to_reach_target,
 		// therefore bounding the function output to approximately <= MAX_SQRT_PRICE
-		sqrt_ratio_current + amount / liquidity
+		sqrt_ratio_current + (amount << 96u32) / liquidity
 	}
 
 	fn sqrt_price_at_tick(tick: Tick) -> SqrtPriceQ64F96 {
@@ -1322,5 +1322,207 @@ mod test {
 			minted_capital[!SD::INPUT_TICKER],
 			returned_capital[!SD::INPUT_TICKER] + fees[!SD::INPUT_TICKER] + swap_output
 		);
+	}
+
+	// UNISWAP TESTS => UniswapV3Pool.spec.ts
+
+	fn mint_pool() -> (PoolState, enum_map::EnumMap<Ticker, Amount>) {
+		let mut pool =
+			PoolState::new(100, U256::from_dec_str("25054144837504793118650146401").unwrap()); // encodeSqrtPrice (1,10)
+		const ID: LiquidityProvider = H256([0xcf; 32]);
+		const MINTED_LIQUIDITY: u128 = 3_161;
+		let mut minted_capital = None;
+
+		pool.mint(ID, MIN_TICK, MAX_TICK, MINTED_LIQUIDITY, |minted| {
+			minted_capital.replace(minted);
+			true
+		})
+		.unwrap();
+		let minted_capital = minted_capital.unwrap();
+
+		(pool, minted_capital)
+	}
+
+	#[test]
+	#[should_panic]
+	fn test_initialize_failure() {
+		PoolState::new(100, U256::from(1));
+	}
+	#[test]
+	fn test_initialize_success() {
+		PoolState::new(100, U256::from(MIN_SQRT_PRICE));
+		PoolState::new(100, U256::from(MAX_SQRT_PRICE - 1));
+
+		let pool =
+			PoolState::new(100, U256::from_dec_str("56022770974786143748341366784").unwrap());
+
+		assert_eq!(
+			pool.current_sqrt_price,
+			U256::from_dec_str("56022770974786143748341366784").unwrap()
+		);
+		assert_eq!(pool.current_tick, Tick::from(-6_932));
+	}
+	#[test]
+	#[should_panic]
+	fn test_initialize_too_low() {
+		PoolState::new(100, U256::from(MIN_SQRT_PRICE - 1));
+	}
+
+	#[test]
+	#[should_panic]
+	fn test_initialize_too_high() {
+		PoolState::new(100, U256::from(MAX_SQRT_PRICE));
+	}
+
+	#[test]
+	#[should_panic]
+	fn test_initialize_too_high_2() {
+		PoolState::new(
+			100,
+			U256::from_dec_str(
+				"57896044618658097711785492504343953926634992332820282019728792003956564819968", /* 2**160-1 */
+			)
+			.unwrap(),
+		);
+	}
+
+	// Minting
+
+	// Failure - TBD: Check that the minting failures don't modify the pool
+
+	#[test]
+	fn test_mint_err() {
+		let (mut pool, minted_capital) = mint_pool();
+		const ID: LiquidityProvider = H256([0xcf; 32]);
+		assert!(pool.mint(ID, 1, 0, 1, |_| true).is_err());
+		assert!((pool.mint(ID, -887273, 0, 1, |_| true)).is_err());
+		assert!((pool.mint(ID, 0, 887273, 1, |_| true)).is_err());
+
+		assert!((pool
+			.mint(ID, MIN_TICK + 1, MAX_TICK - 1, MAX_TICK_GROSS_LIQUIDITY + 1, |_| true))
+		.is_err());
+
+		assert!(
+			(pool.mint(ID, MIN_TICK + 1, MAX_TICK - 1, MAX_TICK_GROSS_LIQUIDITY, |_| true)).is_ok()
+		);
+	}
+
+	#[test]
+	fn test_mint_err_tickmax() {
+		let (mut pool, minted_capital) = mint_pool();
+		const ID: LiquidityProvider = H256([0xcf; 32]);
+
+		assert!((pool.mint(ID, MIN_TICK + 1, MAX_TICK - 1, 1000, |_| true)).is_ok());
+
+		assert!((pool.mint(
+			ID,
+			MIN_TICK + 1,
+			MAX_TICK - 1,
+			MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
+			|_| true
+		))
+		.is_err());
+
+		assert!((pool.mint(
+			ID,
+			MIN_TICK + 2,
+			MAX_TICK - 1,
+			MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
+			|_| true
+		))
+		.is_err());
+
+		assert!((pool.mint(
+			ID,
+			MIN_TICK + 1,
+			MAX_TICK - 2,
+			MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
+			|_| true
+		))
+		.is_err());
+
+		assert!((pool.mint(
+			ID,
+			MIN_TICK + 1,
+			MAX_TICK - 1,
+			MAX_TICK_GROSS_LIQUIDITY - 1000,
+			|_| true
+		))
+		.is_ok());
+
+		// Different behaviour from Uniswap - does not revert when minting 0
+		assert!(pool.mint(ID, MIN_TICK + 1, MAX_TICK - 1, 0, |_| true).is_ok());
+	}
+
+	// Success cases
+
+	#[test]
+	fn test_balances() {
+		let (_, minted_capital) = mint_pool();
+		// Check "balances"
+		const INPUT_TICKER: Ticker = Ticker::Base;
+		assert_eq!(minted_capital[INPUT_TICKER], U256::from(9_996));
+		assert_eq!(minted_capital[!INPUT_TICKER], U256::from(1_000));
+	}
+
+	#[test]
+	fn test_initial_tick() {
+		let (pool, _) = mint_pool();
+		// Check current tick
+		assert_eq!(pool.current_tick, Tick::from(-23_028));
+	}
+
+	fn above_current_price() -> (PoolState, enum_map::EnumMap<Ticker, Amount>) {
+		let (mut pool, mut minted_capital_accum) = mint_pool();
+
+		const MINTED_LIQUIDITY: u128 = 10_000;
+		const ID: LiquidityProvider = H256([0xcf; 32]);
+		const INPUT_TICKER: Ticker = Ticker::Base;
+
+		let mut minted_capital = None;
+		pool.mint(ID, -22980, 0, MINTED_LIQUIDITY, |minted| {
+			minted_capital.replace(minted);
+			true
+		})
+		.unwrap();
+		let minted_capital = minted_capital.unwrap();
+
+		assert_eq!(minted_capital[!INPUT_TICKER], U256::from(0));
+
+		minted_capital_accum[INPUT_TICKER] += minted_capital[INPUT_TICKER];
+		minted_capital_accum[!INPUT_TICKER] += minted_capital[!INPUT_TICKER];
+
+		assert_eq!(minted_capital_accum[INPUT_TICKER], U256::from(9_996 + 21_549));
+		assert_eq!(minted_capital_accum[!INPUT_TICKER], U256::from(1_000));
+
+		(pool, minted_capital_accum)
+	}
+
+	#[test]
+	fn test_max_tick_max_leverage() {
+		let (mut pool, mut minted_capital_accum) = mint_pool();
+		const ID: LiquidityProvider = H256([0xcf; 32]);
+		let mut minted_capital = None;
+		let uniswap_max_tick = 887220;
+		let uniswap_tickspacing = 60;
+		pool.mint(
+			ID,
+			uniswap_max_tick - uniswap_tickspacing, /* 60 == Uniswap's tickSpacing */
+			uniswap_max_tick,
+			5070602400912917605986812821504, /* 2**102 */
+			|minted| {
+				minted_capital.replace(minted);
+				true
+			},
+		)
+		.unwrap();
+		let minted_capital = minted_capital.unwrap();
+		println!("{:?}", minted_capital);
+
+		minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
+		minted_capital_accum[!Ticker::Base] += minted_capital[!Ticker::Base];
+
+		assert_eq!(minted_capital_accum[Ticker::Base], U256::from(9_996 + 828_011_525));
+		assert_eq!(minted_capital_accum[!Ticker::Base], U256::from(1_000));
 	}
 }
