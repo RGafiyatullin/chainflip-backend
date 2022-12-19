@@ -1326,7 +1326,7 @@ mod test {
 
 	// UNISWAP TESTS => UniswapV3Pool.spec.ts
 
-	fn mint_pool() -> (PoolState, enum_map::EnumMap<Ticker, Amount>) {
+	fn mint_pool() -> (PoolState, enum_map::EnumMap<Ticker, Amount>, LiquidityProvider) {
 		let mut pool =
 			PoolState::new(100, U256::from_dec_str("25054144837504793118650146401").unwrap()); // encodeSqrtPrice (1,10)
 		const ID: LiquidityProvider = H256([0xcf; 32]);
@@ -1340,7 +1340,7 @@ mod test {
 		.unwrap();
 		let minted_capital = minted_capital.unwrap();
 
-		(pool, minted_capital)
+		(pool, minted_capital, ID)
 	}
 
 	#[test]
@@ -1392,8 +1392,7 @@ mod test {
 
 	#[test]
 	fn test_mint_err() {
-		let (mut pool, minted_capital) = mint_pool();
-		const ID: LiquidityProvider = H256([0xcf; 32]);
+		let (mut pool, minted_capital, ID) = mint_pool();
 		assert!(pool.mint(ID, 1, 0, 1, |_| true).is_err());
 		assert!((pool.mint(ID, -887273, 0, 1, |_| true)).is_err());
 		assert!((pool.mint(ID, 0, 887273, 1, |_| true)).is_err());
@@ -1409,8 +1408,7 @@ mod test {
 
 	#[test]
 	fn test_mint_err_tickmax() {
-		let (mut pool, minted_capital) = mint_pool();
-		const ID: LiquidityProvider = H256([0xcf; 32]);
+		let (mut pool, minted_capital, ID) = mint_pool();
 
 		assert!((pool.mint(ID, MIN_TICK + 1, MAX_TICK - 1, 1000, |_| true)).is_ok());
 
@@ -1458,7 +1456,7 @@ mod test {
 
 	#[test]
 	fn test_balances() {
-		let (_, minted_capital) = mint_pool();
+		let (_, minted_capital, ID) = mint_pool();
 		// Check "balances"
 		const INPUT_TICKER: Ticker = Ticker::Base;
 		assert_eq!(minted_capital[INPUT_TICKER], U256::from(9_996));
@@ -1467,17 +1465,16 @@ mod test {
 
 	#[test]
 	fn test_initial_tick() {
-		let (pool, _) = mint_pool();
+		let (pool, _, _) = mint_pool();
 		// Check current tick
 		assert_eq!(pool.current_tick, Tick::from(-23_028));
 	}
 
 	#[test]
 	fn above_current_price() {
-		let (mut pool, mut minted_capital_accum) = mint_pool();
+		let (mut pool, mut minted_capital_accum, ID) = mint_pool();
 
 		const MINTED_LIQUIDITY: u128 = 10_000;
-		const ID: LiquidityProvider = H256([0xcf; 32]);
 		const INPUT_TICKER: Ticker = Ticker::Base;
 
 		let mut minted_capital = None;
@@ -1499,8 +1496,7 @@ mod test {
 
 	#[test]
 	fn test_max_tick_max_leverage() {
-		let (mut pool, mut minted_capital_accum) = mint_pool();
-		const ID: LiquidityProvider = H256([0xcf; 32]);
+		let (mut pool, mut minted_capital_accum, ID) = mint_pool();
 		let mut minted_capital = None;
 		let uniswap_max_tick = 887220;
 		let uniswap_tickspacing = 60;
@@ -1516,7 +1512,6 @@ mod test {
 		)
 		.unwrap();
 		let minted_capital = minted_capital.unwrap();
-		println!("{:?}", minted_capital);
 
 		minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
 		minted_capital_accum[!Ticker::Base] += minted_capital[!Ticker::Base];
@@ -1524,4 +1519,107 @@ mod test {
 		assert_eq!(minted_capital_accum[Ticker::Base], U256::from(9_996 + 828_011_525));
 		assert_eq!(minted_capital_accum[!Ticker::Base], U256::from(1_000));
 	}
+
+	#[test]
+	fn test_maxtick() {
+		let (mut pool, mut minted_capital_accum, ID) = mint_pool();
+		let mut minted_capital = None;
+		pool.mint(ID, -22980, 887220, 10000, |minted| {
+			minted_capital.replace(minted);
+			true
+		})
+		.unwrap();
+		let minted_capital = minted_capital.unwrap();
+
+		minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
+		minted_capital_accum[!Ticker::Base] += minted_capital[!Ticker::Base];
+
+		assert_eq!(minted_capital_accum[Ticker::Base], U256::from(9_996 + 31_549));
+		assert_eq!(minted_capital_accum[!Ticker::Base], U256::from(1_000));
+	}
+
+	#[test]
+	fn test_removing_works() {
+		let (mut pool, mut minted_capital_accum, ID) = mint_pool();
+		let mut minted_capital = None;
+		pool.mint(ID, -240, 0, 10000, |minted| {
+			minted_capital.replace(minted);
+			true
+		})
+		.unwrap();
+
+		let (returned_capital, _) = pool.burn(ID, -240, 0, 10000).unwrap();
+
+		assert_eq!(returned_capital[Ticker::Base], U256::from(120));
+		assert_eq!(returned_capital[!Ticker::Base], U256::from(0));
+	}
+
+	#[test]
+	fn test_addliquidityto_liquiditygross() {
+		let (mut pool, _, ID) = mint_pool();
+		pool.mint(ID, -240, 0, 100, |_| true).unwrap();
+
+		assert_eq!(pool.liquidity_map.get(&-240).unwrap().liquidity_gross, 100);
+		assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 100);
+		assert!(!pool.liquidity_map.contains_key(&1));
+		assert!(!pool.liquidity_map.contains_key(&2));
+
+		pool.mint(ID, -240, 1, 150, |_| true).unwrap();
+		assert_eq!(pool.liquidity_map.get(&-240).unwrap().liquidity_gross, 250);
+		assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 100);
+		assert_eq!(pool.liquidity_map.get(&1).unwrap().liquidity_gross, 150);
+		assert!(!pool.liquidity_map.contains_key(&2));
+
+		pool.mint(ID, 0, 2, 60, |_| true).unwrap();
+		assert_eq!(pool.liquidity_map.get(&-240).unwrap().liquidity_gross, 250);
+		assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 160);
+		assert_eq!(pool.liquidity_map.get(&1).unwrap().liquidity_gross, 150);
+		assert_eq!(pool.liquidity_map.get(&2).unwrap().liquidity_gross, 60);
+	}
+
+	#[test]
+	fn test_remove_liquidity_liquiditygross() {
+		let (mut pool, _, ID) = mint_pool();
+		pool.mint(ID, -240, 0, 100, |_| true).unwrap();
+		pool.mint(ID, -240, 0, 40, |_| true).unwrap();
+		pool.burn(ID, -240, 0, 90).unwrap();
+		assert_eq!(pool.liquidity_map.get(&-240).unwrap().liquidity_gross, 50);
+		assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 50);
+	}
+
+	#[test]
+	fn test_clearsticklower_ifpositionremoved() {
+		let (mut pool, _, ID) = mint_pool();
+		pool.mint(ID, -240, 0, 100, |_| true).unwrap();
+		pool.burn(ID, -240, 0, 100).unwrap();
+		assert!(!pool.liquidity_map.contains_key(&-240));
+	}
+
+	#[test]
+	fn test_clearstickupper_ifpositionremoved() {
+		let (mut pool, _, ID) = mint_pool();
+		pool.mint(ID, -240, 0, 100, |_| true).unwrap();
+		pool.burn(ID, -240, 0, 100).unwrap();
+		assert!(!pool.liquidity_map.contains_key(&0));
+	}
+
+	#[test]
+	fn test_clears_onlyunused() {
+		let (mut pool, _, ID) = mint_pool();
+		pool.mint(ID, -240, 0, 100, |_| true).unwrap();
+		pool.mint(ID, -60, 0, 250, |_| true).unwrap();
+		pool.burn(ID, -240, 0, 100).unwrap();
+		assert!(!pool.liquidity_map.contains_key(&-240));
+		assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 250);
+		assert_eq!(
+			pool.liquidity_map.get(&0).unwrap().fee_growth_outside[Ticker::Base],
+			U256::from(0)
+		);
+		assert_eq!(
+			pool.liquidity_map.get(&0).unwrap().fee_growth_outside[!Ticker::Base],
+			U256::from(0)
+		);
+	}
+
+	// TODO: Continue  UniswapV3Pool.spec.ts line 360
 }
