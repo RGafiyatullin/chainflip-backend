@@ -1472,7 +1472,8 @@ mod test {
 		assert_eq!(pool.current_tick, Tick::from(-23_028));
 	}
 
-	fn above_current_price() -> (PoolState, enum_map::EnumMap<Ticker, Amount>) {
+	#[test]
+	fn above_current_price() {
 		let (mut pool, mut minted_capital_accum) = mint_pool();
 
 		const MINTED_LIQUIDITY: u128 = 10_000;
@@ -1494,8 +1495,6 @@ mod test {
 
 		assert_eq!(minted_capital_accum[INPUT_TICKER], U256::from(9_996 + 21_549));
 		assert_eq!(minted_capital_accum[!INPUT_TICKER], U256::from(1_000));
-
-		(pool, minted_capital_accum)
 	}
 
 	#[test]
