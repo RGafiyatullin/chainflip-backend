@@ -952,6 +952,7 @@ dependencies = [
  "rand 0.6.5",
  "rand 0.7.3",
  "secp256k1 0.20.3",
+ "sha2 0.9.9",
  "slog",
  "sp-consensus-aura",
  "sp-core 6.0.0 (git+https://github.com/chainflip-io/substrate.git?tag=chainflip-monthly-2022-06+01)",
@@ -976,6 +977,7 @@ dependencies = [
  "serde",
  "slog",
  "substrate-build-script-utils",
+ "tiny-bip39 1.0.0",
  "tokio",
  "utilities",
 ]

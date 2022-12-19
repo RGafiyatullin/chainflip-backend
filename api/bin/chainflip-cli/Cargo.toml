@@ -17,6 +17,7 @@ serde = {version = "1.0", features = ["derive", "rc"]}
 slog = {version = "2.7.0", features = ["max_level_trace", "release_max_level_trace"]}
 tokio = {version = "1.13.1", features = ["full"]}
 utilities = {path = "../../../utilities"}
+tiny-bip39 = "1.0.0"
 
 [build-dependencies]
 substrate-build-script-utils = { git = "https://github.com/chainflip-io/substrate.git", tag = 'chainflip-monthly-2022-06+01' }

@@ -260,7 +260,8 @@ fn confirm_submit() -> bool {
 	}
 }
 
-fn generate_keys(path: Option<PathBuf>) -> Result<()> {
+fn generate_keys(path: Option<PathBuf>, seed_phrase: Option<&str>) -> Result<()> {
+	use bip39::{Language, Mnemonic, MnemonicType};
 	use std::fs;
 
 	const NODE_KEY_FILE_NAME: &str = "node_key_file";
@@ -294,18 +295,23 @@ fn generate_keys(path: Option<PathBuf>) -> Result<()> {
 
 	println!("Generating fresh keys for your Chainflip Node!");
 
-	let node_key = api::generate_node_key();
+	// Get a new random seed phrase if none was provided
+	let seed_phrase = seed_phrase
+		.unwrap_or_else(|| Mnemonic::new(MnemonicType::Words12, Language::English).phrase());
+
+	let node_key = api::generate_node_key(seed_phrase)?;
 	fs::write(node_key_file, hex::encode(node_key.secret_key))?;
 	println!("🔑 Your Node public key is: 0x{}", hex::encode(node_key.public_key));
 
-	let ethereum_key = api::generate_ethereum_key();
+	let ethereum_key = api::generate_ethereum_key(seed_phrase)?;
 	fs::write(ethereum_key_file, hex::encode(ethereum_key.secret_key))?;
 	println!("🔑 Your Ethereum public key is: 0x{}", hex::encode(ethereum_key.public_key));
 
-	let (signing_key, signing_key_seed) = api::generate_signing_key(None)?;
+	let signing_key = api::generate_signing_key(seed_phrase)?;
 	fs::write(signing_key_file, hex::encode(signing_key.secret_key))?;
 	println!("🔑 Your Validator key is: 0x{}", hex::encode(signing_key.public_key));
-	println!("🌱 Your Validator key seed phrase is: {}", signing_key_seed);
+
+	println!("🌱 Your Chainflip keys seed phrase is: {}", seed_phrase);
 
 	println!("Saved all secret keys to {}", absolute_path_string);
 
