@@ -33,11 +33,12 @@ use async_trait::async_trait;
 use mockall::automock;
 
 pub type EthHttpRpcClient = EthRpcClient<web3::transports::Http>;
-pub type EthWsRpcClient = EthRpcClient<web3::transports::WebSocket>;
+pub type EthWsRpcClient = EthRpcClient<super::ws_transport::WebSocket>;
 
 #[derive(Clone)]
 pub struct EthRpcClient<T: EthTransport> {
 	web3: Web3<T>,
+	// MAXIM: should there be a field to record if the connection is broken?
 }
 
 impl<T: EthTransport> EthRpcClient<T> {
@@ -250,11 +251,13 @@ where
 	}
 
 	async fn block_number(&self) -> Result<U64> {
-		self.web3
-			.eth()
-			.block_number()
-			.await
-			.context("Failed to fetch block number with HTTP client")
+		let res = self.web3.eth().block_number().await;
+
+		if let Err(web3::Error::Transport(_)) = &res {
+			println!("Transport error!");
+		}
+
+		res.context("Failed to fetch block number with HTTP client")
 	}
 }
 
@@ -262,9 +265,7 @@ impl EthWsRpcClient {
 	pub async fn new(eth_settings: &settings::Eth, logger: &slog::Logger) -> Result<Self> {
 		let client = Self::inner_new(
 			&eth_settings.ws_node_endpoint,
-			async {
-				context!(web3::transports::WebSocket::new(&eth_settings.ws_node_endpoint).await)
-			},
+			async { super::ws_transport::WebSocket::new(&eth_settings.ws_node_endpoint).await },
 			logger,
 		)
 		.await?;
@@ -296,14 +297,14 @@ impl EthWsRpcClient {
 pub trait EthWsRpcApi {
 	async fn subscribe_new_heads(
 		&self,
-	) -> Result<SubscriptionStream<web3::transports::WebSocket, BlockHeader>>;
+	) -> Result<SubscriptionStream<super::ws_transport::WebSocket, BlockHeader>>;
 }
 
 #[async_trait]
 impl EthWsRpcApi for EthWsRpcClient {
 	async fn subscribe_new_heads(
 		&self,
-	) -> Result<SubscriptionStream<web3::transports::WebSocket, BlockHeader>> {
+	) -> Result<SubscriptionStream<super::ws_transport::WebSocket, BlockHeader>> {
 		self.web3
 			.eth_subscribe()
 			.subscribe_new_heads()
@@ -552,4 +553,73 @@ pub mod mocks {
 			async fn block_number(&self) -> Result<U64>;
 		}
 	);
+}
+
+#[cfg(test)]
+mod maxim {
+
+	use futures::StreamExt;
+
+	use super::*;
+
+	async fn block_consumer(ws_client: EthWsRpcClient) -> Result<()> {
+		let mut block_stream = ws_client.subscribe_new_heads().await.expect("could not subscribe");
+
+		println!("GOT BLOCK STREAM");
+
+		while let Some(block_header) = block_stream.next().await {
+			println!(">>>>>> got block header: {:?}", block_header)
+		}
+
+		println!("BLOCK CONSUMER FINISHED");
+
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn ws_test() -> Result<()> {
+		use crate::settings::Eth;
+
+		let logger = crate::logging::test_utils::new_test_logger();
+
+		let eth_settings = Eth {
+			ws_node_endpoint: "wss://eth-goerli.g.alchemy.com/v2/RHrVrBxWb2Of2ErtV6WYfxSwM3RiV-vv"
+				.to_string(),
+			http_node_endpoint: "".to_string(),
+			private_key_file: std::path::PathBuf::from(""),
+		};
+
+		let ws_client = EthWsRpcClient::new(&eth_settings, &logger)
+			.await
+			.context("Failed to create EthWsRpcClient")?;
+
+		// println!(">>> Requesting block number. This should fail");
+
+		tokio::task::spawn(block_consumer(ws_client.clone()));
+
+		// match ws_client.block_number().await {
+		// 	Ok(block_number) => {
+		// 		println!("got block number: {}", block_number);
+		// 	},
+		// 	Err(err) => {
+		// 		// This is a generic anyhow::Error
+		// 		println!("Err: {}", err);
+		// 	},
+		// }
+
+		tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+		Ok(())
+	}
+}
+
+// This reconnects if necessary
+pub async fn subscribe_new_heads_reliable(
+	ws_client: &mut EthRpcClient<super::ws_transport::WebSocket>,
+) -> Result<SubscriptionStream<super::ws_transport::WebSocket, BlockHeader>> {
+	let res = ws_client.subscribe_new_heads().await?;
+
+	// MAXIM: (TODO) reconnect ws_client on error
+
+	Ok(res)
 }

@@ -86,6 +86,7 @@ where
 			let eth_http_rpc = eth_dual_rpc.http_client.clone();
 			let state_chain_client = state_chain_client.clone();
 			async move {
+				// MAXIM: safe stream from a given block
 				let safe_ws_tx_stream = block_transactions_stream_from_head_stream(
 					epoch_start.block_number,
 					safe_ws_head_stream(

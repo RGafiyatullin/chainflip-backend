@@ -43,6 +43,7 @@ rand_legacy = { package = "rand", version = "0.6" }
 
 # Same version of jsonrpsee as substrate
 jsonrpsee = { version = "0.13.0", features = ["full"] }
+jsonrpc-core = "*"
 
 websocket = "0.24"
 ethbloom = "0.12.1"
@@ -91,6 +92,9 @@ zmq = {git = "https://github.com/chainflip-io/rust-zmq.git", tag = "chainflip-v0
 ed25519-dalek = "*"
 x25519-dalek = {version ="*", features = ["serde"]}
 rand = "0.8.4"
+async-native-tls = { package = "web3-async-native-tls", version = "0.4", default-features = false}
+soketto = "*"
+headers = { version = "0.3"}
 
 # Local deps
 cf-chains = {path = "../state-chain/chains"}

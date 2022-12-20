@@ -31,15 +31,23 @@ where
 	StateChainClient: ExtrinsicApi + 'static + Send + Sync,
 {
 	epoch_witnesser::start(
+		// NAME
 		contract_witnesser.contract_name(),
+		// Receiver for starts of epochs
 		epoch_starts_receiver,
+		// should witness (?)
 		move |epoch_start| witness_historical_epochs || epoch_start.current,
+		// Initial state
 		contract_witnesser,
+		// epoch witnesser generator
 		move |end_witnessing_signal, epoch_start, mut contract_witnesser, logger| {
 			let state_chain_client = state_chain_client.clone();
 			let eth_dual_rpc = eth_dual_rpc.clone();
 
 			async move {
+				// IN RELEASE: read WitnessedUntil from file
+
+				// Get blocks with events?
 				let mut block_stream = block_events_stream_for_contract_from(
 					epoch_start.block_number,
 					&contract_witnesser,
@@ -57,6 +65,7 @@ where
 						break
 					}
 
+					// Handle block events
 					contract_witnesser
 						.handle_block_events(
 							epoch_start.epoch_index,
@@ -67,6 +76,8 @@ where
 							&logger,
 						)
 						.await?;
+
+					// IN RELEASE: record witnessed until
 				}
 				Ok(contract_witnesser)
 			}

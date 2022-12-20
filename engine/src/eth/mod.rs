@@ -6,6 +6,7 @@ pub mod ingress_witnesser;
 pub mod key_manager;
 mod merged_block_items_stream;
 pub mod stake_manager;
+mod ws_transport;
 
 pub mod event;
 
@@ -388,7 +389,7 @@ where
 pub async fn block_events_stream_for_contract_from<EventParameters, ContractWitnesser>(
 	from_block: u64,
 	contract_witnesser: &ContractWitnesser,
-	eth_dual_rpc: EthDualRpcClient,
+	mut eth_dual_rpc: EthDualRpcClient,
 	logger: &slog::Logger,
 ) -> Result<Pin<Box<dyn Stream<Item = BlockWithItems<Event<EventParameters>>> + Send + 'static>>>
 where
@@ -402,14 +403,14 @@ where
 		hex::encode(contract_address)
 	);
 
+	// MAXIM: safe stream from a given block
+
+	let head_stream = rpc::subscribe_new_heads_reliable(&mut eth_dual_rpc.ws_client).await?;
+
 	let safe_ws_block_events = block_events_stream_from_head_stream(
 		from_block,
 		contract_address,
-		safe_ws_head_stream(
-			eth_dual_rpc.ws_client.subscribe_new_heads().await?,
-			ETH_BLOCK_SAFETY_MARGIN,
-			logger,
-		),
+		safe_ws_head_stream(head_stream, ETH_BLOCK_SAFETY_MARGIN, logger),
 		contract_witnesser.decode_log_closure()?,
 		eth_dual_rpc.ws_client,
 		logger.clone(),
