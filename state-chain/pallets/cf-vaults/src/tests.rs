@@ -18,7 +18,7 @@ macro_rules! assert_last_event {
 	($pat:pat) => {
 		let event = last_event::<MockRuntime>();
 		assert!(
-			matches!(event, $crate::mock::Event::VaultsPallet($pat)),
+			matches!(event, $crate::mock::RuntimeEvent::VaultsPallet($pat)),
 			"Unexpected event {:?}",
 			event
 		);
@@ -164,13 +164,17 @@ fn keygen_verification_failure() {
 fn no_active_rotation() {
 	new_test_ext().execute_with(|| {
 		assert_noop!(
-			VaultsPallet::report_keygen_outcome(Origin::signed(ALICE), 1, Ok(NEW_AGG_PUB_KEY)),
+			VaultsPallet::report_keygen_outcome(
+				RuntimeOrigin::signed(ALICE),
+				1,
+				Ok(NEW_AGG_PUB_KEY)
+			),
 			Error::<MockRuntime, _>::NoActiveRotation
 		);
 
 		assert_noop!(
 			VaultsPallet::report_keygen_outcome(
-				Origin::signed(ALICE),
+				RuntimeOrigin::signed(ALICE),
 				1,
 				Err(KeygenError::Failure(Default::default()))
 			),
@@ -186,7 +190,7 @@ fn cannot_report_keygen_success_twice() {
 		let ceremony_id = current_ceremony_id();
 
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(ALICE),
+			RuntimeOrigin::signed(ALICE),
 			ceremony_id,
 			Ok(NEW_AGG_PUB_KEY)
 		));
@@ -194,7 +198,7 @@ fn cannot_report_keygen_success_twice() {
 		// Can't report twice.
 		assert_noop!(
 			VaultsPallet::report_keygen_outcome(
-				Origin::signed(ALICE),
+				RuntimeOrigin::signed(ALICE),
 				ceremony_id,
 				Ok(NEW_AGG_PUB_KEY)
 			),
@@ -211,7 +215,7 @@ fn cannot_report_two_different_keygen_outcomes() {
 		let ceremony_id = current_ceremony_id();
 
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(ALICE),
+			RuntimeOrigin::signed(ALICE),
 			ceremony_id,
 			Ok(NEW_AGG_PUB_KEY)
 		));
@@ -219,7 +223,7 @@ fn cannot_report_two_different_keygen_outcomes() {
 		// Can't report failure after reporting success
 		assert_noop!(
 			VaultsPallet::report_keygen_outcome(
-				Origin::signed(ALICE),
+				RuntimeOrigin::signed(ALICE),
 				ceremony_id,
 				Err(KeygenError::Failure(BTreeSet::from_iter([BOB, CHARLIE])))
 			),
@@ -236,7 +240,7 @@ fn only_participants_can_report_keygen_outcome() {
 		let ceremony_id = current_ceremony_id();
 
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(ALICE),
+			RuntimeOrigin::signed(ALICE),
 			ceremony_id,
 			Ok(NEW_AGG_PUB_KEY)
 		));
@@ -246,7 +250,7 @@ fn only_participants_can_report_keygen_outcome() {
 		assert!(!ALL_CANDIDATES.contains(&non_participant), "Non-participant is a candidate");
 		assert_noop!(
 			VaultsPallet::report_keygen_outcome(
-				Origin::signed(non_participant),
+				RuntimeOrigin::signed(non_participant),
 				ceremony_id,
 				Ok(NEW_AGG_PUB_KEY)
 			),
@@ -263,7 +267,7 @@ fn reporting_keygen_outcome_must_be_for_pending_ceremony_id() {
 		let ceremony_id = current_ceremony_id();
 
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(ALICE),
+			RuntimeOrigin::signed(ALICE),
 			ceremony_id,
 			Ok(NEW_AGG_PUB_KEY)
 		));
@@ -271,7 +275,7 @@ fn reporting_keygen_outcome_must_be_for_pending_ceremony_id() {
 		// Ceremony id in the past (not the pending one we're waiting for)
 		assert_noop!(
 			VaultsPallet::report_keygen_outcome(
-				Origin::signed(ALICE),
+				RuntimeOrigin::signed(ALICE),
 				ceremony_id - 1,
 				Ok(NEW_AGG_PUB_KEY)
 			),
@@ -282,7 +286,7 @@ fn reporting_keygen_outcome_must_be_for_pending_ceremony_id() {
 		// Ceremony id in the future
 		assert_noop!(
 			VaultsPallet::report_keygen_outcome(
-				Origin::signed(ALICE),
+				RuntimeOrigin::signed(ALICE),
 				ceremony_id + 1,
 				Ok(NEW_AGG_PUB_KEY)
 			),
@@ -301,7 +305,7 @@ fn keygen_report_success() {
 		assert_eq!(KeygenResolutionPendingSince::<MockRuntime, _>::get(), 1);
 
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(ALICE),
+			RuntimeOrigin::signed(ALICE),
 			keygen_ceremony_id,
 			Ok(NEW_AGG_PUB_KEY)
 		));
@@ -322,7 +326,7 @@ fn keygen_report_success() {
 
 		// Bob agrees.
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(BOB),
+			RuntimeOrigin::signed(BOB),
 			keygen_ceremony_id,
 			Ok(NEW_AGG_PUB_KEY)
 		));
@@ -342,7 +346,7 @@ fn keygen_report_success() {
 
 		// Charlie agrees.
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(CHARLIE),
+			RuntimeOrigin::signed(CHARLIE),
 			keygen_ceremony_id,
 			Ok(NEW_AGG_PUB_KEY)
 		));
@@ -401,7 +405,7 @@ fn keygen_report_failure() {
 		assert_eq!(KeygenResolutionPendingSince::<MockRuntime, _>::get(), 1);
 
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(ALICE),
+			RuntimeOrigin::signed(ALICE),
 			ceremony_id,
 			Err(KeygenError::Failure(BTreeSet::from_iter([CHARLIE])))
 		));
@@ -413,7 +417,7 @@ fn keygen_report_failure() {
 
 		// Bob agrees.
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(BOB),
+			RuntimeOrigin::signed(BOB),
 			ceremony_id,
 			Err(KeygenError::Failure(BTreeSet::from_iter([CHARLIE])))
 		));
@@ -427,7 +431,7 @@ fn keygen_report_failure() {
 
 		// Charlie agrees.
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(CHARLIE),
+			RuntimeOrigin::signed(CHARLIE),
 			ceremony_id,
 			Err(KeygenError::Failure(BTreeSet::from_iter([CHARLIE])))
 		));
@@ -461,7 +465,7 @@ fn test_keygen_timeout_period() {
 		assert_eq!(KeygenResolutionPendingSince::<MockRuntime, _>::get(), 1);
 
 		assert_ok!(VaultsPallet::report_keygen_outcome(
-			Origin::signed(ALICE),
+			RuntimeOrigin::signed(ALICE),
 			ceremony_id,
 			Err(KeygenError::Failure(BTreeSet::from_iter([CHARLIE])))
 		));
@@ -489,7 +493,7 @@ fn vault_key_rotated() {
 
 		assert_noop!(
 			VaultsPallet::vault_key_rotated(
-				Origin::root(),
+				RuntimeOrigin::root()(),
 				NEW_AGG_PUB_KEY,
 				ROTATION_BLOCK_NUMBER,
 				TX_HASH,
@@ -507,7 +511,7 @@ fn vault_key_rotated() {
 		VaultsPallet::activate();
 
 		assert_ok!(VaultsPallet::vault_key_rotated(
-			Origin::root(),
+			RuntimeOrigin::root()(),
 			NEW_AGG_PUB_KEY,
 			ROTATION_BLOCK_NUMBER,
 			TX_HASH,
@@ -516,7 +520,7 @@ fn vault_key_rotated() {
 		// Can't repeat.
 		assert_noop!(
 			VaultsPallet::vault_key_rotated(
-				Origin::root(),
+				RuntimeOrigin::root()(),
 				NEW_AGG_PUB_KEY,
 				ROTATION_BLOCK_NUMBER,
 				TX_HASH,
@@ -567,7 +571,7 @@ fn test_vault_key_rotated_externally() {
 		const TX_HASH: [u8; 4] = [0xab; 4];
 		assert_eq!(MockSystemStateManager::get_current_system_state(), SystemState::Normal);
 		assert_ok!(VaultsPallet::vault_key_rotated_externally(
-			Origin::root(),
+			RuntimeOrigin::root()(),
 			NEW_AGG_PUB_KEY,
 			1,
 			TX_HASH,
