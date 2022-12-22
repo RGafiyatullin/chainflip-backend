@@ -291,6 +291,24 @@ pub struct BlockWithItems<BlockItem: Debug> {
 	pub block_items: Vec<BlockItem>,
 }
 
+// MAXIM: we can build on top of this.
+
+async fn eth_ws_block_head_stream_reliable_from<EthRpc>(
+	from_block: u64,
+	eth_rpc: EthRpc,
+	logger: &slog::Logger,
+) -> Result<Pin<Box<dyn Stream<Item = EthNumberBloom> + Send + 'static>>>
+where
+	EthRpc: 'static + EthRpcApi + Send + Sync + Clone,
+{
+	// MAXIM (TODO): we want subscriptions to be made at this level, not
+	// at the upper levels (see `block_events_stream_from_head_stream`)
+
+	// How can we re-connect eth_rpc without breaking subscriptions elsewhere?
+	// Should we first refactor to only have one subscriptions for ETH blocks?
+	todo!();
+}
+
 async fn eth_block_head_stream_from<BlockHeaderStream, EthRpc>(
 	from_block: u64,
 	safe_head_stream: BlockHeaderStream,
@@ -324,6 +342,7 @@ where
 async fn block_events_stream_from_head_stream<BlockHeaderStream, EthRpc, EventParameters>(
 	from_block: u64,
 	contract_address: H160,
+	// MAXIM: the reason this is generic is because we also have HTTP client
 	safe_head_stream: BlockHeaderStream,
 	decode_log_fn: DecodeLogClosure<EventParameters>,
 	eth_rpc: EthRpc,
@@ -389,6 +408,7 @@ where
 pub async fn block_events_stream_for_contract_from<EventParameters, ContractWitnesser>(
 	from_block: u64,
 	contract_witnesser: &ContractWitnesser,
+	// MAXIM: this is smart pointer, not an "owned" connection
 	mut eth_dual_rpc: EthDualRpcClient,
 	logger: &slog::Logger,
 ) -> Result<Pin<Box<dyn Stream<Item = BlockWithItems<Event<EventParameters>>> + Send + 'static>>>

@@ -25,6 +25,7 @@ pub async fn block_head_stream_from<
 	HeaderFut,
 >(
 	from_block: BlockNumber,
+	// MAXIM: does this need to be "safe"?
 	safe_head_stream: HeaderStream,
 	get_header_fn: GetHeaderClosure,
 	logger: &slog::Logger,
