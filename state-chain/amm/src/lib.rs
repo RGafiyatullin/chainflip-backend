@@ -518,7 +518,6 @@ impl PoolState {
 				self.current_liquidity -= current_liquidity_delta;
 
 				let fees_owed = if position.liquidity == 0 {
-					println!("REMOVING POSITION");
 					// DIFF: This behaviour is different than Uniswap's to ensure if a position
 					// exists its ticks also exist in the liquidity_map
 					// In other words, the position will automatically be removed if all the
@@ -648,14 +647,6 @@ impl PoolState {
 			// next_sqrt_price_from_input_amount rounds so this maybe true even though
 			// amount_minus_fees < amount_required_to_reach_target (TODO Prove)
 			if sqrt_ratio_next == sqrt_ratio_target {
-				// Note conversion to i128 and addition don't overflow (See test `max_liquidity`)
-				self.current_liquidity = i128::try_from(self.current_liquidity)
-					.unwrap()
-					.checked_add(SD::liquidity_delta_on_crossing_tick(target_info))
-					.unwrap()
-					.try_into()
-					.unwrap();
-
 				// Will not overflow as fee_pips <= ONE_IN_PIPS / 2
 				let fees = mul_div_ceil(
 					amount_required_to_reach_target,
@@ -669,8 +660,12 @@ impl PoolState {
 				// global_fee_growth value is. We also do this to avoid needing to consider the
 				// case of reverting an extrinsic's mutations which is expensive in Substrate based
 				// chains.
-				self.global_fee_growth[SD::INPUT_TICKER] =
-					self.global_fee_growth[SD::INPUT_TICKER].saturating_add(fees);
+				self.global_fee_growth[SD::INPUT_TICKER] = self.global_fee_growth[SD::INPUT_TICKER]
+					.saturating_add(mul_div_floor(
+						fees,
+						U256::from(1) << 128u32,
+						self.current_liquidity,
+					));
 				target_info.fee_growth_outside = enum_map::EnumMap::default().map(|ticker, ()| {
 					self.global_fee_growth[ticker] - target_info.fee_growth_outside[ticker]
 				});
@@ -680,6 +675,15 @@ impl PoolState {
 				// TODO: Prove these don't underflow
 				amount -= amount_required_to_reach_target;
 				amount -= fees;
+
+				// Update the liquidity as the last step.
+				// Note conversion to i128 and addition don't overflow (See test `max_liquidity`)
+				self.current_liquidity = i128::try_from(self.current_liquidity)
+					.unwrap()
+					.checked_add(SD::liquidity_delta_on_crossing_tick(target_info))
+					.unwrap()
+					.try_into()
+					.unwrap();
 			} else {
 				let amount_in = SD::input_amount_delta_ceil(
 					self.current_sqrt_price,
@@ -696,8 +700,12 @@ impl PoolState {
 				// the maximum global_fee_growth value is. We also do this to avoid needing to
 				// consider the case of reverting an extrinsic's mutations which is expensive in
 				// Substrate based chains.
-				self.global_fee_growth[SD::INPUT_TICKER] =
-					self.global_fee_growth[SD::INPUT_TICKER].saturating_add(fees);
+				self.global_fee_growth[SD::INPUT_TICKER] = self.global_fee_growth[SD::INPUT_TICKER]
+					.saturating_add(mul_div_floor(
+						fees,
+						U256::from(1) << 128u32,
+						self.current_liquidity,
+					));
 				self.current_sqrt_price = sqrt_ratio_next;
 				self.current_tick = Self::tick_at_sqrt_price(self.current_sqrt_price);
 
@@ -1340,7 +1348,7 @@ mod test {
 
 	fn mint_pool() -> (PoolState, enum_map::EnumMap<Ticker, Amount>, LiquidityProvider) {
 		let mut pool =
-			PoolState::new(100, U256::from_dec_str("25054144837504793118650146401").unwrap()); // encodeSqrtPrice (1,10)
+			PoolState::new(300, U256::from_dec_str("25054144837504793118650146401").unwrap()); // encodeSqrtPrice (1,10)
 		const ID: LiquidityProvider = H256([0xcf; 32]);
 		const MINTED_LIQUIDITY: u128 = 3_161;
 		let mut minted_capital = None;
@@ -1891,8 +1899,9 @@ mod test {
 		.unwrap();
 
 		const SWAP_INPUT: u128 = 1000000000000000000;
-		pool.swap::<PairToBase>((SWAP_INPUT / 10).into());
-		pool.swap::<BaseToPair>((SWAP_INPUT / 100).into());
+
+		pool.swap::<BaseToPair>((SWAP_INPUT / 10).into());
+		pool.swap::<PairToBase>((SWAP_INPUT / 100).into());
 
 		match pool.burn(
 			ID,
@@ -1922,8 +1931,6 @@ mod test {
 			))
 			.unwrap();
 		assert_eq!(tick.liquidity, 1);
-
-		// TO DEBUG
 		assert_eq!(
 			tick.last_fee_growth_inside[Ticker::Base],
 			U256::from_dec_str("102084710076281216349243831104605583").unwrap()
@@ -1932,9 +1939,33 @@ mod test {
 			tick.last_fee_growth_inside[!Ticker::Base],
 			U256::from_dec_str("10208471007628121634924383110460558").unwrap()
 		);
-		///
-
 		assert_eq!(tick.fees_owed[Ticker::Base], 0);
 		assert_eq!(tick.fees_owed[!Ticker::Base], 0);
+
+		let (returned_capital, fees_owed) = pool
+			.burn(
+				ID,
+				MIN_TICK_UNISWAP + TICKSPACING_UNISWAP,
+				MAX_TICK_UNISWAP - TICKSPACING_UNISWAP,
+				1,
+			)
+			.unwrap();
+
+		// DIFF: Burn will have burnt the entire position so it will be deleted.
+		assert_eq!(fees_owed[Ticker::Base], 0);
+		assert_eq!(fees_owed[!Ticker::Base], 0);
+
+		// This could be missing + fees_owed[Ticker::Base]
+		assert_eq!(returned_capital[Ticker::Base], U256::from(3));
+		assert_eq!(returned_capital[!Ticker::Base], U256::from(0));
+
+		match pool.positions.get(&(
+			ID,
+			MIN_TICK_UNISWAP + TICKSPACING_UNISWAP,
+			MAX_TICK_UNISWAP - TICKSPACING_UNISWAP,
+		)) {
+			None => {},
+			_ => panic!("Expected NonExistent Key"),
+		}
 	}
 }
