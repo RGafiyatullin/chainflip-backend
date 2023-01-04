@@ -529,10 +529,6 @@ impl PoolState {
 					// If the position is not fully burnt then the position fees are not updated
 					// and zero fees are returned. So basically fees are collected when
 					// the whole position is burnt or when we call collect.
-					println!(
-						"Position not fully burnt. Fees Owed: {:?} but we return 0",
-						position.fees_owed
-					);
 					Default::default()
 				};
 
@@ -626,7 +622,6 @@ impl PoolState {
 			.then_some(())
 			.and_then(|()| SD::target_tick(self.current_tick, &mut self.liquidity_map))
 		{
-			println!(" ------- SWAP LOOP ------- ");
 			let sqrt_ratio_target = Self::sqrt_price_at_tick(*target_tick);
 
 			let amount_minus_fees = mul_div_floor(
@@ -634,8 +629,6 @@ impl PoolState {
 				U256::from(ONE_IN_PIPS - self.fee_pips),
 				U256::from(ONE_IN_PIPS),
 			); // This cannot overflow as we bound fee_pips to <= ONE_IN_PIPS/2 (TODO)
-			println!("self.current_sqrt_price: {:?}", self.current_sqrt_price);
-			println!("sqrt_ratio_target: {:?}", sqrt_ratio_target);
 			let amount_required_to_reach_target = SD::input_amount_delta_ceil(
 				self.current_sqrt_price,
 				sqrt_ratio_target,
@@ -645,10 +638,6 @@ impl PoolState {
 			let sqrt_ratio_next = if amount_minus_fees >= amount_required_to_reach_target {
 				sqrt_ratio_target
 			} else {
-				println!(" ------- COMPUTE SWAP ------- ");
-				println!("self.current_sqrt_price: {:?}", self.current_sqrt_price);
-				println!("self.current_liquidity: {:?}", self.current_liquidity);
-				println!("amount_minus_fees: {:?}", amount_minus_fees);
 				assert!(self.current_liquidity != 0);
 				SD::next_sqrt_price_from_input_amount(
 					self.current_sqrt_price,
@@ -656,8 +645,6 @@ impl PoolState {
 					amount_minus_fees,
 				)
 			};
-			println!("sqrt_ratio_next: {:?}", sqrt_ratio_next);
-			println!("sqrt_ratio_target: {:?}", sqrt_ratio_target);
 
 			// Cannot overflow as if the swap traversed all ticks (MIN_TICK to MAX_TICK
 			// (inclusive)), assuming the maximum possible liquidity, total_amount_out would still
@@ -745,9 +732,7 @@ impl PoolState {
 				// test_updates_entering)
 				if self.current_sqrt_price != sqrt_ratio_next {
 					self.current_sqrt_price = sqrt_ratio_next;
-					println!("self.current_sqrt_price {}", self.current_sqrt_price);
 					self.current_tick = Self::tick_at_sqrt_price(self.current_sqrt_price);
-					println!("final tick: {}", self.current_tick);
 				}
 
 				break
@@ -911,10 +896,6 @@ impl PoolState {
 		liquidity: Liquidity,
 		amount: Amount,
 	) -> SqrtPriceQ64F96 {
-		println!("next_sqrt_price_from_pair_input************'");
-		println!("sqrt_ratio_current: {:?}", sqrt_ratio_current);
-		println!("liquidity: {:?}", liquidity);
-		println!("amount: {:?}", amount);
 		// Will not overflow as function is not called if amount >= amount_required_to_reach_target,
 		// therefore bounding the function output to approximately <= MAX_SQRT_PRICE
 		sqrt_ratio_current + (amount << 96u32) / liquidity
@@ -2752,36 +2733,61 @@ mod test {
 	#[test]
 	fn test_swapping_gaps_pairtobase() {
 		let (mut pool, _, id) = mediumpool_initialized_nomint();
-		println!("pool.current_tick {}", pool.current_tick);
-		pool.mint(id, 120000, 121200, 2500000000000000000, |_| true).unwrap();
+		pool.mint(id, 120000, 121200, 250000000000000000, |_| true).unwrap();
 		pool.swap::<PairToBase>((U256::from_dec_str("1000000000000000000").unwrap()).into());
-		let (returned_capital, _) = pool.burn(id, 120000, 121200, 2500000000000000000).unwrap();
+		let (returned_capital, _) = pool.burn(id, 120000, 121200, 250000000000000000).unwrap();
 
-		// assert_eq!(returned_capital[Ticker::Base],
-		// U256::from_dec_str("30027458295511").unwrap()); assert_eq!(
-		// 	returned_capital[!Ticker::Base],
-		// 	U256::from_dec_str("996999999999999999").unwrap()
-		// );
+		assert_eq!(returned_capital[Ticker::Base], U256::from_dec_str("30027458295511").unwrap());
+		assert_eq!(
+			returned_capital[!Ticker::Base],
+			U256::from_dec_str("996999999999999999").unwrap()
+		);
 		assert_eq!(pool.current_tick, 120196)
 	}
 
 	#[test]
 	fn test_swapping_gaps_basetopair() {
 		let (mut pool, _, id) = mediumpool_initialized_nomint();
-		println!("pool.current_tick {}", pool.current_tick);
-		pool.mint(id, -121200, -120000, 2500000000000000000, |_| true).unwrap();
+		pool.mint(id, -121200, -120000, 250000000000000000, |_| true).unwrap();
 		pool.swap::<BaseToPair>((U256::from_dec_str("1000000000000000000").unwrap()).into());
-		let (returned_capital, _) = pool.burn(id, -121200, -120000, 2500000000000000000).unwrap();
+		let (returned_capital, _) = pool.burn(id, -121200, -120000, 250000000000000000).unwrap();
 
-		// assert_eq!(returned_capital[Ticker::Base],
-		// U256::from_dec_str("30027458295511").unwrap()); assert_eq!(
-		// 	returned_capital[!Ticker::Base],
-		// 	U256::from_dec_str("996999999999999999").unwrap()
-		// );
+		assert_eq!(
+			returned_capital[Ticker::Base],
+			U256::from_dec_str("996999999999999999").unwrap()
+		);
+		assert_eq!(returned_capital[!Ticker::Base], U256::from_dec_str("30027458295511").unwrap());
 		assert_eq!(pool.current_tick, -120197)
 	}
+
+	#[test]
+	fn test_cannot_run_ticktransition_twice() {
+		const ID: LiquidityProvider = H256([0xcf; 32]);
+
+		let p0 = PoolState::sqrt_price_at_tick(-24081) + 1;
+		let mut pool = PoolState::new(300, p0);
+		assert_eq!(pool.current_liquidity, 0);
+		assert_eq!(pool.current_tick, -24081);
+
+		// add a bunch of liquidity around current price
+		pool.mint(ID, -24082, -24080, 1000000000000000000000 as u128, |_| true).unwrap();
+		assert_eq!(pool.current_liquidity, 1000000000000000000000 as u128);
+
+		pool.mint(ID, -24082, -24081, 1000000000000000000000 as u128, |_| true).unwrap();
+		assert_eq!(pool.current_liquidity, 1000000000000000000000 as u128);
+
+		// check the math works out to moving the price down 1, sending no amount out, and having
+		// some amount remaining
+		let amount_swapped = pool.swap::<BaseToPair>((U256::from_dec_str("3").unwrap()).into());
+		assert_eq!(amount_swapped, U256::from_dec_str("0").unwrap());
+
+		assert_eq!(pool.current_tick, -24082);
+		assert_eq!(pool.current_sqrt_price, p0 - 1);
+		assert_eq!(pool.current_liquidity, 2000000000000000000000 as u128);
+	}
+
 	///////////////////////////////////////////////////////////
-	/// TEST SQRTPRICE MATH
+	///         TEST SQRTPRICE MATH (not complete)         ////
 	///////////////////////////////////////////////////////////
 	#[test]
 	#[should_panic]
