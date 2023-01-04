@@ -629,6 +629,7 @@ impl PoolState {
 				U256::from(ONE_IN_PIPS - self.fee_pips),
 				U256::from(ONE_IN_PIPS),
 			); // This cannot overflow as we bound fee_pips to <= ONE_IN_PIPS/2 (TODO)
+
 			let amount_required_to_reach_target = SD::input_amount_delta_ceil(
 				self.current_sqrt_price,
 				sqrt_ratio_target,
@@ -693,7 +694,8 @@ impl PoolState {
 				amount -= amount_required_to_reach_target;
 				amount -= fees;
 
-				// Update the liquidity as the last step.
+				// Since the liquidity value is used for the fee calculation, updating needs to be
+				// done at the end.
 				// Note conversion to i128 and addition don't overflow (See test `max_liquidity`)
 				self.current_liquidity = i128::try_from(self.current_liquidity)
 					.unwrap()
@@ -1942,12 +1944,12 @@ mod test {
 			H256([0xce; 32]),
 			MIN_TICK_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
 			MAX_TICK_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
-			1000000000000000000,
+			expandto18decimals(1).as_u128(),
 			|_| true,
 		)
 		.unwrap();
 
-		const SWAP_INPUT: u128 = 1000000000000000000;
+		let SWAP_INPUT: u128 = expandto18decimals(1).as_u128();
 
 		pool.swap::<BaseToPair>((SWAP_INPUT / 10).into());
 		pool.swap::<PairToBase>((SWAP_INPUT / 100).into());
@@ -2049,8 +2051,7 @@ mod test {
 	) -> (PoolState, enum_map::EnumMap<Ticker, Amount>, LiquidityProvider) {
 		// fee_pips shall be one order of magnitude smaller than in the Uniswap pool (because
 		// ONE_IN_PIPS is /10)
-		let mut pool =
-			PoolState::new(300, U256::from_dec_str("79228162514264337593543950336").unwrap()); // encodeSqrtPrice (1,1)
+		let mut pool = PoolState::new(300, encodedprice1_1());
 		pool_initialized_zerotick(pool)
 	}
 
@@ -2077,13 +2078,13 @@ mod test {
 			H256([0xce; 32]),
 			MIN_TICK_UNISWAP_MEDIUM,
 			MAX_TICK_UNISWAP_MEDIUM,
-			1000000000000000000 as u128,
+			expandto18decimals(1).as_u128(),
 			|_| true,
 		)
 		.unwrap();
 
-		pool.swap::<BaseToPair>(U256::from_dec_str("1000000000000000000").unwrap());
-		pool.swap::<PairToBase>(U256::from_dec_str("1000000000000000000").unwrap());
+		pool.swap::<BaseToPair>(expandto18decimals(1));
+		pool.swap::<PairToBase>(expandto18decimals(1));
 
 		// Should be able to do only 1 burn (1000000000000000000 / 987654321000000000)
 
@@ -2114,13 +2115,13 @@ mod test {
 			H256([0xce; 32]),
 			MIN_TICK_UNISWAP_MEDIUM,
 			MAX_TICK_UNISWAP_MEDIUM,
-			1000000000000000000 as u128,
+			expandto18decimals(1).as_u128(),
 			|_| true,
 		)
 		.unwrap();
 
-		pool.swap::<BaseToPair>(U256::from_dec_str("1000000000000000000").unwrap());
-		pool.swap::<PairToBase>(U256::from_dec_str("1000000000000000000").unwrap());
+		pool.swap::<BaseToPair>(expandto18decimals(1));
+		pool.swap::<PairToBase>(expandto18decimals(1));
 
 		// Add a poke to update the fee growth and check it's value
 		pool.burn(H256([0xce; 32]), MIN_TICK_UNISWAP_MEDIUM, MAX_TICK_UNISWAP_MEDIUM, 0)
@@ -2144,7 +2145,7 @@ mod test {
 				H256([0xce; 32]),
 				MIN_TICK_UNISWAP_MEDIUM,
 				MAX_TICK_UNISWAP_MEDIUM,
-				1000000000000000000,
+				expandto18decimals(1).as_u128(),
 			)
 			.unwrap();
 
@@ -2179,7 +2180,7 @@ mod test {
 		)
 		.unwrap();
 
-		pool.swap::<BaseToPair>(U256::from_dec_str("1000000000000000000").unwrap());
+		pool.swap::<BaseToPair>(expandto18decimals(1));
 
 		pool.burn(
 			id,
@@ -2213,7 +2214,7 @@ mod test {
 			|_| true,
 		)
 		.unwrap();
-		pool.swap::<BaseToPair>(U256::from_dec_str("1000000000000000000").unwrap());
+		pool.swap::<BaseToPair>(expandto18decimals(1));
 
 		pool.burn(
 			id,
@@ -2247,7 +2248,7 @@ mod test {
 			|_| true,
 		)
 		.unwrap();
-		pool.swap::<BaseToPair>(U256::from_dec_str("1000000000000000000").unwrap());
+		pool.swap::<BaseToPair>(expandto18decimals(1));
 
 		pool.burn(
 			id,
@@ -2271,8 +2272,7 @@ mod test {
 	fn lowpool_initialized_zerotick(
 	) -> (PoolState, enum_map::EnumMap<Ticker, Amount>, LiquidityProvider) {
 		// TIckspaci
-		let mut pool =
-			PoolState::new(50, U256::from_dec_str("79228162514264337593543950336").unwrap()); //	encodeSqrtPrice (1,1)
+		let mut pool = PoolState::new(50, encodedprice1_1()); //	encodeSqrtPrice (1,1)
 		pool_initialized_zerotick(pool)
 	}
 
@@ -2344,13 +2344,17 @@ mod test {
 			id,
 			-TICKSPACING_UNISWAP_LOW,
 			TICKSPACING_UNISWAP_LOW,
-			1000000000000000000,
+			expandto18decimals(1).as_u128(),
 			|_| true,
 		)
 		.unwrap();
 
-		match pool.burn(id, -TICKSPACING_UNISWAP_LOW, TICKSPACING_UNISWAP_LOW, 1000000000000000001)
-		{
+		match pool.burn(
+			id,
+			-TICKSPACING_UNISWAP_LOW,
+			TICKSPACING_UNISWAP_LOW,
+			expandto18decimals(1).as_u128() + 1,
+		) {
 			Err(PositionError::Other(BurnError::PositionLacksLiquidity)) => {},
 			_ => panic!("Should not be able to remove more than position"),
 		}
@@ -2364,13 +2368,13 @@ mod test {
 			id,
 			-TICKSPACING_UNISWAP_LOW * 100,
 			TICKSPACING_UNISWAP_LOW * 100,
-			100000000000000000000,
+			expandto18decimals(100).as_u128(),
 			|_| true,
 		)
 		.unwrap();
 
 		let liquiditybefore = pool.current_liquidity.clone();
-		pool.swap::<BaseToPair>(U256::from_dec_str("1000000000000000000").unwrap());
+		pool.swap::<BaseToPair>(expandto18decimals(1));
 
 		assert!(pool.current_liquidity >= liquiditybefore);
 
@@ -2396,7 +2400,7 @@ mod test {
 	#[test]
 	fn test_initial_liquidity() {
 		let (mut pool, _, id) = mediumpool_initialized_zerotick();
-		assert_eq!(pool.current_liquidity, 2000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 	}
 
 	#[test]
@@ -2406,11 +2410,11 @@ mod test {
 			id,
 			-TICKSPACING_UNISWAP_MEDIUM,
 			TICKSPACING_UNISWAP_MEDIUM,
-			3000000000000000000,
+			expandto18decimals(3).as_u128(),
 			|_| true,
 		)
 		.unwrap();
-		assert_eq!(pool.current_liquidity, 5000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(5).as_u128());
 	}
 
 	#[test]
@@ -2420,11 +2424,11 @@ mod test {
 			id,
 			TICKSPACING_UNISWAP_MEDIUM,
 			2 * TICKSPACING_UNISWAP_MEDIUM,
-			3000000000000000000,
+			expandto18decimals(3).as_u128(),
 			|_| true,
 		)
 		.unwrap();
-		assert_eq!(pool.current_liquidity, 2000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 	}
 
 	#[test]
@@ -2434,43 +2438,43 @@ mod test {
 			id,
 			-2 * TICKSPACING_UNISWAP_MEDIUM,
 			-TICKSPACING_UNISWAP_MEDIUM,
-			3000000000000000000,
+			expandto18decimals(3).as_u128(),
 			|_| true,
 		)
 		.unwrap();
-		assert_eq!(pool.current_liquidity, 2000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 	}
 
 	#[test]
 	fn test_updates_exiting() {
 		let (mut pool, _, id) = mediumpool_initialized_zerotick();
-		assert_eq!(pool.current_liquidity, 2000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 
-		pool.mint(id, 0, TICKSPACING_UNISWAP_MEDIUM, 1000000000000000000, |_| true)
+		pool.mint(id, 0, TICKSPACING_UNISWAP_MEDIUM, expandto18decimals(1).as_u128(), |_| true)
 			.unwrap();
-		assert_eq!(pool.current_liquidity, 3000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(3).as_u128());
 
 		// swap toward the left (just enough for the tick transition function to trigger)
 		pool.swap::<BaseToPair>((1).into());
 
 		assert_eq!(pool.current_tick, -1);
-		assert_eq!(pool.current_liquidity, 2000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 	}
 
 	#[test]
 	fn test_updates_entering() {
 		let (mut pool, _, id) = mediumpool_initialized_zerotick();
-		assert_eq!(pool.current_liquidity, 2000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 
-		pool.mint(id, -TICKSPACING_UNISWAP_MEDIUM, 0, 1000000000000000000, |_| true)
+		pool.mint(id, -TICKSPACING_UNISWAP_MEDIUM, 0, expandto18decimals(1).as_u128(), |_| true)
 			.unwrap();
-		assert_eq!(pool.current_liquidity, 2000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 
 		// swap toward the left (just enough for the tick transition function to trigger)
 		pool.swap::<BaseToPair>((1).into());
 
 		assert_eq!(pool.current_tick, -1);
-		assert_eq!(pool.current_liquidity, 3000000000000000000 as u128);
+		assert_eq!(pool.current_liquidity, expandto18decimals(3).as_u128());
 	}
 
 	// Uniswap "limit orders"
@@ -2479,7 +2483,7 @@ mod test {
 	fn test_limitselling_basetopair_tick0thru1() {
 		let (mut pool, _, id) = mediumpool_initialized_zerotick();
 		let mut minted_capital = None;
-		pool.mint(id, 0, 120, 1000000000000000000, |minted| {
+		pool.mint(id, 0, 120, expandto18decimals(1).as_u128(), |minted| {
 			minted_capital.replace(minted);
 			true
 		})
@@ -2492,7 +2496,7 @@ mod test {
 		// somebody takes the limit order
 		pool.swap::<PairToBase>((U256::from_dec_str("2000000000000000000").unwrap()).into());
 
-		let (burned, fees_owed) = pool.burn(id, 0, 120, 1000000000000000000).unwrap();
+		let (burned, fees_owed) = pool.burn(id, 0, 120, expandto18decimals(1).as_u128()).unwrap();
 		assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
 		assert_eq!(burned[!Ticker::Base], U256::from_dec_str("6017734268818165").unwrap());
 
@@ -2512,7 +2516,7 @@ mod test {
 	fn test_limitselling_pairtobase_tick1thru0() {
 		let (mut pool, _, id) = mediumpool_initialized_zerotick();
 		let mut minted_capital = None;
-		pool.mint(id, -120, 0, 1000000000000000000, |minted| {
+		pool.mint(id, -120, 0, expandto18decimals(1).as_u128(), |minted| {
 			minted_capital.replace(minted);
 			true
 		})
@@ -2525,7 +2529,7 @@ mod test {
 		// somebody takes the limit order
 		pool.swap::<BaseToPair>((U256::from_dec_str("2000000000000000000").unwrap()).into());
 
-		let (burned, fees_owed) = pool.burn(id, -120, 0, 1000000000000000000).unwrap();
+		let (burned, fees_owed) = pool.burn(id, -120, 0, expandto18decimals(1).as_u128()).unwrap();
 		assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
 		assert_eq!(burned[Ticker::Base], U256::from_dec_str("6017734268818165").unwrap());
 
@@ -2546,8 +2550,7 @@ mod test {
 	// Low Fee, tickSpacing = 10, 1:1 price
 	fn lowpool_initialized_one() -> (PoolState, enum_map::EnumMap<Ticker, Amount>, LiquidityProvider)
 	{
-		let mut pool =
-			PoolState::new(50, U256::from_dec_str("79228162514264337593543950336").unwrap()); //	encodeSqrtPrice(1,1)
+		let mut pool = PoolState::new(50, encodedprice1_1()); //	encodeSqrtPrice(1,1)
 		const ID: LiquidityProvider = H256([0xcf; 32]);
 		let mut minted_amounts: enum_map::EnumMap<Ticker, Amount> = Default::default();
 		(pool, minted_amounts, ID)
@@ -2557,8 +2560,14 @@ mod test {
 	fn test_multiplelps() {
 		let (mut pool, _, id) = lowpool_initialized_one();
 
-		pool.mint(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 1000000000000000000, |_| true)
-			.unwrap();
+		pool.mint(
+			id,
+			MIN_TICK_UNISWAP_LOW,
+			MAX_TICK_UNISWAP_LOW,
+			expandto18decimals(1).as_u128(),
+			|_| true,
+		)
+		.unwrap();
 		pool.mint(
 			id,
 			MIN_TICK_UNISWAP_LOW + TICKSPACING_UNISWAP_LOW,
@@ -2568,7 +2577,7 @@ mod test {
 		)
 		.unwrap();
 
-		pool.swap::<BaseToPair>((U256::from_dec_str("1000000000000000000").unwrap()).into());
+		pool.swap::<BaseToPair>((expandto18decimals(1)).into());
 
 		// poke positions
 		pool.burn(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
@@ -2602,8 +2611,14 @@ mod test {
 	#[test]
 	fn test_before_capbidn() {
 		let (mut pool, _, id) = lowpool_initialized_one();
-		pool.mint(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 1000000000000000000, |_| true)
-			.unwrap();
+		pool.mint(
+			id,
+			MIN_TICK_UNISWAP_LOW,
+			MAX_TICK_UNISWAP_LOW,
+			expandto18decimals(1).as_u128(),
+			|_| true,
+		)
+		.unwrap();
 
 		pool.global_fee_growth[Ticker::Base] =
 			U256::from_dec_str("115792089237316195423570985008687907852929702298719625575994")
@@ -2619,8 +2634,14 @@ mod test {
 	#[test]
 	fn test_after_capbidn() {
 		let (mut pool, _, id) = lowpool_initialized_one();
-		pool.mint(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 1000000000000000000, |_| true)
-			.unwrap();
+		pool.mint(
+			id,
+			MIN_TICK_UNISWAP_LOW,
+			MAX_TICK_UNISWAP_LOW,
+			expandto18decimals(1).as_u128(),
+			|_| true,
+		)
+		.unwrap();
 
 		pool.global_fee_growth[Ticker::Base] =
 			U256::from_dec_str("115792089237316195423570985008687907852929702298719625575995")
@@ -2636,8 +2657,14 @@ mod test {
 	#[test]
 	fn test_wellafter_capbidn() {
 		let (mut pool, _, id) = lowpool_initialized_one();
-		pool.mint(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 1000000000000000000, |_| true)
-			.unwrap();
+		pool.mint(
+			id,
+			MIN_TICK_UNISWAP_LOW,
+			MAX_TICK_UNISWAP_LOW,
+			expandto18decimals(1).as_u128(),
+			|_| true,
+		)
+		.unwrap();
 
 		pool.global_fee_growth[Ticker::Base] = U256::MAX;
 
@@ -2657,10 +2684,16 @@ mod test {
 		pool.global_fee_growth[!Ticker::Base] = U256::MAX;
 
 		let mut minted_capital = None;
-		pool.mint(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 10000000000000000000, |minted| {
-			minted_capital.replace(minted);
-			true
-		})
+		pool.mint(
+			id,
+			MIN_TICK_UNISWAP_LOW,
+			MAX_TICK_UNISWAP_LOW,
+			expandto18decimals(10).as_u128(),
+			|minted| {
+				minted_capital.replace(minted);
+				true
+			},
+		)
 		.unwrap();
 		let minted_capital = minted_capital.unwrap();
 
@@ -2674,7 +2707,7 @@ mod test {
 	fn test_base() {
 		let (mut pool, _, id) = lowpool_initialized_setfees();
 
-		pool.swap::<BaseToPair>((U256::from_dec_str("1000000000000000000").unwrap()).into());
+		pool.swap::<BaseToPair>((expandto18decimals(1)).into());
 
 		assert_eq!(pool.global_fee_growth[Ticker::Base], U256::MAX);
 		assert_eq!(pool.global_fee_growth[!Ticker::Base], U256::MAX);
@@ -2691,7 +2724,7 @@ mod test {
 	fn test_pair() {
 		let (mut pool, _, id) = lowpool_initialized_setfees();
 
-		pool.swap::<PairToBase>((U256::from_dec_str("1000000000000000000").unwrap()).into());
+		pool.swap::<PairToBase>((expandto18decimals(1)).into());
 
 		assert_eq!(pool.global_fee_growth[Ticker::Base], U256::MAX);
 		assert_eq!(pool.global_fee_growth[!Ticker::Base], U256::MAX);
@@ -2713,8 +2746,7 @@ mod test {
 	) -> (PoolState, enum_map::EnumMap<Ticker, Amount>, LiquidityProvider) {
 		// fee_pips shall be one order of magnitude smaller than in the Uniswap pool (because
 		// ONE_IN_PIPS is /10)
-		let mut pool =
-			PoolState::new(300, U256::from_dec_str("79228162514264337593543950336").unwrap()); // encodeSqrtPrice (1,1)
+		let mut pool = PoolState::new(300, encodedprice1_1());
 		const ID: LiquidityProvider = H256([0xcf; 32]);
 		let mut minted_amounts: enum_map::EnumMap<Ticker, Amount> = Default::default();
 		(pool, minted_amounts, ID)
@@ -2734,7 +2766,7 @@ mod test {
 	fn test_swapping_gaps_pairtobase() {
 		let (mut pool, _, id) = mediumpool_initialized_nomint();
 		pool.mint(id, 120000, 121200, 250000000000000000, |_| true).unwrap();
-		pool.swap::<PairToBase>((U256::from_dec_str("1000000000000000000").unwrap()).into());
+		pool.swap::<PairToBase>((expandto18decimals(1)).into());
 		let (returned_capital, _) = pool.burn(id, 120000, 121200, 250000000000000000).unwrap();
 
 		assert_eq!(returned_capital[Ticker::Base], U256::from_dec_str("30027458295511").unwrap());
@@ -2749,7 +2781,7 @@ mod test {
 	fn test_swapping_gaps_basetopair() {
 		let (mut pool, _, id) = mediumpool_initialized_nomint();
 		pool.mint(id, -121200, -120000, 250000000000000000, |_| true).unwrap();
-		pool.swap::<BaseToPair>((U256::from_dec_str("1000000000000000000").unwrap()).into());
+		pool.swap::<BaseToPair>((expandto18decimals(1)).into());
 		let (returned_capital, _) = pool.burn(id, -121200, -120000, 250000000000000000).unwrap();
 
 		assert_eq!(
@@ -2770,11 +2802,13 @@ mod test {
 		assert_eq!(pool.current_tick, -24081);
 
 		// add a bunch of liquidity around current price
-		pool.mint(ID, -24082, -24080, 1000000000000000000000 as u128, |_| true).unwrap();
-		assert_eq!(pool.current_liquidity, 1000000000000000000000 as u128);
+		pool.mint(ID, -24082, -24080, expandto18decimals(1000).as_u128() as u128, |_| true)
+			.unwrap();
+		assert_eq!(pool.current_liquidity, expandto18decimals(1000).as_u128() as u128);
 
-		pool.mint(ID, -24082, -24081, 1000000000000000000000 as u128, |_| true).unwrap();
-		assert_eq!(pool.current_liquidity, 1000000000000000000000 as u128);
+		pool.mint(ID, -24082, -24081, expandto18decimals(1000).as_u128() as u128, |_| true)
+			.unwrap();
+		assert_eq!(pool.current_liquidity, expandto18decimals(1000).as_u128() as u128);
 
 		// check the math works out to moving the price down 1, sending no amount out, and having
 		// some amount remaining
@@ -2796,7 +2830,7 @@ mod test {
 		PairToBase::next_sqrt_price_from_input_amount(
 			U256::from_dec_str("0").unwrap(),
 			0,
-			U256::from_dec_str("100000000000000000").unwrap(),
+			expandto18decimals(1) / 10,
 		);
 	}
 	#[test]
@@ -2805,7 +2839,7 @@ mod test {
 		BaseToPair::next_sqrt_price_from_input_amount(
 			U256::from_dec_str("1").unwrap(),
 			0,
-			U256::from_dec_str("100000000000000000").unwrap(),
+			expandto18decimals(1) / 10,
 		);
 	}
 
@@ -2823,7 +2857,7 @@ mod test {
 	#[should_panic]
 	fn test_frominput_fails_anyinputoverflow() {
 		PairToBase::next_sqrt_price_from_input_amount(
-			U256::from_dec_str("1").unwrap(), //2^160-1
+			U256::from_dec_str("1").unwrap(),
 			1,
 			U256::from_dec_str(
 				"57896044618658097711785492504343953926634992332820282019728792003956564819968",
@@ -2835,21 +2869,21 @@ mod test {
 	#[test]
 	fn test_frominput_zeroamount_basetopair() {
 		let price = BaseToPair::next_sqrt_price_from_input_amount(
-			U256::from_dec_str("79228162514264337593543950336").unwrap(), //2^96
-			100000000000000000 as u128,
+			encodedprice1_1(),
+			expandto18decimals(1).as_u128(),
 			U256::from_dec_str("0").unwrap(),
 		);
-		assert_eq!(price, U256::from_dec_str("79228162514264337593543950336").unwrap());
+		assert_eq!(price, encodedprice1_1());
 	}
 
 	#[test]
 	fn test_frominput_zeroamount_pairtobase() {
 		let price = PairToBase::next_sqrt_price_from_input_amount(
-			U256::from_dec_str("79228162514264337593543950336").unwrap(), //2^96
-			100000000000000000 as u128,
+			encodedprice1_1(),
+			expandto18decimals(1).as_u128(),
 			U256::from_dec_str("0").unwrap(),
 		);
-		assert_eq!(price, U256::from_dec_str("79228162514264337593543950336").unwrap());
+		assert_eq!(price, encodedprice1_1());
 	}
 
 	#[test]
@@ -2857,12 +2891,12 @@ mod test {
 		let sqrtP: U256 =
 			U256::from_dec_str("1461501637330902918203684832716283019655932542976").unwrap();
 		let liquidity: u128 = u128::MAX;
-		let maxAmountNoOverflow = U256::MAX - (liquidity << 96); // sqrtP)
+		let maxamount_nooverflow = U256::MAX - (liquidity << 96); // sqrtP)
 
 		let price = BaseToPair::next_sqrt_price_from_input_amount(
 			sqrtP, //2^96
 			liquidity,
-			maxAmountNoOverflow,
+			maxamount_nooverflow,
 		);
 
 		assert_eq!(price, 1.into());
@@ -2871,9 +2905,9 @@ mod test {
 	#[test]
 	fn test_frominput_inputamount_pair() {
 		let price = PairToBase::next_sqrt_price_from_input_amount(
-			U256::from_dec_str("79228162514264337593543950336").unwrap(), //encodePriceSqrt(1, 1)
-			1000000000000000000 as u128,
-			U256::from_dec_str("100000000000000000").unwrap(),
+			encodedprice1_1(), //encodePriceSqrt(1, 1)
+			expandto18decimals(1).as_u128(),
+			expandto18decimals(1) / 10,
 		);
 		assert_eq!(price, U256::from_dec_str("87150978765690771352898345369").unwrap());
 	}
@@ -2881,9 +2915,9 @@ mod test {
 	#[test]
 	fn test_frominput_inputamount_base() {
 		let price = BaseToPair::next_sqrt_price_from_input_amount(
-			U256::from_dec_str("79228162514264337593543950336").unwrap(), //encodePriceSqrt(1, 1)
-			1000000000000000000 as u128,
-			U256::from_dec_str("100000000000000000").unwrap(),
+			encodedprice1_1(), //encodePriceSqrt(1, 1)
+			expandto18decimals(1).as_u128(),
+			expandto18decimals(1) / 10,
 		);
 		assert_eq!(price, U256::from_dec_str("72025602285694852357767227579").unwrap());
 	}
@@ -2891,8 +2925,8 @@ mod test {
 	#[test]
 	fn test_frominput_amountinmaxuint96_base() {
 		let price = BaseToPair::next_sqrt_price_from_input_amount(
-			U256::from_dec_str("79228162514264337593543950336").unwrap(), //encodePriceSqrt(1, 1)
-			10000000000000000000 as u128,
+			encodedprice1_1(), //encodePriceSqrt(1, 1)
+			expandto18decimals(10).as_u128(),
 			U256::from_dec_str("1267650600228229401496703205376").unwrap(), // 2**100
 		);
 		assert_eq!(price, U256::from_dec_str("624999999995069620").unwrap());
@@ -2901,10 +2935,129 @@ mod test {
 	#[test]
 	fn test_frominput_amountinmaxuint96_pair() {
 		let price = BaseToPair::next_sqrt_price_from_input_amount(
-			U256::from_dec_str("79228162514264337593543950336").unwrap(), //encodePriceSqrt(1, 1)
+			encodedprice1_1(), //encodePriceSqrt(1, 1)
 			1 as u128,
 			U256::MAX / 2,
 		);
 		assert_eq!(price, U256::from_dec_str("1").unwrap());
+	}
+
+	// Skip get amount from output
+
+	// #getAmount0Delta
+	fn encodedprice1_1() -> U256 {
+		U256::from_dec_str("79228162514264337593543950336").unwrap()
+	}
+	fn encodedprice2_1() -> U256 {
+		U256::from_dec_str("112045541949572287496682733568").unwrap()
+	}
+	fn encodedprice121_100() -> U256 {
+		U256::from_dec_str("87150978765690771352898345369").unwrap()
+	}
+	fn expandto18decimals(amount: u128) -> U256 {
+		U256::from(amount) * U256::from(10).pow(U256::from_dec_str("18").unwrap())
+	}
+
+	#[test]
+	fn test_expanded() {
+		assert_eq!(expandto18decimals(1), expandto18decimals(1));
+	}
+
+	#[test]
+	fn test_0_if_liquidity_0() {
+		assert_eq!(
+			PoolState::base_amount_delta_ceil(encodedprice1_1(), encodedprice2_1(), 0),
+			U256::from(0)
+		);
+	}
+
+	#[test]
+	fn test_price1_121() {
+		assert_eq!(
+			PoolState::base_amount_delta_ceil(
+				encodedprice1_1(),
+				encodedprice121_100(),
+				expandto18decimals(1).as_u128()
+			),
+			U256::from_dec_str("90909090909090910").unwrap()
+		);
+
+		assert_eq!(
+			PoolState::base_amount_delta_floor(
+				encodedprice1_1(),
+				encodedprice121_100(),
+				expandto18decimals(1).as_u128()
+			),
+			U256::from_dec_str("90909090909090909").unwrap()
+		);
+	}
+
+	#[test]
+	fn test_overflow() {
+		assert_eq!(
+			PoolState::base_amount_delta_ceil(
+				U256::from_dec_str("2787593149816327892691964784081045188247552").unwrap(),
+				U256::from_dec_str("22300745198530623141535718272648361505980416").unwrap(),
+				expandto18decimals(1).as_u128(),
+			),
+			PoolState::base_amount_delta_floor(
+				U256::from_dec_str("2787593149816327892691964784081045188247552").unwrap(),
+				U256::from_dec_str("22300745198530623141535718272648361505980416").unwrap(),
+				expandto18decimals(1).as_u128(),
+			) + 1,
+		);
+	}
+
+	// #getAmount1Delta
+
+	#[test]
+	fn test_0_if_liquidity_0_pair() {
+		assert_eq!(
+			PoolState::pair_amount_delta_ceil(encodedprice1_1(), encodedprice2_1(), 0),
+			U256::from(0)
+		);
+	}
+
+	#[test]
+	fn test_price1_121_pair() {
+		assert_eq!(
+			PoolState::pair_amount_delta_ceil(
+				encodedprice1_1(),
+				encodedprice121_100(),
+				expandto18decimals(1).as_u128()
+			),
+			expandto18decimals(1) / 10
+		);
+
+		assert_eq!(
+			PoolState::pair_amount_delta_floor(
+				encodedprice1_1(),
+				encodedprice121_100(),
+				expandto18decimals(1).as_u128()
+			),
+			expandto18decimals(1) / 10 - 1
+		);
+	}
+
+	// Swap computation
+	#[test]
+	fn test_sqrtoverflows() {
+		let sqrtP =
+			U256::from_dec_str("1025574284609383690408304870162715216695788925244").unwrap();
+		let liquidity = 50015962439936049619261659728067971248 as u128;
+		let sqrtQ = BaseToPair::next_sqrt_price_from_input_amount(
+			sqrtP,
+			liquidity,
+			U256::from_dec_str("406").unwrap(),
+		);
+		assert_eq!(
+			sqrtQ,
+			U256::from_dec_str("1025574284609383582644711336373707553698163132913").unwrap()
+		);
+
+		assert_eq!(
+			PoolState::base_amount_delta_ceil(sqrtQ, sqrtP, liquidity as u128),
+			U256::from_dec_str("406").unwrap()
+		);
 	}
 }
