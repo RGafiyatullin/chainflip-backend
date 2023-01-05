@@ -1,5 +1,6 @@
 [Unit]
 Description=Chainflip Validator Node
+After=network.target
 
 [Service]
 Restart=always
@@ -7,14 +8,28 @@ RestartSec=30
 Type=simple
 User=chainflip
 Group=chainflip
-
-ExecStart=/usr/bin/chainflip-node \
-  --chain /etc/chainflip/chainspecs/perseverance.json \
-  --base-path /etc/chainflip/chaindata \
-  --node-key-file /etc/chainflip/keys/node_key_file \
-  --validator \
-  --state-cache-size 0
-
+EnvironmentFile=-/etc/default/chainflip-node
+ExecStart=/usr/bin/chainflip-node $CHAINFLIP_NODE_ARGS
+CapabilityBoundingSet=
+LockPersonality=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateMounts=true
+PrivateTmp=true
+PrivateUsers=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RemoveIPC=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@clock @module @mount @reboot @swap @privileged
 StandardOutput=append:/var/log/chainflip-node.log
 StandardError=append:/var/log/chainflip-node.log
 

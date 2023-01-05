@@ -1,5 +1,6 @@
 [Unit]
 Description=Chainflip Validator Engine
+After=network.target
 
 [Service]
 Restart=always
@@ -7,10 +8,28 @@ RestartSec=30
 Type=simple
 User=chainflip
 Group=chainflip
-
 ExecStart=/usr/bin/chainflip-engine \
   --config-path /etc/chainflip/config/Default.toml
-
+CapabilityBoundingSet=
+LockPersonality=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateMounts=true
+PrivateTmp=true
+PrivateUsers=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RemoveIPC=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@clock @module @mount @reboot @swap @privileged
 StandardOutput=append:/var/log/chainflip-engine.log
 StandardError=append:/var/log/chainflip-engine.log
 
