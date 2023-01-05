@@ -2821,7 +2821,7 @@ mod test {
 	}
 
 	///////////////////////////////////////////////////////////
-	///         TEST SQRTPRICE MATH (not complete)         ////
+	///               TEST SQRTPRICE MATH                  ////
 	///////////////////////////////////////////////////////////
 	#[test]
 	#[should_panic]
@@ -3059,5 +3059,193 @@ mod test {
 			PoolState::base_amount_delta_ceil(sqrtQ, sqrtP, liquidity as u128),
 			U256::from_dec_str("406").unwrap()
 		);
+	}
+
+	///////////////////////////////////////////////////////////
+	///                  TEST SWAPMATH                     ////
+	///////////////////////////////////////////////////////////
+
+	// computeSwapStep
+
+	// We cannot really fake the state of the pool to test this because we would need to mint a
+	// tick equivalent to desired sqrtPriceTarget but:
+	// sqrt_price_at_tick(tick_at_sqrt_price(sqrtPriceTarget)) != sqrtPriceTarget, due to the
+	// prices being between ticks - and therefore converting them to the closes tick.
+	//#[test]
+	fn test_amountcapped_pairtobase_fail() {
+		let mut pool = PoolState::new(60, encodedprice1_1());
+		const ID: LiquidityProvider = H256([0xcf; 32]);
+
+		let mut minted_capital = None;
+
+		pool.mint(
+			ID,
+			PoolState::tick_at_sqrt_price(encodedprice1_1()),
+			PoolState::tick_at_sqrt_price(
+				U256::from_dec_str("79623317895830914510487008059").unwrap(),
+			),
+			expandto18decimals(2).as_u128(),
+			|minted| {
+				minted_capital.replace(minted);
+				true
+			},
+		)
+		.unwrap();
+
+		let minted_capital = minted_capital.unwrap();
+		println!(
+			"upper tick: {:?}",
+			PoolState::tick_at_sqrt_price(
+				U256::from_dec_str("79623317895830914510487008059").unwrap(),
+			)
+		);
+		println!(
+			"Reversed target price: {:?}",
+			PoolState::sqrt_price_at_tick(PoolState::tick_at_sqrt_price(
+				U256::from_dec_str("79623317895830914510487008059").unwrap(),
+			))
+		);
+		// Swap to the right towards price target
+		let amount_swapped = pool.swap::<PairToBase>((expandto18decimals(1)).into());
+		println!("Amount swapped: {:?}", amount_swapped);
+	}
+
+	// Fake computeswapstep => Stripped down version of the real swap
+	// TODO: Consider refactoring real AMM to be able to easily test this.
+	// NOTE: Using ONE_IN_PIPS_UNISWAP here to match the tests. otherwise we would need decimals for
+	// the fee value
+	const ONE_IN_PIPS_UNISWAP: u32 = 1000000;
+
+	fn compute_swapstep<SD: SwapDirection>(
+		current_sqrt_price: SqrtPriceQ64F96,
+		sqrt_ratio_target: SqrtPriceQ64F96,
+		liquidity: Liquidity,
+		mut amount: Amount,
+		fee: u32,
+	) -> (Amount, Amount, SqrtPriceQ64F96, U256) {
+		let mut total_amount_out = Amount::zero();
+
+		let amount_minus_fees = mul_div_floor(
+			amount,
+			U256::from(ONE_IN_PIPS_UNISWAP - fee),
+			U256::from(ONE_IN_PIPS_UNISWAP),
+		); // This cannot overflow as we bound fee_pips to <= ONE_IN_PIPS/2 (TODO)
+
+		let amount_required_to_reach_target =
+			SD::input_amount_delta_ceil(current_sqrt_price, sqrt_ratio_target, liquidity);
+
+		let sqrt_ratio_next = if amount_minus_fees >= amount_required_to_reach_target {
+			sqrt_ratio_target
+		} else {
+			assert!(liquidity != 0);
+			SD::next_sqrt_price_from_input_amount(current_sqrt_price, liquidity, amount_minus_fees)
+		};
+
+		// Cannot overflow as if the swap traversed all ticks (MIN_TICK to MAX_TICK
+		// (inclusive)), assuming the maximum possible liquidity, total_amount_out would still
+		// be below U256::MAX (See test `output_amounts_bounded`)
+		total_amount_out +=
+			SD::output_amount_delta_floor(current_sqrt_price, sqrt_ratio_next, liquidity);
+
+		// next_sqrt_price_from_input_amount rounds so this maybe true even though
+		// amount_minus_fees < amount_required_to_reach_target (TODO Prove)
+		let mut fees: U256 = Default::default();
+		if sqrt_ratio_next == sqrt_ratio_target {
+			// Will not overflow as fee_pips <= ONE_IN_PIPS / 2
+			fees = mul_div_ceil(
+				amount_required_to_reach_target,
+				U256::from(fee),
+				U256::from(ONE_IN_PIPS_UNISWAP - fee),
+			);
+
+			// TODO: Prove these don't underflow
+			amount -= amount_required_to_reach_target;
+			amount -= fees;
+			return (amount_required_to_reach_target, total_amount_out, sqrt_ratio_next, fees)
+		} else {
+			let amount_in =
+				SD::input_amount_delta_ceil(current_sqrt_price, sqrt_ratio_next, liquidity);
+			// Will not underflow due to rounding in flavor of the pool of both sqrt_ratio_next
+			// and amount_in. (TODO: Prove)
+			fees = amount - amount_in;
+			return (amount_in, total_amount_out, sqrt_ratio_next, fees)
+		};
+	}
+
+	#[test]
+	fn test_amountcapped_pairtobase() {
+		let price = encodedprice1_1();
+		let amount = expandto18decimals(1);
+		let price_target = U256::from_dec_str("79623317895830914510487008059").unwrap();
+		let liquidity = expandto18decimals(2).as_u128();
+		let (amount_in, amount_out, sqrt_ratio_next, fees) =
+			compute_swapstep::<PairToBase>(price, price_target, liquidity, amount, 600);
+
+		assert_eq!(amount_in, U256::from_dec_str("9975124224178055").unwrap());
+		assert_eq!(fees, U256::from_dec_str("5988667735148").unwrap());
+		assert_eq!(amount_out, U256::from_dec_str("9925619580021728").unwrap());
+		assert!(amount_in + fees < amount);
+
+		let price_after_input_amount =
+			PoolState::next_sqrt_price_from_pair_input(price, liquidity, amount);
+
+		assert_eq!(sqrt_ratio_next, price_target);
+		assert!(sqrt_ratio_next < price_after_input_amount);
+	}
+
+	// Skip amountout test
+
+	#[test]
+	fn test_amountin_spent_pairtobase() {
+		let price = encodedprice1_1();
+		let price_target = U256::from_dec_str("792281625142643375935439503360").unwrap();
+		let liquidity = expandto18decimals(2).as_u128();
+		let amount = expandto18decimals(1);
+		let (amount_in, amount_out, sqrt_ratio_next, fees) =
+			compute_swapstep::<PairToBase>(price, price_target, liquidity, amount, 600);
+
+		assert_eq!(amount_in, U256::from_dec_str("999400000000000000").unwrap());
+		assert_eq!(fees, U256::from_dec_str("600000000000000").unwrap());
+		assert_eq!(amount_out, U256::from_dec_str("666399946655997866").unwrap());
+		assert_eq!(amount_in + fees, amount);
+
+		let price_after_input_amount =
+			PoolState::next_sqrt_price_from_pair_input(price, liquidity, amount - fees);
+
+		assert!(sqrt_ratio_next < price_target);
+		assert_eq!(sqrt_ratio_next, price_after_input_amount);
+	}
+
+	#[test]
+	fn test_targetprice1_partialinput() {
+		let (amount_in, amount_out, sqrt_ratio_next, fees) = compute_swapstep::<BaseToPair>(
+			U256::from_dec_str("2").unwrap(),
+			U256::from_dec_str("1").unwrap(),
+			1 as u128,
+			U256::from_dec_str("3915081100057732413702495386755767").unwrap(),
+			1,
+		);
+		assert_eq!(amount_in, U256::from_dec_str("39614081257132168796771975168").unwrap());
+		assert_eq!(fees, U256::from_dec_str("39614120871253040049813").unwrap());
+		assert!(
+			amount_in + fees < U256::from_dec_str("3915081100057732413702495386755767").unwrap()
+		);
+		assert_eq!(amount_out, U256::from(0));
+		assert_eq!(sqrt_ratio_next, U256::from_dec_str("1").unwrap());
+	}
+
+	#[test]
+	fn test_entireinput_asfee() {
+		let (amount_in, amount_out, sqrt_ratio_next, fees) = compute_swapstep::<PairToBase>(
+			U256::from_dec_str("2413").unwrap(),
+			U256::from_dec_str("79887613182836312").unwrap(),
+			1985041575832132834610021537970 as u128,
+			U256::from_dec_str("10").unwrap(),
+			1872,
+		);
+		assert_eq!(amount_in, U256::from_dec_str("0").unwrap());
+		assert_eq!(fees, U256::from_dec_str("10").unwrap());
+		assert_eq!(amount_out, U256::from_dec_str("0").unwrap());
+		assert_eq!(sqrt_ratio_next, U256::from_dec_str("2413").unwrap());
 	}
 }
