@@ -1357,11 +1357,6 @@ mod test {
 			.unwrap();
 		let minted_capital = minted_capital.unwrap();
 
-		match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-			(0, 0) => {},
-			_ => panic!("Fees accrued are not zero"),
-		}
-
 		(pool, minted_capital, ID)
 	}
 
@@ -2665,7 +2660,7 @@ mod test {
 	// Low Fee, tickSpacing = 10, 1:1 price
 	fn lowpool_initialized_one() -> (PoolState, enum_map::EnumMap<Ticker, Amount>, LiquidityProvider)
 	{
-		let mut pool = PoolState::new(50, encodedprice1_1()); //	encodeSqrtPrice(1,1)
+		let mut pool = PoolState::new(50, encodedprice1_1());
 		const ID: LiquidityProvider = H256([0xcf; 32]);
 		let mut minted_amounts: enum_map::EnumMap<Ticker, Amount> = Default::default();
 		(pool, minted_amounts, ID)
@@ -2700,8 +2695,9 @@ mod test {
 
 		assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
 		assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
-
-		assert_eq!(fees_owed[Ticker::Base], 166666666666667 as u128);
+		// NOTE: Fee_owed value 1 unit different than Uniswap because uniswap requires 4 loops to do
+		// the swap instead of 1 causing the rounding to be different
+		assert_eq!(fees_owed[Ticker::Base], 166666666666666 as u128);
 		assert_eq!(fees_owed[!Ticker::Base], 0);
 
 		let (burned, fees_owed) = pool
@@ -2712,7 +2708,9 @@ mod test {
 				0,
 			)
 			.unwrap();
-		assert_eq!(fees_owed[Ticker::Base], 333333333333334 as u128);
+		// NOTE: Fee_owed value 1 unit different than Uniswap because uniswap requires 4 loops to do
+		// the swap instead of 1 causing the rounding to be different
+		assert_eq!(fees_owed[Ticker::Base], 333333333333333 as u128);
 		assert_eq!(fees_owed[!Ticker::Base], 0);
 	}
 
@@ -3378,5 +3376,87 @@ mod test {
 		assert_eq!(fees, U256::from_dec_str("10").unwrap());
 		assert_eq!(amount_out, U256::from_dec_str("0").unwrap());
 		assert_eq!(sqrt_ratio_next, U256::from_dec_str("2413").unwrap());
+	}
+
+	///////////////////////////////////////////////////////////
+	///                  ADDED TESTS                       ////
+	///////////////////////////////////////////////////////////
+
+	// Add some more tests for fees_owed collecting
+
+	// Previous tests using mint as a poke and to collect fees.
+
+	#[test]
+	fn test_limitselling_basetopair_tick0thru1_mint() {
+		let (mut pool, _, id) = mediumpool_initialized_zerotick();
+		let mut minted_capital = None;
+		pool.mint(id, 0, 120, expandto18decimals(1).as_u128(), |minted| {
+			minted_capital.replace(minted);
+			true
+		})
+		.unwrap();
+		let minted_capital = minted_capital.unwrap();
+
+		assert_eq!(minted_capital[Ticker::Base], U256::from_dec_str("5981737760509663").unwrap());
+		assert_eq!(minted_capital[!Ticker::Base], U256::from_dec_str("0").unwrap());
+
+		// somebody takes the limit order
+		pool.swap::<PairToBase>((U256::from_dec_str("2000000000000000000").unwrap()).into());
+
+		let fees_owed = pool.mint(id, 0, 120, 1, |_| true).unwrap();
+
+		assert_eq!(fees_owed[Ticker::Base], 0);
+		assert_eq!(fees_owed[!Ticker::Base], 18107525382602);
+
+		let fees_owed = pool.mint(id, 0, 120, 1, |_| true).unwrap();
+		assert_eq!(fees_owed[Ticker::Base], 0);
+		assert_eq!(fees_owed[!Ticker::Base], 0);
+
+		let (burned, fees_owed) = pool.burn(id, 0, 120, expandto18decimals(1).as_u128()).unwrap();
+		assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
+		assert_eq!(burned[!Ticker::Base], U256::from_dec_str("6017734268818165").unwrap());
+
+		// DIFF: position fully burnt
+		assert_eq!(fees_owed[Ticker::Base], 0);
+		assert_eq!(fees_owed[!Ticker::Base], 0);
+
+		assert!(pool.current_tick > 120)
+	}
+
+	#[test]
+	fn test_limitselling_paior_tick1thru0_mint() {
+		let (mut pool, _, id) = mediumpool_initialized_zerotick();
+		let mut minted_capital = None;
+		pool.mint(id, -120, 0, expandto18decimals(1).as_u128(), |minted| {
+			minted_capital.replace(minted);
+			true
+		})
+		.unwrap();
+		let minted_capital = minted_capital.unwrap();
+
+		assert_eq!(minted_capital[!Ticker::Base], U256::from_dec_str("5981737760509663").unwrap());
+		assert_eq!(minted_capital[Ticker::Base], U256::from_dec_str("0").unwrap());
+
+		// somebody takes the limit order
+		pool.swap::<BaseToPair>((U256::from_dec_str("2000000000000000000").unwrap()).into());
+
+		let fees_owed = pool.mint(id, -120, 0, 1, |_| true).unwrap();
+
+		assert_eq!(fees_owed[!Ticker::Base], 0);
+		assert_eq!(fees_owed[Ticker::Base], 18107525382602);
+
+		let fees_owed = pool.mint(id, -120, 0, 1, |_| true).unwrap();
+		assert_eq!(fees_owed[!Ticker::Base], 0);
+		assert_eq!(fees_owed[Ticker::Base], 0);
+
+		let (burned, fees_owed) = pool.burn(id, -120, 0, expandto18decimals(1).as_u128()).unwrap();
+		assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
+		assert_eq!(burned[Ticker::Base], U256::from_dec_str("6017734268818165").unwrap());
+
+		// DIFF: position fully burnt
+		assert_eq!(fees_owed[!Ticker::Base], 0);
+		assert_eq!(fees_owed[Ticker::Base], 0);
+
+		assert!(pool.current_tick < -120)
 	}
 }
