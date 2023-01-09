@@ -61,6 +61,14 @@ struct Position {
 	liquidity: Liquidity,
 	last_fee_growth_inside: enum_map::EnumMap<Ticker, FeeGrowthQ128F128>,
 }
+
+#[derive(Clone, Debug)]
+struct LimitOrders {
+	liquidity: Liquidity,
+	last_fee_growth_inside: enum_map::EnumMap<Ticker, FeeGrowthQ128F128>,
+	// Setting f64 for now but we should use a float type that is more precise
+	oneMinusPercSwapLast: f64,
+}
 impl Position {
 	fn update_fees_owed(
 		&mut self,
@@ -129,6 +137,14 @@ struct TickInfo {
 	fee_growth_outside: enum_map::EnumMap<Ticker, FeeGrowthQ128F128>,
 }
 
+#[derive(Clone, Debug)]
+struct TickInfoLimitOrder {
+	liquidity_gross: u128,
+	fee_growth_inside: FeeGrowthQ128F128,
+	// Setting f64 for now but we should use a float type that is more precise
+	oneMinusPercSwap: f64,
+}
+
 #[derive(Debug)]
 pub struct PoolState {
 	fee_pips: u32,
@@ -138,9 +154,12 @@ pub struct PoolState {
 	global_fee_growth: enum_map::EnumMap<Ticker, FeeGrowthQ128F128>,
 	liquidity_map: BTreeMap<Tick, TickInfo>,
 	positions: BTreeMap<(LiquidityProvider, Tick, Tick), Position>,
+	liquidity_map_base_lo: BTreeMap<Tick, TickInfoLimitOrder>,
+	liquidity_map_pair_lo: BTreeMap<Tick, TickInfoLimitOrder>,
+	limit_orders: BTreeMap<(LiquidityProvider, Tick, Ticker), LimitOrders>,
 }
 
-#[derive(Enum, Clone, Copy, Debug)]
+#[derive(Enum, Clone, Copy, Debug, PartialEq)]
 pub enum Ticker {
 	Base,
 	Pair,
@@ -379,6 +398,46 @@ impl PoolState {
 			]
 			.into(),
 			positions: Default::default(),
+			//  Guarantee MIN_TICK_LO and MAX_TICK_LO are always in map to simplify swap logic
+			liquidity_map_base_lo: [
+				(
+					MIN_TICK_LO,
+					TickInfoLimitOrder {
+						liquidity_gross: 0,
+						fee_growth_inside: Default::default(),
+						oneMinusPercSwap: 1.0,
+					},
+				),
+				(
+					MAX_TICK_LO,
+					TickInfoLimitOrder {
+						liquidity_gross: 0,
+						fee_growth_inside: Default::default(),
+						oneMinusPercSwap: 1.0,
+					},
+				),
+			]
+			.into(),
+			liquidity_map_pair_lo: [
+				(
+					MIN_TICK_LO,
+					TickInfoLimitOrder {
+						liquidity_gross: 0,
+						fee_growth_inside: Default::default(),
+						oneMinusPercSwap: 1.0,
+					},
+				),
+				(
+					MAX_TICK_LO,
+					TickInfoLimitOrder {
+						liquidity_gross: 0,
+						fee_growth_inside: Default::default(),
+						oneMinusPercSwap: 1.0,
+					},
+				),
+			]
+			.into(),
+			limit_orders: Default::default(),
 		}
 	}
 
@@ -474,9 +533,9 @@ impl PoolState {
 		}
 	}
 
-	// Mock Limit order mint functions. Could also be part of the normal mint or both
-	// mint_limitorders can be one single function. We can probably get rid of the extra input
-	// and do it similarly as swap with a trait (analogue to Swapdirection)
+	// Mock Limit order mint functions. Could also be part of the normal mint/burn functions
+	// and do it similarly as swap with a trait (analogue to Swapdirection). This is just for
+	// writing the tests.
 	fn mint_limit_order<F: FnOnce(enum_map::EnumMap<Ticker, Amount>) -> bool>(
 		&mut self,
 		lp: LiquidityProvider,
@@ -491,6 +550,18 @@ impl PoolState {
 		} else {
 			Err(MintError::InvalidTickRange)
 		}
+	}
+	fn burn_limit_order(
+		&mut self,
+		lp: LiquidityProvider,
+		tick: Tick,
+		burnt_liquidity: Liquidity,
+		ticker: Ticker,
+	) -> Result<
+		(enum_map::EnumMap<Ticker, Amount>, enum_map::EnumMap<Ticker, u128>),
+		PositionError<BurnError>,
+	> {
+		Ok(Default::default())
 	}
 
 	/// Tries to remove liquidity from the specified range-order, and convert the liqudity into
@@ -3429,7 +3500,7 @@ mod test {
 	}
 
 	#[test]
-	fn test_limitselling_paior_tick1thru0_mint() {
+	fn test_limitselling_pair_tick1thru0_mint() {
 		let (mut pool, _, id) = mediumpool_initialized_zerotick();
 		let mut minted_capital = None;
 		pool.mint(id, -120, 0, expandto18decimals(1).as_u128(), |minted| {
@@ -3472,6 +3543,8 @@ mod test {
 ///
 #[cfg(test)]
 mod test_limit_orders {
+	use crate::test::TICKSPACING_UNISWAP_MEDIUM;
+
 	use super::*;
 
 	pub const MIN_TICK_LO_UNISWAP_MEDIUM: Tick = -23016;
@@ -3516,120 +3589,115 @@ mod test_limit_orders {
 	}
 
 	// Minting
-	#[test]
-
-	fn test_mint_err_base_lo() {
-		mint_err_lo(Ticker::Base);
-	}
 
 	#[test]
-	fn test_mint_err_pair_lo() {
-		mint_err_lo(Ticker::Pair);
-	}
-
-	fn mint_err_lo(ticker: Ticker) {
-		let (mut pool, _, id) = mint_pool_lo();
-		assert!((pool.mint_limit_order(id, -887273, 1, ticker, |_| true)).is_err());
-		assert!((pool.mint_limit_order(id, MIN_TICK_LO - 1, 1, ticker, |_| true)).is_err());
-		assert!((pool.mint_limit_order(id, MAX_TICK_LO + 1, 1, ticker, |_| true)).is_err());
-
-		assert!((pool.mint_limit_order(
-			id,
-			MIN_TICK_LO + 1,
-			MAX_TICK_GROSS_LIQUIDITY + 1,
-			ticker,
-			|_| true
-		))
-		.is_err());
-
-		assert!((pool.mint_limit_order(
-			id,
-			MAX_TICK_LO - 1,
-			MAX_TICK_GROSS_LIQUIDITY,
-			ticker,
-			|_| true
-		))
-		.is_ok());
-	}
-	#[test]
-	fn test_mint_err_tickmax_base_lo() {
-		mint_err_tickmax_lo(Ticker::Base);
-	}
-	#[test]
-	fn test_mint_err_tickmax_pair_lo() {
-		mint_err_tickmax_lo(Ticker::Pair);
-	}
-
-	fn mint_err_tickmax_lo(ticker: Ticker) {
+	fn test_mint_err_lo() {
 		let (mut pool, _, id) = mint_pool_lo();
 
-		let fees_owed = pool.mint_limit_order(id, MAX_TICK_LO - 1, 1000, ticker, |_| true).unwrap();
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			assert!((pool.mint_limit_order(id, -887273, 1, ticker, |_| true)).is_err());
+			assert!((pool.mint_limit_order(id, MIN_TICK_LO - 1, 1, ticker, |_| true)).is_err());
+			assert!((pool.mint_limit_order(id, MAX_TICK_LO + 1, 1, ticker, |_| true)).is_err());
 
-		match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-			(0, 0) => {},
-			_ => panic!("Fees accrued are not zero"),
+			assert!((pool.mint_limit_order(
+				id,
+				MIN_TICK_LO + 1,
+				MAX_TICK_GROSS_LIQUIDITY + 1,
+				ticker,
+				|_| true
+			))
+			.is_err());
+
+			assert!((pool.mint_limit_order(
+				id,
+				MAX_TICK_LO - 1,
+				MAX_TICK_GROSS_LIQUIDITY,
+				ticker,
+				|_| true
+			))
+			.is_ok());
 		}
+	}
 
-		assert!((pool.mint_limit_order(
-			id,
-			MAX_TICK_LO - 1,
-			MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
-			ticker,
-			|_| true
-		))
-		.is_err());
+	#[test]
+	fn test_mint_err_tickmax_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
 
-		assert!((pool.mint_limit_order(
-			id,
-			MIN_TICK_LO + 2,
-			MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
-			ticker,
-			|_| true
-		))
-		.is_err());
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			let fees_owed =
+				pool.mint_limit_order(id, MAX_TICK_LO - 1, 1000, ticker, |_| true).unwrap();
 
-		assert!((pool.mint_limit_order(
-			id,
-			MAX_TICK_LO - 1,
-			MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
-			ticker,
-			|_| true
-		))
-		.is_err());
+			match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
+				(0, 0) => {},
+				_ => panic!("Fees accrued are not zero"),
+			}
 
-		assert!((pool.mint_limit_order(
-			id,
-			MAX_TICK_LO - 2,
-			MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
-			ticker,
-			|_| true
-		))
-		.is_err());
+			assert!((pool.mint_limit_order(
+				id,
+				MAX_TICK_LO - 1,
+				MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
+				ticker,
+				|_| true
+			))
+			.is_err());
 
-		assert!((pool.mint_limit_order(
-			id,
-			MIN_TICK_LO + 1,
-			MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
-			ticker,
-			|_| true
-		))
-		.is_err());
+			assert!((pool.mint_limit_order(
+				id,
+				MIN_TICK_LO + 2,
+				MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
+				ticker,
+				|_| true
+			))
+			.is_err());
 
-		let fees_owed = pool
-			.mint_limit_order(id, MAX_TICK_LO - 1, MAX_TICK_GROSS_LIQUIDITY - 1000, ticker, |_| {
-				true
-			})
-			.unwrap();
-		match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-			(0, 0) => {},
-			_ => panic!("Fees accrued are not zero"),
-		}
+			assert!((pool.mint_limit_order(
+				id,
+				MAX_TICK_LO - 1,
+				MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
+				ticker,
+				|_| true
+			))
+			.is_err());
 
-		// Different behaviour from Uniswap - does not revert when minting 0
-		let fees_owed = pool.mint_limit_order(id, MAX_TICK_LO - 1, 0, ticker, |_| true).unwrap();
-		match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-			(0, 0) => {},
-			_ => panic!("Fees accrued are not zero"),
+			assert!((pool.mint_limit_order(
+				id,
+				MAX_TICK_LO - 2,
+				MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
+				ticker,
+				|_| true
+			))
+			.is_err());
+
+			assert!((pool.mint_limit_order(
+				id,
+				MIN_TICK_LO + 1,
+				MAX_TICK_GROSS_LIQUIDITY - 1000 + 1,
+				ticker,
+				|_| true
+			))
+			.is_err());
+
+			let fees_owed = pool
+				.mint_limit_order(
+					id,
+					MAX_TICK_LO - 1,
+					MAX_TICK_GROSS_LIQUIDITY - 1000,
+					ticker,
+					|_| true,
+				)
+				.unwrap();
+			match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
+				(0, 0) => {},
+				_ => panic!("Fees accrued are not zero"),
+			}
+
+			// Different behaviour from Uniswap - does not revert when minting 0
+			let fees_owed =
+				pool.mint_limit_order(id, MAX_TICK_LO - 1, 0, ticker, |_| true).unwrap();
+			match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
+				(0, 0) => {},
+				_ => panic!("Fees accrued are not zero"),
+			}
 		}
 	}
 
@@ -3644,45 +3712,40 @@ mod test_limit_orders {
 		assert_eq!(minted_capital[!INPUT_TICKER], U256::from(3_161));
 	}
 	#[test]
-	fn test_mint_one_side_base_lo() {
-		mint_one_side_lo(Ticker::Base);
-	}
-	#[test]
-	fn test_mint_one_side_pair_lo() {
-		mint_one_side_lo(Ticker::Pair);
-	}
-
-	fn mint_one_side_lo(ticker: Ticker) {
+	fn test_mint_one_side_lo() {
 		let (mut pool, mut minted_capital_accum, id) = mint_pool_lo();
-		let mut minted_capital = None;
-		// Adding one unit to this liquidity to make them different for testing purposes
-		pool.mint_limit_order(id, pool.current_tick, 3161, ticker, |minted| {
-			minted_capital.replace(minted);
-			true
-		})
-		.unwrap();
-		let minted_capital = minted_capital.unwrap();
 
-		minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
-		minted_capital_accum[Ticker::Pair] += minted_capital[Ticker::Pair];
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			let mut minted_capital = None;
+			// Adding one unit to this liquidity to make them different for testing purposes
+			pool.mint_limit_order(id, pool.current_tick, 3161, ticker, |minted| {
+				minted_capital.replace(minted);
+				true
+			})
+			.unwrap();
+			let minted_capital = minted_capital.unwrap();
 
-		assert_eq!(minted_capital_accum[ticker], U256::from(3_161) * 2);
-		assert_eq!(minted_capital_accum[!ticker], U256::from(3_161));
+			minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
+			minted_capital_accum[Ticker::Pair] += minted_capital[Ticker::Pair];
 
-		let mut minted_capital = None;
+			assert_eq!(minted_capital_accum[ticker], U256::from(3_161) * 2);
+			assert_eq!(minted_capital_accum[!ticker], U256::from(3_161));
 
-		pool.mint_limit_order(id, pool.current_tick, 3161, !ticker, |minted| {
-			minted_capital.replace(minted);
-			true
-		})
-		.unwrap();
-		let minted_capital = minted_capital.unwrap();
+			let mut minted_capital = None;
 
-		minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
-		minted_capital_accum[Ticker::Pair] += minted_capital[Ticker::Pair];
+			pool.mint_limit_order(id, pool.current_tick, 3161, !ticker, |minted| {
+				minted_capital.replace(minted);
+				true
+			})
+			.unwrap();
+			let minted_capital = minted_capital.unwrap();
 
-		assert_eq!(minted_capital[ticker], U256::from(3_161) * 2);
-		assert_eq!(minted_capital[!ticker], U256::from(3_161) * 2);
+			minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
+			minted_capital_accum[Ticker::Pair] += minted_capital[Ticker::Pair];
+
+			assert_eq!(minted_capital[ticker], U256::from(3_161) * 2);
+			assert_eq!(minted_capital[!ticker], U256::from(3_161) * 2);
+		}
 	}
 
 	#[test]
@@ -3693,244 +3756,318 @@ mod test_limit_orders {
 	}
 
 	#[test]
-	fn test_transfer_base_only_lo() {
-		test_transfer_onetoken_only_lo(Ticker::Base);
-	}
-	#[test]
-	fn test_transfer_pair_only_lo() {
-		test_transfer_onetoken_only_lo(Ticker::Pair);
-	}
-
 	// Above current price
-	fn test_transfer_onetoken_only_lo(ticker: Ticker) {
+	fn test_transfer_onetoken_only_lo() {
 		let (mut pool, mut minted_capital_accum, id) = mint_pool_lo();
 
 		const MINTED_LIQUIDITY: u128 = 10_000;
 
-		let mut minted_capital = None;
-		let fees_owed = pool
-			.mint_limit_order(id, -22980, MINTED_LIQUIDITY, ticker, |minted| {
-				minted_capital.replace(minted);
-				true
-			})
-			.unwrap();
-		let minted_capital = minted_capital.unwrap();
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			let mut minted_capital = None;
+			let fees_owed = pool
+				.mint_limit_order(id, -22980, MINTED_LIQUIDITY, ticker, |minted| {
+					minted_capital.replace(minted);
+					true
+				})
+				.unwrap();
+			let minted_capital = minted_capital.unwrap();
 
-		match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-			(0, 0) => {},
-			_ => panic!("Fees accrued are not zero"),
+			match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
+				(0, 0) => {},
+				_ => panic!("Fees accrued are not zero"),
+			}
+
+			assert_eq!(minted_capital[!ticker], U256::from(0));
+
+			minted_capital_accum[ticker] += minted_capital[ticker];
+			assert_eq!(minted_capital[!ticker], U256::from(0));
+
+			assert_eq!(minted_capital_accum[ticker], U256::from(3_161 + 10000));
 		}
-
-		assert_eq!(minted_capital[!ticker], U256::from(0));
-
-		minted_capital_accum[ticker] += minted_capital[ticker];
-		assert_eq!(minted_capital[!ticker], U256::from(0));
-
-		assert_eq!(minted_capital_accum[ticker], U256::from(3_161 + 10000));
 	}
 
 	#[test]
-	fn test_maxtick_maxleverage_base_lo() {
-		maxtick_maxleverage_lo(Ticker::Base);
-	}
-	#[test]
-	fn test_maxtick_maxleverage_pair_lo() {
-		maxtick_maxleverage_lo(Ticker::Pair);
-	}
 
-	fn maxtick_maxleverage_lo(ticker: Ticker) {
+	fn test_maxtick_maxleverage_lo() {
 		let (mut pool, mut minted_capital_accum, id) = mint_pool_lo();
-		let mut minted_capital = None;
-		let uniswap_max_tick = 887220;
-		let uniswap_tickspacing = 60;
-		pool.mint_limit_order(
-			id,
-			MAX_TICK_LO,
-			5070602400912917605986812821504 as u128,
-			ticker,
-			|minted| {
-				minted_capital.replace(minted);
-				true
-			},
-		)
-		.unwrap();
-		let minted_capital = minted_capital.unwrap();
 
-		minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
-		minted_capital_accum[!Ticker::Base] += minted_capital[!Ticker::Base];
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			let mut minted_capital = None;
+			let uniswap_max_tick = 887220;
+			let uniswap_tickspacing = 60;
+			pool.mint_limit_order(
+				id,
+				MAX_TICK_LO,
+				5070602400912917605986812821504 as u128,
+				ticker,
+				|minted| {
+					minted_capital.replace(minted);
+					true
+				},
+			)
+			.unwrap();
+			let minted_capital = minted_capital.unwrap();
 
-		assert_eq!(
-			minted_capital_accum[ticker],
-			U256::from(3_161) + U256::from_dec_str("5070602400912917605986812821504").unwrap()
-		);
-		assert_eq!(minted_capital_accum[!ticker], U256::from(3_161));
+			minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
+			minted_capital_accum[!Ticker::Base] += minted_capital[!Ticker::Base];
+
+			assert_eq!(
+				minted_capital_accum[ticker],
+				U256::from(3_161) + U256::from_dec_str("5070602400912917605986812821504").unwrap()
+			);
+			assert_eq!(minted_capital_accum[!ticker], U256::from(3_161));
+		}
 	}
 
 	#[test]
 	fn test_maxtick_lo() {
-		maxtick_lo(Ticker::Base);
+		let (mut pool, mut minted_capital_accum, id) = mint_pool_lo();
+
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			let mut minted_capital = None;
+			pool.mint_limit_order(id, MAX_TICK_LO, 10000, ticker, |minted| {
+				minted_capital.replace(minted);
+				true
+			})
+			.unwrap();
+			let minted_capital = minted_capital.unwrap();
+
+			minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
+			minted_capital_accum[!Ticker::Base] += minted_capital[!Ticker::Base];
+
+			assert_eq!(minted_capital_accum[ticker], U256::from(3_161 + 10_000));
+			assert_eq!(minted_capital_accum[!ticker], U256::from(3_161));
+		}
+	}
+
+	#[test]
+	fn test_removing_works_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			pool.mint_limit_order(id, -240, 10000, ticker, |_| true).unwrap();
+			pool.mint_limit_order(id, 0, 10000, ticker, |_| true).unwrap();
+
+			let (returned_capital, fees_owed) =
+				pool.burn_limit_order(id, -240, 10000, ticker).unwrap();
+
+			assert_eq!(returned_capital[Ticker::Base], U256::from(1000));
+			assert_eq!(returned_capital[!Ticker::Base], U256::from(0));
+			assert_eq!(fees_owed[Ticker::Base], 0);
+			assert_eq!(fees_owed[!Ticker::Base], 0);
+
+			let (returned_capital, fees_owed) =
+				pool.burn_limit_order(id, 0, 10000, ticker).unwrap();
+
+			assert_eq!(returned_capital[Ticker::Base], U256::from(1000));
+			assert_eq!(returned_capital[!Ticker::Base], U256::from(0));
+			assert_eq!(fees_owed[Ticker::Base], 0);
+			assert_eq!(fees_owed[!Ticker::Base], 0);
+		}
+	}
+
+	#[test]
+
+	fn test_removing_works_twosteps_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
+
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			let mut minted_capital = None;
+			pool.mint_limit_order(id, -240, 10000, ticker, |minted| {
+				minted_capital.replace(minted);
+				true
+			})
+			.unwrap();
+
+			for i in [-240, 0] {
+				let (returned_capital_0, fees_owed_0) =
+					pool.burn_limit_order(id, i, 10000 / 2, ticker).unwrap();
+
+				let (returned_capital_1, fees_owed_1) =
+					pool.burn_limit_order(id, i, 10000 / 2, ticker).unwrap();
+
+				pool.mint_limit_order(id, i, 10000, ticker, |minted| {
+					minted_capital.replace(minted);
+					true
+				})
+				.unwrap();
+
+				assert_eq!(returned_capital_0[Ticker::Base], U256::from(60));
+				assert_eq!(returned_capital_0[!Ticker::Base], U256::from(0));
+				assert_eq!(returned_capital_1[Ticker::Base], U256::from(60));
+				assert_eq!(returned_capital_1[!Ticker::Base], U256::from(0));
+
+				assert_eq!(fees_owed_0[Ticker::Base], 0);
+				assert_eq!(fees_owed_0[!Ticker::Base], 0);
+				assert_eq!(fees_owed_1[Ticker::Base], 0);
+				assert_eq!(fees_owed_1[!Ticker::Base], 0);
+			}
+		}
+	}
+
+	fn get_tickinfo_limit_orders<'a>(
+		pool: &'a PoolState,
+		ticker: Ticker,
+		tick: &'a Tick,
+	) -> &'a TickInfoLimitOrder {
+		if ticker == Ticker::Base {
+			return &pool.liquidity_map_base_lo.get(tick).unwrap()
+		} else {
+			return &pool.liquidity_map_pair_lo.get(tick).unwrap()
+		};
+	}
+
+	fn get_liquiditymap_lo<'a>(
+		pool: &PoolState,
+		ticker: Ticker,
+	) -> &BTreeMap<Tick, TickInfoLimitOrder> {
+		if ticker == Ticker::Base {
+			return &pool.liquidity_map_base_lo
+		} else {
+			return &pool.liquidity_map_pair_lo
+		};
 	}
 	#[test]
-	fn test_maxtick_pair_lo() {
-		maxtick_lo(Ticker::Pair);
+	fn test_addliquidityto_liquiditygross_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
+
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			for i in [-240, 0] {
+				let fees_owed = pool.mint_limit_order(id, i, 100, ticker, |_| true).unwrap();
+
+				match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
+					(0, 0) => {},
+					_ => panic!("Fees accrued are not zero"),
+				}
+				let tickinfo_lo = get_tickinfo_limit_orders(&pool, ticker, &i);
+				assert_eq!(tickinfo_lo.liquidity_gross, 100);
+				assert_eq!(tickinfo_lo.fee_growth_inside, U256::from(0));
+				assert_eq!(tickinfo_lo.oneMinusPercSwap, 1.0);
+				let liquidity_map_lo = get_liquiditymap_lo(&pool, ticker);
+				assert!(!liquidity_map_lo.contains_key(&1));
+				assert!(!liquidity_map_lo.contains_key(&2));
+
+				let fees_owed = pool.mint_limit_order(id, i, 150, ticker, |_| true).unwrap();
+				match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
+					(0, 0) => {},
+					_ => panic!("Fees accrued are not zero"),
+				}
+				let fees_owed = pool.mint_limit_order(id, i + 1, 150, ticker, |_| true).unwrap();
+
+				match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
+					(0, 0) => {},
+					_ => panic!("Fees accrued are not zero"),
+				}
+				assert_eq!(get_tickinfo_limit_orders(&pool, ticker, &i).liquidity_gross, 250);
+				assert_eq!(get_tickinfo_limit_orders(&pool, ticker, &(i + 1)).liquidity_gross, 100);
+				assert!(!get_liquiditymap_lo(&pool, ticker).contains_key(&(i + 2)));
+
+				let fees_owed = pool.mint_limit_order(id, i + 2, 60, ticker, |_| true).unwrap();
+				match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
+					(0, 0) => {},
+					_ => panic!("Fees accrued are not zero"),
+				}
+
+				// Check complete final state
+				let tickinfo_lo = get_tickinfo_limit_orders(&pool, ticker, &i);
+				assert_eq!(tickinfo_lo.liquidity_gross, 250);
+				assert_eq!(tickinfo_lo.fee_growth_inside, U256::from(0));
+				assert_eq!(tickinfo_lo.oneMinusPercSwap, 1.0);
+				let aux_tick = i + 1;
+				let tickinfo_lo = get_tickinfo_limit_orders(&pool, ticker, &aux_tick);
+				assert_eq!(tickinfo_lo.liquidity_gross, 100);
+				assert_eq!(tickinfo_lo.fee_growth_inside, U256::from(0));
+				assert_eq!(tickinfo_lo.oneMinusPercSwap, 1.0);
+				let aux_tick = i + 2;
+				let tickinfo_lo = get_tickinfo_limit_orders(&pool, ticker, &aux_tick);
+				assert_eq!(tickinfo_lo.liquidity_gross, 60);
+				assert_eq!(tickinfo_lo.fee_growth_inside, U256::from(0));
+				assert_eq!(tickinfo_lo.oneMinusPercSwap, 1.0);
+			}
+		}
 	}
 
-	fn maxtick_lo(ticker: Ticker) {
-		let (mut pool, mut minted_capital_accum, id) = mint_pool_lo();
-		let mut minted_capital = None;
-		pool.mint_limit_order(id, MAX_TICK_LO, 10000, ticker, |minted| {
-			minted_capital.replace(minted);
-			true
-		})
-		.unwrap();
-		let minted_capital = minted_capital.unwrap();
+	#[test]
+	fn test_remove_liquidity_liquiditygross_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
 
-		minted_capital_accum[Ticker::Base] += minted_capital[Ticker::Base];
-		minted_capital_accum[!Ticker::Base] += minted_capital[!Ticker::Base];
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			pool.mint_limit_order(id, -240, 100, ticker, |_| true).unwrap();
+			pool.mint_limit_order(id, 0, 40, ticker, |_| true).unwrap();
 
-		assert_eq!(minted_capital_accum[ticker], U256::from(3_161 + 10_000));
-		assert_eq!(minted_capital_accum[!ticker], U256::from(3_161));
+			assert_eq!(get_tickinfo_limit_orders(&pool, ticker, &240).liquidity_gross, 100);
+			assert_eq!(get_tickinfo_limit_orders(&pool, ticker, &0).liquidity_gross, 40);
+
+			let (burned, _) = pool.burn_limit_order(id, -240, 90, ticker).unwrap();
+
+			let tickinfo = get_tickinfo_limit_orders(&pool, ticker, &240);
+			assert_eq!(tickinfo.liquidity_gross, 10);
+			assert_eq!(tickinfo.fee_growth_inside, U256::from(0));
+			assert_eq!(tickinfo.oneMinusPercSwap, 1.0);
+			assert_eq!(burned[ticker], U256::from(90));
+			assert_eq!(burned[!ticker], U256::from(0));
+
+			let (burned, _) = pool.burn_limit_order(id, 90, 30, ticker).unwrap();
+			let tickinfo = get_tickinfo_limit_orders(&pool, ticker, &0);
+			assert_eq!(tickinfo.liquidity_gross, 10);
+			assert_eq!(tickinfo.fee_growth_inside, U256::from(0));
+			assert_eq!(tickinfo.oneMinusPercSwap, 1.0);
+			assert_eq!(burned[ticker], U256::from(30));
+			assert_eq!(burned[!ticker], U256::from(0));
+		}
 	}
 
-	// Continue line 344 chainflipPool.py test and line 262 UniswapV3Pool.spec.ts
+	#[test]
+	fn test_clearstick_ifpositionremoved_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
 
-	// #[test]
-	// fn test_removing_works_0_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	let mut minted_capital = None;
-	// 	pool.mint_limit_order_base(id, -240, 0, 10000, |minted| {
-	// 		minted_capital.replace(minted);
-	// 		true
-	// 	})
-	// 	.unwrap();
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			pool.mint_limit_order(id, -240, 100, ticker, |_| true).unwrap();
+			pool.mint_limit_order(id, 0, 100, ticker, |_| true).unwrap();
 
-	// 	let (returned_capital, fees_owed) = pool.burn(id, -240, 0, 10000).unwrap();
+			pool.burn_limit_order(id, -240, 100, ticker).unwrap();
+			let liquidity_map_lo = get_liquiditymap_lo(&pool, ticker);
+			assert!(!liquidity_map_lo.contains_key(&-240));
+			assert!(liquidity_map_lo.contains_key(&0));
 
-	// 	assert_eq!(returned_capital[Ticker::Base], U256::from(120));
-	// 	assert_eq!(returned_capital[!Ticker::Base], U256::from(0));
+			pool.burn_limit_order(id, 0, 100, ticker).unwrap();
+			let liquidity_map_lo = get_liquiditymap_lo(&pool, ticker);
+			assert!(!liquidity_map_lo.contains_key(&-240));
+			assert!(!liquidity_map_lo.contains_key(&0));
+		}
+	}
 
-	// 	assert_eq!(fees_owed[Ticker::Base], 0);
-	// 	assert_eq!(fees_owed[!Ticker::Base], 0);
-	// }
+	#[test]
+	fn test_clears_onlyunused_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
+		let id2: LiquidityProvider = H256([0xce; 32]);
 
-	// #[test]
-	// fn test_removing_works_twosteps_0_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	let mut minted_capital = None;
-	// 	pool.mint_limit_order_base(id, -240, 0, 10000, |minted| {
-	// 		minted_capital.replace(minted);
-	// 		true
-	// 	})
-	// 	.unwrap();
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			pool.mint_limit_order(id, -240, 100, ticker, |_| true).unwrap();
+			pool.mint_limit_order(id, 0, 100, ticker, |_| true).unwrap();
+			pool.mint_limit_order(id2, -1, 250, ticker, |_| true).unwrap();
+			pool.mint_limit_order(id2, 0, 250, ticker, |_| true).unwrap();
 
-	// 	let (returned_capital_0, fees_owed_0) = pool.burn(id, -240, 0, 10000 / 2).unwrap();
-	// 	let (returned_capital_1, fees_owed_1) = pool.burn(id, -240, 0, 10000 / 2).unwrap();
+			let liquidity_map_lo = get_liquiditymap_lo(&pool, ticker);
+			assert!(liquidity_map_lo.contains_key(&-240));
+			assert!(liquidity_map_lo.contains_key(&0));
+			assert!(liquidity_map_lo.contains_key(&1));
 
-	// 	assert_eq!(returned_capital_0[Ticker::Base], U256::from(60));
-	// 	assert_eq!(returned_capital_0[!Ticker::Base], U256::from(0));
-	// 	assert_eq!(returned_capital_1[Ticker::Base], U256::from(60));
-	// 	assert_eq!(returned_capital_1[!Ticker::Base], U256::from(0));
+			pool.burn_limit_order(id, -240, 100, ticker).unwrap();
+			pool.burn_limit_order(id, 0, 100, ticker).unwrap();
 
-	// 	assert_eq!(fees_owed_0[Ticker::Base], 0);
-	// 	assert_eq!(fees_owed_0[!Ticker::Base], 0);
-	// 	assert_eq!(fees_owed_1[Ticker::Base], 0);
-	// 	assert_eq!(fees_owed_1[!Ticker::Base], 0);
-	// }
-
-	// #[test]
-	// fn test_addliquidityto_liquiditygross_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	let fees_owed = pool.mint_limit_order_base(id, -240, 0, 100, |_| true).unwrap();
-
-	// 	match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-	// 		(0, 0) => {},
-	// 		_ => panic!("Fees accrued are not zero"),
-	// 	}
-
-	// 	assert_eq!(pool.liquidity_map.get(&-240).unwrap().liquidity_gross, 100);
-	// 	assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 100);
-	// 	assert!(!pool.liquidity_map.contains_key(&1));
-	// 	assert!(!pool.liquidity_map.contains_key(&2));
-
-	// 	let fees_owed = pool.mint_limit_order_base(id, -240, 1, 150, |_| true).unwrap();
-
-	// 	match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-	// 		(0, 0) => {},
-	// 		_ => panic!("Fees accrued are not zero"),
-	// 	}
-	// 	assert_eq!(pool.liquidity_map.get(&-240).unwrap().liquidity_gross, 250);
-	// 	assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 100);
-	// 	assert_eq!(pool.liquidity_map.get(&1).unwrap().liquidity_gross, 150);
-	// 	assert!(!pool.liquidity_map.contains_key(&2));
-
-	// 	let fees_owed = pool.mint_limit_order_base(id, 0, 2, 60, |_| true).unwrap();
-
-	// 	match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-	// 		(0, 0) => {},
-	// 		_ => panic!("Fees accrued are not zero"),
-	// 	}
-	// 	assert_eq!(pool.liquidity_map.get(&-240).unwrap().liquidity_gross, 250);
-	// 	assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 160);
-	// 	assert_eq!(pool.liquidity_map.get(&1).unwrap().liquidity_gross, 150);
-	// 	assert_eq!(pool.liquidity_map.get(&2).unwrap().liquidity_gross, 60);
-	// }
-
-	// #[test]
-	// fn test_remove_liquidity_liquiditygross_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	pool.mint_limit_order_base(id, -240, 0, 100, |_| true).unwrap();
-	// 	pool.mint_limit_order_base(id, -240, 0, 40, |_| true).unwrap();
-	// 	let (_, fees_owed) = pool.burn(id, -240, 0, 90).unwrap();
-	// 	match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-	// 		(0, 0) => {},
-	// 		_ => panic!("Fees accrued are not zero"),
-	// 	}
-	// 	assert_eq!(pool.liquidity_map.get(&-240).unwrap().liquidity_gross, 50);
-	// 	assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 50);
-	// }
-
-	// #[test]
-	// fn test_clearsticklower_ifpositionremoved_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	pool.mint_limit_order_base(id, -240, 0, 100, |_| true).unwrap();
-	// 	let (_, fees_owed) = pool.burn(id, -240, 0, 100).unwrap();
-	// 	match (fees_owed[Ticker::Base], fees_owed[Ticker::Pair]) {
-	// 		(0, 0) => {},
-	// 		_ => panic!("Fees accrued are not zero"),
-	// 	}
-	// 	assert!(!pool.liquidity_map.contains_key(&-240));
-	// }
-
-	// #[test]
-	// fn test_clearstickupper_ifpositionremoved_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	pool.mint_limit_order_base(id, -240, 0, 100, |_| true).unwrap();
-	// 	pool.burn(id, -240, 0, 100).unwrap();
-	// 	assert!(!pool.liquidity_map.contains_key(&0));
-	// }
-
-	// #[test]
-	// fn test_clears_onlyunused_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	pool.mint_limit_order_base(id, -240, 0, 100, |_| true).unwrap();
-	// 	pool.mint_limit_order_base(id, -60, 0, 250, |_| true).unwrap();
-	// 	pool.burn(id, -240, 0, 100).unwrap();
-	// 	assert!(!pool.liquidity_map.contains_key(&-240));
-	// 	assert_eq!(pool.liquidity_map.get(&0).unwrap().liquidity_gross, 250);
-	// 	assert_eq!(
-	// 		pool.liquidity_map.get(&0).unwrap().fee_growth_outside[Ticker::Base],
-	// 		U256::from(0)
-	// 	);
-	// 	assert_eq!(
-	// 		pool.liquidity_map.get(&0).unwrap().fee_growth_outside[!Ticker::Base],
-	// 		U256::from(0)
-	// 	);
-	// }
+			let liquidity_map_lo = get_liquiditymap_lo(&pool, ticker);
+			assert!(!liquidity_map_lo.contains_key(&-240));
+			let tickinfo_lo = get_tickinfo_limit_orders(&pool, ticker, &-1);
+			assert_eq!(tickinfo_lo.liquidity_gross, 250);
+			assert_eq!(tickinfo_lo.fee_growth_inside, U256::from(0));
+			assert_eq!(tickinfo_lo.oneMinusPercSwap, 1.0);
+		}
+	}
 
 	// // Including current price
 
 	// #[test]
-	// fn test_price_within_range_lo() {
+	// fn price_within_range_lo() {
 	// 	let (mut pool, minted_capital_accum, id) = mint_pool_lo();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(
@@ -3960,7 +4097,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_initializes_lowertick_lo() {
+	// fn initializes_lowertick_lo() {
 	// 	let (mut pool, _, id) = mint_pool_lo();
 	// 	pool.mint_limit_order_base(
 	// 		id,
@@ -3980,7 +4117,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_initializes_uppertick_lo() {
+	// fn initializes_uppertick_lo() {
 	// 	let (mut pool, _, id) = mint_pool_lo();
 	// 	pool.mint_limit_order_base(
 	// 		id,
@@ -4000,7 +4137,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_minmax_tick_lo() {
+	// fn minmax_tick_lo() {
 	// 	let (mut pool, minted_capital_accum, id) = mint_pool_lo();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(
@@ -4029,46 +4166,58 @@ mod test_limit_orders {
 	// 	);
 	// }
 
-	// #[test]
-	// fn test_removing_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	pool.mint_limit_order_base(
-	// 		id,
-	// 		MIN_TICK_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
-	// 		MAX_TICK_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
-	// 		100,
-	// 		|_| true,
-	// 	)
-	// 	.unwrap();
+	#[test]
+	fn removing_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
 
-	// 	let (amounts_owed, _) = pool
-	// 		.burn(
-	// 			id,
-	// 			MIN_TICK_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
-	// 			MAX_TICK_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
-	// 			100,
-	// 		)
-	// 		.unwrap();
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			pool.mint_limit_order(
+				id,
+				MIN_TICK_LO_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
+				100,
+				ticker,
+				|_| true,
+			)
+			.unwrap();
+			pool.mint_limit_order(
+				id,
+				MAX_TICK_LO_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
+				101,
+				ticker,
+				|_| true,
+			)
+			.unwrap();
 
-	// 	assert_eq!(amounts_owed[Ticker::Base], U256::from(316));
-	// 	assert_eq!(amounts_owed[!Ticker::Base], U256::from(31));
+			let (amounts_owed, _) = pool
+				.burn_limit_order(
+					id,
+					MIN_TICK_LO_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
+					100,
+					ticker,
+				)
+				.unwrap();
 
-	// 	// DIFF: Burn will have burnt the entire position so it will be deleted.
-	// 	match pool.burn(
-	// 		id,
-	// 		MIN_TICK_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
-	// 		MAX_TICK_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
-	// 		1,
-	// 	) {
-	// 		Err(PositionError::NonExistent) => {},
-	// 		_ => panic!("Expected NonExistent"),
-	// 	}
-	// }
+			assert_eq!(amounts_owed[ticker], U256::from(100));
+			assert_eq!(amounts_owed[ticker], U256::from(0));
+
+			let (amounts_owed, _) = pool
+				.burn_limit_order(
+					id,
+					MAX_TICK_LO_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
+					101,
+					ticker,
+				)
+				.unwrap();
+
+			assert_eq!(amounts_owed[ticker], U256::from(101));
+			assert_eq!(amounts_owed[ticker], U256::from(0));
+		}
+	}
 
 	// // Below current price
 
 	// #[test]
-	// fn test_transfer_token1_only_lo() {
+	// fn transfer_token1_only_lo() {
 	// 	let (mut pool, minted_capital_accum, id) = mint_pool_lo();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(id, -46080, -23040, 10000, |minted| {
@@ -4092,7 +4241,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_mintick_maxleverage_lo() {
+	// fn mintick_maxleverage_lo() {
 	// 	let (mut pool, minted_capital_accum, id) = mint_pool_lo();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(
@@ -4122,7 +4271,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_mintick_lo() {
+	// fn mintick_lo() {
 	// 	let (mut pool, minted_capital_accum, id) = mint_pool_lo();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(id, MIN_TICK_UNISWAP_MEDIUM, -23040, 10000, |minted| {
@@ -4145,35 +4294,51 @@ mod test_limit_orders {
 	// 	);
 	// }
 
-	// #[test]
-	// fn test_removing_works_1_lo() {
-	// 	let (mut pool, _, id) = mint_pool_lo();
-	// 	let mut minted_capital = None;
-	// 	pool.mint_limit_order_base(id, -46080, -46020, 10000, |minted| {
-	// 		minted_capital.replace(minted);
-	// 		true
-	// 	})
-	// 	.unwrap();
+	#[test]
+	fn removing_works_1_lo() {
+		let (mut pool, _, id) = mint_pool_lo();
 
-	// 	let (returned_capital, fees_owed) = pool.burn(id, -46080, -46020, 10000).unwrap();
+		for ticker in vec![Ticker::Base, Ticker::Pair] {
+			pool.mint_limit_order(id, -46080, 10000, ticker, |_| true).unwrap();
+			pool.mint_limit_order(id, -46020, 10001, ticker, |_| true).unwrap();
 
-	// 	// DIFF: Burn will have burnt the entire position so it will be deleted.
-	// 	assert_eq!(returned_capital[Ticker::Base], U256::from(0));
-	// 	assert_eq!(returned_capital[!Ticker::Base], U256::from(3));
+			let (returned_capital, fees_owed) =
+				pool.burn_limit_order(id, -46080, 10000, ticker).unwrap();
 
-	// 	assert_eq!(fees_owed[Ticker::Base], 0);
-	// 	assert_eq!(fees_owed[!Ticker::Base], 0);
+			// DIFF: Burn will have burnt the entire position so it will be deleted.
+			assert_eq!(returned_capital[ticker], U256::from(10000));
+			assert_eq!(returned_capital[!ticker], U256::from(0));
 
-	// 	match pool.burn(id, -46080, -46020, 1) {
-	// 		Err(PositionError::NonExistent) => {},
-	// 		_ => panic!("Expected NonExistent"),
-	// 	}
-	// }
+			assert_eq!(fees_owed[ticker], 0);
+			assert_eq!(fees_owed[ticker], 0);
+
+			match pool.burn_limit_order(id, -46080, 1, ticker) {
+				Err(PositionError::NonExistent) => {},
+				_ => panic!("Expected NonExistent"),
+			}
+			let (returned_capital, fees_owed) =
+				pool.burn_limit_order(id, -46020, 10001, ticker).unwrap();
+
+			// DIFF: Burn will have burnt the entire position so it will be deleted.
+			assert_eq!(returned_capital[ticker], U256::from(10001));
+			assert_eq!(returned_capital[!ticker], U256::from(0));
+
+			assert_eq!(fees_owed[ticker], 0);
+			assert_eq!(fees_owed[ticker], 0);
+
+			match pool.burn_limit_order(id, -46080, 1, ticker) {
+				Err(PositionError::NonExistent) => {},
+				_ => panic!("Expected NonExistent"),
+			}
+		}
+	}
+
+	// Continue here: Line 737 test_chainflipPool.py, line 508 Uniswapv3Pool.spec.ts
 
 	// // NOTE: There is no implementation of protocol fees so we skip those tests
 
 	// #[test]
-	// fn test_poke_uninitialized_position_lo() {
+	// fn poke_uninitialized_position_lo() {
 	// 	let (mut pool, _, id) = mint_pool_lo();
 	// 	pool.mint_limit_order_base(
 	// 		H256([0xce; 32]),
@@ -4189,7 +4354,7 @@ mod test_limit_orders {
 	// 	pool.swap::<BaseToPair>((SWAP_INPUT / 10).into());
 	// 	pool.swap::<PairToBase>((SWAP_INPUT / 100).into());
 
-	// 	match pool.burn(
+	// 	match pool.burn_limit_order(
 	// 		id,
 	// 		MIN_TICK_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
 	// 		MAX_TICK_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
@@ -4312,7 +4477,7 @@ mod test_limit_orders {
 
 	// // Own test
 	// #[test]
-	// fn test_multiple_burns_lo() {
+	// fn multiple_burns_lo() {
 	// 	let (mut pool, _, _id) = mediumpool_initialized_zerotick();
 	// 	// some activity that would make the ticks non-zero
 	// 	pool.mint_limit_order_base(
@@ -4329,7 +4494,7 @@ mod test_limit_orders {
 
 	// 	// Should be able to do only 1 burn (1000000000000000000 / 987654321000000000)
 
-	// 	pool.burn(
+	// 	pool.burn_limit_order(
 	// 		H256([0xce; 32]),
 	// 		MIN_TICK_UNISWAP_MEDIUM,
 	// 		MAX_TICK_UNISWAP_MEDIUM,
@@ -4337,7 +4502,7 @@ mod test_limit_orders {
 	// 	)
 	// 	.unwrap();
 
-	// 	match pool.burn(
+	// 	match pool.burn_limit_order(
 	// 		H256([0xce; 32]),
 	// 		MIN_TICK_UNISWAP_MEDIUM,
 	// 		MAX_TICK_UNISWAP_MEDIUM,
@@ -4349,7 +4514,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_notclearposition_ifnomoreliquidity_lo() {
+	// fn notclearposition_ifnomoreliquidity_lo() {
 	// 	let (mut pool, _, _id) = mediumpool_initialized_zerotick();
 	// 	// some activity that would make the ticks non-zero
 	// 	pool.mint_limit_order_base(
@@ -4416,7 +4581,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_clearstick_iflastposition_lo() {
+	// fn clearstick_iflastposition_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	// some activity that would make the ticks non-zero
 	// 	pool.mint_limit_order_base(
@@ -4430,7 +4595,7 @@ mod test_limit_orders {
 
 	// 	pool.swap::<BaseToPair>(expandto18decimals(1));
 
-	// 	pool.burn(
+	// 	pool.burn_limit_order(
 	// 		id,
 	// 		MIN_TICK_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
 	// 		MAX_TICK_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
@@ -4443,7 +4608,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_clearlower_ifupperused_lo() {
+	// fn clearlower_ifupperused_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	// some activity that would make the ticks non-zero
 	// 	pool.mint_limit_order_base(
@@ -4464,7 +4629,7 @@ mod test_limit_orders {
 	// 	.unwrap();
 	// 	pool.swap::<BaseToPair>(expandto18decimals(1));
 
-	// 	pool.burn(
+	// 	pool.burn_limit_order(
 	// 		id,
 	// 		MIN_TICK_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
 	// 		MAX_TICK_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
@@ -4477,7 +4642,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_clearupper_iflowerused_lo() {
+	// fn clearupper_iflowerused_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	// some activity that would make the ticks non-zero
 	// 	pool.mint_limit_order_base(
@@ -4498,7 +4663,7 @@ mod test_limit_orders {
 	// 	.unwrap();
 	// 	pool.swap::<BaseToPair>(expandto18decimals(1));
 
-	// 	pool.burn(
+	// 	pool.burn_limit_order(
 	// 		id,
 	// 		MIN_TICK_UNISWAP_MEDIUM + TICKSPACING_UNISWAP_MEDIUM,
 	// 		MAX_TICK_UNISWAP_MEDIUM - TICKSPACING_UNISWAP_MEDIUM,
@@ -4525,7 +4690,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_mint_rightofcurrentprice_lo() {
+	// fn mint_rightofcurrentprice_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_zerotick();
 
 	// 	let liquiditybefore = pool.current_liquidity.clone();
@@ -4551,7 +4716,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_mint_leftofcurrentprice_lo() {
+	// fn mint_leftofcurrentprice_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_zerotick();
 
 	// 	let liquiditybefore = pool.current_liquidity.clone();
@@ -4577,7 +4742,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_mint_withincurrentprice_lo() {
+	// fn mint_withincurrentprice_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_zerotick();
 
 	// 	let liquiditybefore = pool.current_liquidity.clone();
@@ -4603,7 +4768,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_cannotremove_morethanposition_lo() {
+	// fn cannotremove_morethanposition_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_zerotick();
 
 	// 	pool.mint_limit_order_base(
@@ -4615,7 +4780,7 @@ mod test_limit_orders {
 	// 	)
 	// 	.unwrap();
 
-	// 	match pool.burn(
+	// 	match pool.burn_limit_order(
 	// 		id,
 	// 		-TICKSPACING_UNISWAP_LOW,
 	// 		TICKSPACING_UNISWAP_LOW,
@@ -4627,7 +4792,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_collectfees_withincurrentprice_lo() {
+	// fn collectfees_withincurrentprice_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_zerotick();
 
 	// 	pool.mint_limit_order_base(
@@ -4659,13 +4824,13 @@ mod test_limit_orders {
 	// // Post initialize at medium fee
 
 	// #[test]
-	// fn test_initial_liquidity_lo() {
+	// fn initial_liquidity_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 	// }
 
 	// #[test]
-	// fn test_returns_insupply_inrange_lo() {
+	// fn returns_insupply_inrange_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	pool.mint_limit_order_base(
 	// 		id,
@@ -4679,7 +4844,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_excludes_supply_abovetick_lo() {
+	// fn excludes_supply_abovetick_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	pool.mint_limit_order_base(
 	// 		id,
@@ -4693,7 +4858,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_excludes_supply_belowtick_lo() {
+	// fn excludes_supply_belowtick_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	pool.mint_limit_order_base(
 	// 		id,
@@ -4707,7 +4872,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_updates_exiting_lo() {
+	// fn updates_exiting_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 
@@ -4729,7 +4894,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_updates_entering_lo() {
+	// fn updates_entering_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 
@@ -4753,7 +4918,7 @@ mod test_limit_orders {
 	// // Uniswap "limit orders"
 
 	// #[test]
-	// fn test_limitselling_basetopair_tick0thru1_lo() {
+	// fn limitselling_basetopair_tick0thru1_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(id, 0, 120, expandto18decimals(1).as_u128(), |minted| {
@@ -4769,15 +4934,16 @@ mod test_limit_orders {
 	// 	// somebody takes the limit order
 	// 	pool.swap::<PairToBase>((U256::from_dec_str("2000000000000000000").unwrap()).into());
 
-	// 	let (burned, fees_owed) = pool.burn(id, 0, 120, expandto18decimals(1).as_u128()).unwrap();
-	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
-	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("6017734268818165").unwrap());
+	// 	let (burned, fees_owed) = pool.burn_limit_order(id, 0, 120,
+	// expandto18decimals(1).as_u128()).unwrap(); 	assert_eq!(burned[Ticker::Base],
+	// U256::from_dec_str("0").unwrap()); 	assert_eq!(burned[!Ticker::Base],
+	// U256::from_dec_str("6017734268818165").unwrap());
 
 	// 	// DIFF: position fully burnt
 	// 	assert_eq!(fees_owed[Ticker::Base], 0);
 	// 	assert_eq!(fees_owed[!Ticker::Base], 18107525382602);
 
-	// 	match pool.burn(id, 0, 120, 1) {
+	// 	match pool.burn_limit_order(id, 0, 120, 1) {
 	// 		Err(PositionError::NonExistent) => {},
 	// 		_ => panic!("Expected NonExistent"),
 	// 	}
@@ -4786,7 +4952,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_limitselling_basetopair_tick0thru1_poke_lo() {
+	// fn limitselling_basetopair_tick0thru1_poke_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(id, 0, 120, expandto18decimals(1).as_u128(), |minted| {
@@ -4802,7 +4968,7 @@ mod test_limit_orders {
 	// 	// somebody takes the limit order
 	// 	pool.swap::<PairToBase>((U256::from_dec_str("2000000000000000000").unwrap()).into());
 
-	// 	let (burned, fees_owed) = pool.burn(id, 0, 120, 0).unwrap();
+	// 	let (burned, fees_owed) = pool.burn_limit_order(id, 0, 120, 0).unwrap();
 	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
 	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
 
@@ -4810,9 +4976,10 @@ mod test_limit_orders {
 	// 	assert_eq!(fees_owed[Ticker::Base], 0);
 	// 	assert_eq!(fees_owed[!Ticker::Base], 18107525382602);
 
-	// 	let (burned, fees_owed) = pool.burn(id, 0, 120, expandto18decimals(1).as_u128()).unwrap();
-	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
-	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("6017734268818165").unwrap());
+	// 	let (burned, fees_owed) = pool.burn_limit_order(id, 0, 120,
+	// expandto18decimals(1).as_u128()).unwrap(); 	assert_eq!(burned[Ticker::Base],
+	// U256::from_dec_str("0").unwrap()); 	assert_eq!(burned[!Ticker::Base],
+	// U256::from_dec_str("6017734268818165").unwrap());
 
 	// 	// DIFF: position fully burnt
 	// 	assert_eq!(fees_owed[Ticker::Base], 0);
@@ -4822,7 +4989,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_limitselling_pairtobase_tick1thru0_lo() {
+	// fn limitselling_pairtobase_tick1thru0_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(id, -120, 0, expandto18decimals(1).as_u128(), |minted| {
@@ -4838,15 +5005,16 @@ mod test_limit_orders {
 	// 	// somebody takes the limit order
 	// 	pool.swap::<BaseToPair>((U256::from_dec_str("2000000000000000000").unwrap()).into());
 
-	// 	let (burned, fees_owed) = pool.burn(id, -120, 0, expandto18decimals(1).as_u128()).unwrap();
-	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
-	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("6017734268818165").unwrap());
+	// 	let (burned, fees_owed) = pool.burn_limit_order(id, -120, 0,
+	// expandto18decimals(1).as_u128()).unwrap(); 	assert_eq!(burned[!Ticker::Base],
+	// U256::from_dec_str("0").unwrap()); 	assert_eq!(burned[Ticker::Base],
+	// U256::from_dec_str("6017734268818165").unwrap());
 
 	// 	// DIFF: position fully burnt
 	// 	assert_eq!(fees_owed[!Ticker::Base], 0);
 	// 	assert_eq!(fees_owed[Ticker::Base], 18107525382602);
 
-	// 	match pool.burn(id, -120, 0, 1) {
+	// 	match pool.burn_limit_order(id, -120, 0, 1) {
 	// 		Err(PositionError::NonExistent) => {},
 	// 		_ => panic!("Expected NonExistent"),
 	// 	}
@@ -4855,7 +5023,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_limitselling_pairtobase_tick1thru0_poke_lo() {
+	// fn limitselling_pairtobase_tick1thru0_poke_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_zerotick();
 	// 	let mut minted_capital = None;
 	// 	pool.mint_limit_order_base(id, -120, 0, expandto18decimals(1).as_u128(), |minted| {
@@ -4871,22 +5039,23 @@ mod test_limit_orders {
 	// 	// somebody takes the limit order
 	// 	pool.swap::<BaseToPair>((U256::from_dec_str("2000000000000000000").unwrap()).into());
 
-	// 	let (burned, fees_owed) = pool.burn(id, -120, 0, 0).unwrap();
+	// 	let (burned, fees_owed) = pool.burn_limit_order(id, -120, 0, 0).unwrap();
 	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
 	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
 
 	// 	assert_eq!(fees_owed[!Ticker::Base], 0);
 	// 	assert_eq!(fees_owed[Ticker::Base], 18107525382602);
 
-	// 	let (burned, fees_owed) = pool.burn(id, -120, 0, expandto18decimals(1).as_u128()).unwrap();
-	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
-	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("6017734268818165").unwrap());
+	// 	let (burned, fees_owed) = pool.burn_limit_order(id, -120, 0,
+	// expandto18decimals(1).as_u128()).unwrap(); 	assert_eq!(burned[!Ticker::Base],
+	// U256::from_dec_str("0").unwrap()); 	assert_eq!(burned[Ticker::Base],
+	// U256::from_dec_str("6017734268818165").unwrap());
 
 	// 	// DIFF: position fully burnt
 	// 	assert_eq!(fees_owed[!Ticker::Base], 0);
 	// 	assert_eq!(fees_owed[Ticker::Base], 0);
 
-	// 	match pool.burn(id, -120, 0, 1) {
+	// 	match pool.burn_limit_order(id, -120, 0, 1) {
 	// 		Err(PositionError::NonExistent) => {},
 	// 		_ => panic!("Expected NonExistent"),
 	// 	}
@@ -4906,7 +5075,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_multiplelps_lo() {
+	// fn multiplelps_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_one();
 
 	// 	pool.mint_limit_order_base(
@@ -4930,7 +5099,7 @@ mod test_limit_orders {
 
 	// 	// poke positions
 	// 	let (burned, fees_owed) =
-	// 		pool.burn(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
+	// 		pool.burn_limit_order(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
 
 	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
 	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
@@ -4960,7 +5129,7 @@ mod test_limit_orders {
 
 	// // Works across large increases
 	// #[test]
-	// fn test_before_capbidn_lo() {
+	// fn before_capbidn_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_one();
 	// 	pool.mint_limit_order_base(
 	// 		id,
@@ -4976,7 +5145,7 @@ mod test_limit_orders {
 	// 			.unwrap();
 
 	// 	let (burned, fees_owed) =
-	// 		pool.burn(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
+	// 		pool.burn_limit_order(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
 
 	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
 	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
@@ -4986,7 +5155,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_after_capbidn_lo() {
+	// fn after_capbidn_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_one();
 	// 	pool.mint_limit_order_base(
 	// 		id,
@@ -5002,7 +5171,7 @@ mod test_limit_orders {
 	// 			.unwrap();
 
 	// 	let (burned, fees_owed) =
-	// 		pool.burn(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
+	// 		pool.burn_limit_order(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
 
 	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
 	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
@@ -5012,7 +5181,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_wellafter_capbidn_lo() {
+	// fn wellafter_capbidn_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_one();
 	// 	pool.mint_limit_order_base(
 	// 		id,
@@ -5026,7 +5195,7 @@ mod test_limit_orders {
 	// 	pool.global_fee_growth[Ticker::Base] = U256::MAX;
 
 	// 	let (burned, fees_owed) =
-	// 		pool.burn(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
+	// 		pool.burn_limit_order(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
 
 	// 	assert_eq!(burned[Ticker::Base], U256::from_dec_str("0").unwrap());
 	// 	assert_eq!(burned[!Ticker::Base], U256::from_dec_str("0").unwrap());
@@ -5064,7 +5233,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_base_lo() {
+	// fn base_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_setfees();
 
 	// 	pool.swap::<BaseToPair>((expandto18decimals(1)).into());
@@ -5073,7 +5242,7 @@ mod test_limit_orders {
 	// 	assert_eq!(pool.global_fee_growth[!Ticker::Base], U256::MAX);
 
 	// 	let (burned, fees_owed) =
-	// 		pool.burn(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
+	// 		pool.burn_limit_order(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
 
 	// 	// DIFF: no fees accrued
 	// 	assert_eq!(fees_owed[Ticker::Base], 0);
@@ -5081,7 +5250,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_pair_lo() {
+	// fn pair_lo() {
 	// 	let (mut pool, _, id) = lowpool_initialized_setfees();
 
 	// 	pool.swap::<PairToBase>((expandto18decimals(1)).into());
@@ -5089,7 +5258,8 @@ mod test_limit_orders {
 	// 	assert_eq!(pool.global_fee_growth[Ticker::Base], U256::MAX);
 	// 	assert_eq!(pool.global_fee_growth[!Ticker::Base], U256::MAX);
 
-	// 	let (_, fees_owed) = pool.burn(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW, 0).unwrap();
+	// 	let (_, fees_owed) = pool.burn_limit_order(id, MIN_TICK_UNISWAP_LOW, MAX_TICK_UNISWAP_LOW,
+	// 0).unwrap();
 
 	// 	// DIFF: no fees accrued
 	// 	assert_eq!(fees_owed[Ticker::Base], 0 as u128);
@@ -5113,7 +5283,7 @@ mod test_limit_orders {
 
 	// // DIFF: We have a tickspacing of 1, which means we will never have issues with it.
 	// #[test]
-	// fn test_tickspacing_lo() {
+	// fn tickspacing_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_nomint();
 	// 	pool.mint_limit_order_base(id, -6, 6, 1, |_| true).unwrap();
 	// 	pool.mint_limit_order_base(id, -12, 12, 1, |_| true).unwrap();
@@ -5122,12 +5292,12 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_swapping_gaps_pairtobase_lo() {
+	// fn swapping_gaps_pairtobase_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_nomint();
 	// 	pool.mint_limit_order_base(id, 120000, 121200, 250000000000000000, |_| true).unwrap();
 	// 	pool.swap::<PairToBase>((expandto18decimals(1)).into());
 	// 	let (returned_capital, fees_owed) =
-	// 		pool.burn(id, 120000, 121200, 250000000000000000).unwrap();
+	// 		pool.burn_limit_order(id, 120000, 121200, 250000000000000000).unwrap();
 
 	// 	assert_eq!(returned_capital[Ticker::Base], U256::from_dec_str("30027458295511").unwrap());
 	// 	assert_eq!(
@@ -5142,13 +5312,13 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_swapping_gaps_basetopair_lo() {
+	// fn swapping_gaps_basetopair_lo() {
 	// 	let (mut pool, _, id) = mediumpool_initialized_nomint();
 	// 	pool.mint_limit_order_base(id, -121200, -120000, 250000000000000000, |_| true)
 	// 		.unwrap();
 	// 	pool.swap::<BaseToPair>((expandto18decimals(1)).into());
 	// 	let (returned_capital, fees_owed) =
-	// 		pool.burn(id, -121200, -120000, 250000000000000000).unwrap();
+	// 		pool.burn_limit_order(id, -121200, -120000, 250000000000000000).unwrap();
 
 	// 	assert_eq!(
 	// 		returned_capital[Ticker::Base],
@@ -5163,7 +5333,7 @@ mod test_limit_orders {
 	// }
 
 	// #[test]
-	// fn test_cannot_run_ticktransition_twice_lo() {
+	// fn cannot_run_ticktransition_twice_lo() {
 	// 	const ID: LiquidityProvider = H256([0xcf; 32]);
 
 	// 	let p0 = PoolState::sqrt_price_at_tick(-24081) + 1;
