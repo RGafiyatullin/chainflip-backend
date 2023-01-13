@@ -8,8 +8,12 @@ RestartSec=30
 Type=simple
 User=chainflip
 Group=chainflip
-EnvironmentFile=-/etc/default/chainflip-node
-ExecStart=/usr/bin/chainflip-node $CHAINFLIP_NODE_ARGS
+ExecStart=/usr/bin/chainflip-node \
+  --chain /etc/chainflip/chainspecs/perseverance.json \
+  --base-path /var/lib/chainflip/chaindata \
+  --node-key-file /etc/chainflip/keys/node_key_file \
+  --validator \
+  --state-cache-size 0
 CapabilityBoundingSet=
 LockPersonality=true
 NoNewPrivileges=true
@@ -22,7 +26,7 @@ ProtectControlGroups=true
 ProtectHostname=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
-ProtectSystem=strict
+# ProtectSystem=strict
 RemoveIPC=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
 RestrictNamespaces=true

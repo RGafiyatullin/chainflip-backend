@@ -4,10 +4,17 @@ set -e
 action="$1"
 
 if [ "$action" = "configure" ]; then
+  # Create user and group
   getent group chainflip >/dev/null 2>&1 || addgroup --system chainflip
   getent passwd chainflip >/dev/null 2>&1 ||
     adduser --system --home /home/chainflip --disabled-password \
-    --ingroup chainflip chainflip
+      --ingroup chainflip chainflip
+
+  # Create data dir
+  if [ ! -e /var/lib/chainflip ]; then
+    mkdir -p /var/lib/chainflip
+  fi
+  chown -R chainflip:chainflip /var/lib/chainflip
 fi
 
 #DEBHELPER#
