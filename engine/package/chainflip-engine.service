@@ -22,7 +22,6 @@ ProtectControlGroups=true
 ProtectHostname=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
-ProtectSystem=strict
 RemoveIPC=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
 RestrictNamespaces=true
