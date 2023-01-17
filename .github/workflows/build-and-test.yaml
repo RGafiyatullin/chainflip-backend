@@ -34,7 +34,7 @@ jobs:
       group: ${{ github.ref }}-cargo-fmt
       cancel-in-progress: true
     container:
-      image: 'ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache'
+      image: "ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache"
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -50,7 +50,7 @@ jobs:
       group: ${{ github.ref }}-cargo-clippy
       cancel-in-progress: true
     container:
-      image: 'ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache'
+      image: "ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache"
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -66,7 +66,7 @@ jobs:
       group: ${{ github.ref }}-cargo-doc
       cancel-in-progress: true
     container:
-      image: 'ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache'
+      image: "ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache"
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -100,7 +100,7 @@ jobs:
       cancel-in-progress: true
     needs: [set-variables, cargo-fmt]
     container:
-      image: 'ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache'
+      image: "ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache"
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -137,7 +137,7 @@ jobs:
         run: |
           cargo deb --no-build --no-strip -p chainflip-engine --deb-revision "${{ steps.vars.outputs.date }}"
           cargo deb --no-build --no-strip -p chainflip-cli --deb-revision "${{ steps.vars.outputs.date }}"
-          cargo deb --no-build --no-strip -p chainflip-node --deb-revision "${{ steps.vars.outputs.date }}"
+          cargo deb --no-build --no-strip -p chainflip-node --deb-revision "${{ steps.vars.outputs.date }}" --variant ${NODE_CARGO_DEB_VARIANT:-sisyphos}
           cargo deb --no-build --no-strip -p generate-genesis-keys --deb-revision "${{ steps.vars.outputs.date }}"
       - name: Upload packages
         uses: actions/upload-artifact@v3
@@ -166,7 +166,7 @@ jobs:
       cancel-in-progress: true
     needs: [set-variables, cargo-fmt]
     container:
-      image: 'ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache'
+      image: "ghcr.io/${{ github.repository }}/rust-base:nightly-2022-08-08-no-sccache"
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -203,7 +203,7 @@ jobs:
         run: |
           cargo deb --no-build --no-strip -p chainflip-engine --deb-revision "${{ steps.vars.outputs.date }}"
           cargo deb --no-build --no-strip -p chainflip-cli --deb-revision "${{ steps.vars.outputs.date }}"
-          cargo deb --no-build --no-strip -p chainflip-node --deb-revision "${{ steps.vars.outputs.date }}"
+          cargo deb --no-build --no-strip -p chainflip-node --deb-revision "${{ steps.vars.outputs.date }}" --variant ${NODE_CARGO_DEB_VARIANT:-sisyphos}
           cargo deb --no-build --no-strip -p chainflip-relayer --deb-revision "${{ steps.vars.outputs.date }}"
           cargo deb --no-build --no-strip -p generate-genesis-keys --deb-revision "${{ steps.vars.outputs.date }}"
       - name: Upload packages
@@ -314,8 +314,8 @@ jobs:
           echo ${{ secrets.CF_RUNNER_SUDO_PASSWORD }} | sudo -S apt-get install -y graphviz
       - uses: actions/setup-java@v3
         with:
-          distribution: 'zulu'
-          java-version: '17'
+          distribution: "zulu"
+          java-version: "17"
       - name: Generate class diagram
         run: |
           cd chainflip-docgen/
