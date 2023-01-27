@@ -13,6 +13,7 @@ use crate::{
 		crypto::{CryptoScheme, CHAIN_TAG_SIZE},
 		KeyId,
 	},
+	witnesser::checkpointing::WitnessedUntil,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -28,8 +29,12 @@ pub const GENESIS_HASH_KEY: &[u8; 12] = b"genesis_hash";
 
 /// A static length prefix is used on the `DATA_COLUMN`
 pub const PREFIX_SIZE: usize = 10;
+const PARTIAL_PREFIX_SIZE: usize = PREFIX_SIZE - CHAIN_TAG_SIZE;
 /// Keygen data uses a prefix that is a combination of a keygen data prefix and the chain tag
-const KEYGEN_DATA_PARTIAL_PREFIX: &[u8; PREFIX_SIZE - CHAIN_TAG_SIZE] = b"key_____";
+const KEYGEN_DATA_PARTIAL_PREFIX: &[u8; PARTIAL_PREFIX_SIZE] = b"key_____";
+/// The Witnesser checkpoint uses a prefix that is a combination of a checkpoint prefix and the
+/// chain tag
+const WITNESSER_CHECKPOINT_PARTIAL_PREFIX: &[u8; PARTIAL_PREFIX_SIZE] = b"check___";
 
 /// Column family names
 // All data is stored in `DATA_COLUMN` with a prefix for key spaces
@@ -98,12 +103,9 @@ impl PersistentKeyDB {
 		create_missing_db_and_cols_opts.create_missing_column_families(true);
 		create_missing_db_and_cols_opts.create_if_missing(true);
 
-		let cf_descriptors: Vec<ColumnFamilyDescriptor> =
-			cfs.into_iter().map(|(_, cf_desc)| cf_desc).collect();
-
 		// Open the db or create a new one if it doesn't exist
 		let db =
-			DB::open_cf_descriptors(&create_missing_db_and_cols_opts, &db_path, cf_descriptors)
+			DB::open_cf_descriptors(&create_missing_db_and_cols_opts, db_path, cfs.into_values())
 				.map_err(anyhow::Error::msg)
 				.context(format!("Failed to open database at: {}", db_path.display()))?;
 
@@ -142,57 +144,89 @@ impl PersistentKeyDB {
 	pub fn update_key<C: CryptoScheme>(
 		&self,
 		key_id: &KeyId,
-		keygen_result_info: &KeygenResultInfo<C::Point>,
+		keygen_result_info: &KeygenResultInfo<C>,
 	) {
 		let key_id_with_prefix =
-			[KEYGEN_DATA_PARTIAL_PREFIX, &(C::CHAIN_TAG.to_bytes())[..], &key_id.0.clone()[..]]
-				.concat();
+			[get_keygen_data_prefix::<C>().as_slice(), &key_id.0.clone()[..]].concat();
 
 		self.db
 			.put_cf(
 				get_data_column_handle(&self.db),
 				key_id_with_prefix,
-				&bincode::serialize(keygen_result_info)
+				bincode::serialize(keygen_result_info)
 					.expect("Couldn't serialize keygen result info"),
 			)
 			.unwrap_or_else(|e| panic!("Failed to update key {}. Error: {}", &key_id, e));
 	}
 
-	pub fn load_keys<C: CryptoScheme>(&self) -> HashMap<KeyId, KeygenResultInfo<C::Point>> {
-		self.db
-			.prefix_iterator_cf(
-				get_data_column_handle(&self.db),
-				[&KEYGEN_DATA_PARTIAL_PREFIX[..], &(C::CHAIN_TAG.to_bytes())[..]].concat(),
-			)
+	pub fn load_keys<C: CryptoScheme>(&self) -> HashMap<KeyId, KeygenResultInfo<C>> {
+		let keys: HashMap<KeyId, KeygenResultInfo<C>> = self
+			.db
+			.prefix_iterator_cf(get_data_column_handle(&self.db), get_keygen_data_prefix::<C>())
+			.filter_map(|result| match result {
+				Ok(key) => Some(key),
+				Err(err) => {
+					slog::error!(self.logger, "Error getting prefix iterator: {err}");
+					None
+				},
+			})
 			.filter_map(|(key_id, key_info)| {
 				// Strip the prefix off the key_id
 				let key_id: KeyId = KeyId(key_id[PREFIX_SIZE..].into());
 
 				// deserialize the `KeygenResultInfo`
-				match bincode::deserialize::<KeygenResultInfo<C::Point>>(&key_info) {
-					Ok(keygen_result_info) => {
-						slog::debug!(
-							self.logger,
-							"Loaded {} key_info (key_id: {}) from database",
-							C::NAME,
-							key_id
-						);
-						Some((key_id, keygen_result_info))
-					},
+				match bincode::deserialize::<KeygenResultInfo<C>>(&key_info) {
+					Ok(keygen_result_info) => Some((key_id, keygen_result_info)),
 					Err(err) => {
 						slog::error!(
 							self.logger,
-							"Could not deserialize {} key_info (key_id: {}) from database: {}",
+							"Could not deserialize {} key from database: {}",
 							C::NAME,
-							key_id,
-							err
+							err;
+							"key_id" => key_id.to_string()
 						);
 						None
 					},
 				}
 			})
-			.collect()
+			.collect();
+		if !keys.is_empty() {
+			slog::debug!(self.logger, "Loaded {} {} keys from the database", keys.len(), C::NAME,);
+		}
+		keys
 	}
+
+	/// Write the witnesser checkpoint to the db
+	pub fn update_checkpoint<C: CryptoScheme>(&self, checkpoint: &WitnessedUntil) {
+		self.db
+			.put_cf(
+				get_data_column_handle(&self.db),
+				get_checkpoint_prefix::<C>(),
+				bincode::serialize(checkpoint).expect("Should serialize WitnessedUntil checkpoint"),
+			)
+			.unwrap_or_else(|e| {
+				panic!("Failed to update {} witnesser checkpoint. Error: {e}", C::NAME)
+			});
+	}
+
+	pub fn load_checkpoint<C: CryptoScheme>(&self) -> Result<Option<WitnessedUntil>> {
+		self.db
+			.get_cf(get_data_column_handle(&self.db), get_checkpoint_prefix::<C>())?
+			.map(|data| {
+				bincode::deserialize::<WitnessedUntil>(&data).map_err(|e| {
+					anyhow!("Could not deserialize {} WitnessedUntil checkpoint: {e}", C::NAME)
+				})
+			})
+			.transpose()
+	}
+}
+
+fn get_keygen_data_prefix<C: CryptoScheme>() -> Vec<u8> {
+	[&KEYGEN_DATA_PARTIAL_PREFIX[..], &(C::CHAIN_TAG.to_bytes())[..]].concat()
+}
+
+fn get_checkpoint_prefix<C: CryptoScheme>() -> Vec<u8> {
+	[WITNESSER_CHECKPOINT_PARTIAL_PREFIX, &(C::CHAIN_TAG.to_bytes())[..]].concat()
 }
 
 // Creates a backup of the database folder to BACKUPS_DIRECTORY/backup_vx_xx_xx
@@ -258,7 +292,7 @@ pub fn get_data_column_handle(db: &DB) -> &ColumnFamily {
 
 fn get_column_handle<'a>(db: &'a DB, column_name: &str) -> &'a ColumnFamily {
 	db.cf_handle(column_name)
-		.unwrap_or_else(|| panic!("Should get column family handle for {}", column_name))
+		.unwrap_or_else(|| panic!("Should get column family handle for {column_name}"))
 }
 
 /// Get the schema version from the metadata column in the db.
@@ -268,7 +302,7 @@ fn read_schema_version(db: &DB, logger: &slog::Logger) -> Result<u32> {
 		.map(|version| {
 			let version: [u8; 4] = version.try_into().expect("Version should be a u32");
 			let version = u32::from_be_bytes(version);
-			slog::info!(logger, "Found db_schema_version of {}", version);
+			slog::info!(logger, "Found db_schema_version of {version}");
 			version
 		})
 		.ok_or_else(|| anyhow!("Could not find db schema version"))
@@ -362,7 +396,7 @@ fn migrate_db_to_latest(
 			// Future migrations can be added here
 
 			// No migrations exist yet so just panic
-			panic!("Invalid migration from schema version {}", version);
+			panic!("Invalid migration from schema version {version}");
 		},
 	}
 }

@@ -12,7 +12,7 @@ use cf_traits::{
 		signer_nomination::MockNominator, system_state_info::MockSystemStateInfo,
 		threshold_signer::MockThresholdSigner,
 	},
-	Chainflip, KeyState,
+	Chainflip, EpochKey, KeyState,
 };
 use frame_support::parameter_types;
 use sp_core::H256;
@@ -50,8 +50,8 @@ impl frame_system::Config for Test {
 	type BlockWeights = ();
 	type BlockLength = ();
 	type DbWeight = ();
-	type Origin = Origin;
-	type Call = Call;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -59,7 +59,7 @@ impl frame_system::Config for Test {
 	type AccountId = u64;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = BlockHashCount;
 	type Version = ();
 	type PalletInfo = PalletInfo;
@@ -76,7 +76,7 @@ impl Chainflip for Test {
 	type KeyId = Vec<u8>;
 	type ValidatorId = u64;
 	type Amount = u128;
-	type Call = Call;
+	type RuntimeCall = RuntimeCall;
 	type EnsureWitnessed = NeverFailingOriginCheck<Self>;
 	type EnsureWitnessedAtCurrentEpoch = NeverFailingOriginCheck<Self>;
 	type EpochInfo = cf_traits::mocks::epoch_info::MockEpochInfo;
@@ -104,10 +104,11 @@ thread_local! {
 pub struct MockKeyProvider;
 
 impl cf_traits::KeyProvider<MockEthereum> for MockKeyProvider {
-	fn current_key_epoch_index() -> KeyState<<MockEthereum as ChainCrypto>::AggKey> {
-		KeyState::Active {
+	fn current_epoch_key() -> EpochKey<<MockEthereum as ChainCrypto>::AggKey> {
+		EpochKey {
 			key: if VALIDKEY.with(|cell| *cell.borrow()) { VALID_AGG_KEY } else { INVALID_AGG_KEY },
 			epoch_index: Default::default(),
+			key_state: KeyState::Active,
 		}
 	}
 }
@@ -119,14 +120,14 @@ impl MockKeyProvider {
 }
 
 impl pallet_cf_broadcast::Config<Instance1> for Test {
-	type Event = Event;
-	type Call = Call;
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
 	type Offence = PalletOffence;
 	type AccountRoleRegistry = ();
 	type TargetChain = MockEthereum;
 	type ApiCall = MockApiCall<MockEthereum>;
 	type TransactionBuilder = MockTransactionBuilder<Self::TargetChain, Self::ApiCall>;
-	type ThresholdSigner = MockThresholdSigner<MockEthereum, Call>;
+	type ThresholdSigner = MockThresholdSigner<MockEthereum, RuntimeCall>;
 	type BroadcastSignerNomination = MockNominator;
 	type OffenceReporter = MockOffenceReporter;
 	type EnsureThresholdSigned = NeverFailingOriginCheck<Self>;

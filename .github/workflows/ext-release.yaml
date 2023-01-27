@@ -10,7 +10,6 @@ on:
         options:
           - "perseverance"
           - "sandstorm"
-          - "ibiza"
           - "sysiphos"
           - "berghain"
 # on:
@@ -18,7 +17,7 @@ on:
 #     types: [published]
 jobs:
   call-external-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: Call external release repository
     steps:
       - name: Repository Dispatch

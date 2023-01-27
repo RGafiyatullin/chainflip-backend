@@ -2,16 +2,14 @@
 
 use super::*;
 
-use cf_chains::benchmarking_value::BenchmarkValue;
 use cf_traits::{Chainflip, FeePayment};
-use frame_benchmarking::{account, benchmarks, whitelisted_caller, Vec};
+use frame_benchmarking::{account, benchmarks, whitelisted_caller};
 use frame_support::sp_runtime::traits::UniqueSaturatedFrom;
 use frame_system::RawOrigin;
+use sp_std::collections::btree_set::BTreeSet;
 
-fn generate_proposal<T: Config>() -> Proposal<T> {
-	Proposal::SetGovernanceKey(
-		<<T as pallet::Config>::Chain as cf_chains::ChainCrypto>::GovKey::benchmark_value(),
-	)
+fn generate_proposal<T: Config>() -> Proposal {
+	Proposal::SetGovernanceKey((ForeignChain::Ethereum, vec![1; 32]))
 }
 
 benchmarks! {
@@ -24,7 +22,7 @@ benchmarks! {
 			T::BlockNumber::from(1u32),
 			proposal.clone(),
 		);
-		let backers = (0..a).map(|i| account("doogle", i, 0)).collect::<Vec<_>>();
+		let backers = (0..a).map(|i| account("doogle", i, 0)).collect::<BTreeSet<_>>();
 		for account in &backers {
 			T::FeePayment::mint_to_account(account, stake);
 		}
@@ -35,7 +33,7 @@ benchmarks! {
 		assert!(GovKeyUpdateAwaitingEnactment::<T>::get().is_some());
 	}
 	on_initialize_execute_proposal {
-		GovKeyUpdateAwaitingEnactment::<T>::set(Some((1u32.into(), <<T as pallet::Config>::Chain as cf_chains::ChainCrypto>::GovKey::benchmark_value())));
+		GovKeyUpdateAwaitingEnactment::<T>::set(Some((1u32.into(), (ForeignChain::Ethereum, vec![1; 32]))));
 	}: {
 		Pallet::<T>::on_initialize(1u32.into());
 	} verify {
@@ -52,7 +50,7 @@ benchmarks! {
 		let a in 1..1000;
 		let caller: T::AccountId = whitelisted_caller();
 		let proposal = generate_proposal::<T>();
-		let backers = (0..a).map(|i| account::<T::AccountId>("signers", i, 0)).collect::<Vec<T::AccountId>>();
+		let backers = (0..a).map(|i| account::<T::AccountId>("signers", i, 0)).collect::<BTreeSet<_>>();
 		Proposals::<T>::insert(
 			<frame_system::Pallet<T>>::block_number() + T::VotingPeriod::get(),
 			proposal.clone(),

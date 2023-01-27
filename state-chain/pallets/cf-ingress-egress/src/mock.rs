@@ -3,12 +3,13 @@ pub use cf_chains::{
 	eth::api::{EthereumApi, EthereumReplayProtection},
 	Chain, ChainAbi, ChainEnvironment,
 };
+use cf_primitives::BroadcastId;
 pub use cf_primitives::{
 	chains::{assets, Ethereum},
 	Asset, AssetAmount, EthereumAddress, ExchangeRate, ETHEREUM_ETH_ADDRESS,
 };
 
-use cf_traits::mocks::all_batch::MockAllBatch;
+use cf_traits::mocks::all_batch::{MockAllBatch, MockEthEnvironment};
 pub use cf_traits::{
 	mocks::{ensure_origin_mock::NeverFailingOriginCheck, system_state_info::MockSystemStateInfo},
 	Broadcaster,
@@ -26,7 +27,6 @@ type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
 type AccountId = u64;
 
-pub const ETHEREUM_FLIP_ADDRESS: EthereumAddress = [0x00; 20];
 // Configure a mock runtime to test the pallet.
 frame_support::construct_runtime!(
 	pub enum Test where
@@ -49,8 +49,8 @@ impl system::Config for Test {
 	type BlockWeights = ();
 	type BlockLength = ();
 	type DbWeight = ();
-	type Origin = Origin;
-	type Call = Call;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -58,7 +58,7 @@ impl system::Config for Test {
 	type AccountId = AccountId;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = BlockHashCount;
 	type Version = ();
 	type PalletInfo = PalletInfo;
@@ -75,7 +75,7 @@ impl cf_traits::Chainflip for Test {
 	type KeyId = Vec<u8>;
 	type ValidatorId = u64;
 	type Amount = u128;
-	type Call = Call;
+	type RuntimeCall = RuntimeCall;
 	type EnsureWitnessed = NeverFailingOriginCheck<Self>;
 	type EnsureWitnessedAtCurrentEpoch = NeverFailingOriginCheck<Self>;
 	type EpochInfo = cf_traits::mocks::epoch_info::MockEpochInfo;
@@ -84,32 +84,20 @@ impl cf_traits::Chainflip for Test {
 
 pub struct MockBroadcast;
 impl Broadcaster<Ethereum> for MockBroadcast {
-	type ApiCall = MockAllBatch;
+	type ApiCall = MockAllBatch<MockEthEnvironment>;
 
-	fn threshold_sign_and_broadcast(_api_call: Self::ApiCall) {}
-}
-
-pub struct MockEthEnvironment;
-
-impl ChainEnvironment<<Ethereum as Chain>::ChainAsset, <Ethereum as Chain>::ChainAccount>
-	for MockEthEnvironment
-{
-	fn lookup(asset: <Ethereum as Chain>::ChainAsset) -> Option<<Ethereum as Chain>::ChainAccount> {
-		Some(match asset {
-			assets::eth::Asset::Eth => ETHEREUM_ETH_ADDRESS.into(),
-			assets::eth::Asset::Flip => ETHEREUM_FLIP_ADDRESS.into(),
-			_ => todo!(),
-		})
+	fn threshold_sign_and_broadcast(_api_call: Self::ApiCall) -> BroadcastId {
+		1
 	}
 }
 
 impl crate::Config<Instance1> for Test {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type TargetChain = Ethereum;
 	type AddressDerivation = ();
 	type LpProvisioning = Self;
 	type SwapIntentHandler = Self;
-	type AllBatch = MockAllBatch;
+	type AllBatch = MockAllBatch<MockEthEnvironment>;
 	type Broadcaster = MockBroadcast;
 	type EnsureGovernance = NeverFailingOriginCheck<Self>;
 	type WeightInfo = ();

@@ -1,19 +1,20 @@
-use sp_runtime::DispatchResult;
-
 use cf_primitives::{
-	liquidity::TradingPosition, Asset, AssetAmount, ExchangeRate, ForeignChainAddress, PoolId,
+	AmmRange, Asset, AssetAmount, BurnResult, ForeignChainAddress, Liquidity, PoolAssetMap, Tick,
 };
+use frame_support::dispatch::DispatchError;
+use sp_runtime::DispatchResult;
 
 pub trait SwapIntentHandler {
 	type AccountId;
-	fn schedule_swap(
+	fn on_swap_ingress(
+		ingress_address: ForeignChainAddress,
 		from: Asset,
 		to: Asset,
 		amount: AssetAmount,
 		egress_address: ForeignChainAddress,
 		relayer_id: Self::AccountId,
 		relayer_commission_bps: u16,
-	) -> DispatchResult;
+	);
 }
 
 pub trait LpProvisioningApi {
@@ -28,47 +29,72 @@ pub trait LpProvisioningApi {
 }
 
 pub trait SwappingApi {
+	// Attempt to swap `from` asset to `to` asset.
+	// If OK, return (output_amount, input_asset_fee, stable_asset_fee)
 	fn swap(
 		from: Asset,
 		to: Asset,
 		input_amount: AssetAmount,
-		fee: u16,
-	) -> (AssetAmount, (Asset, AssetAmount));
+	) -> Result<AssetAmount, DispatchError>;
 }
 
-pub trait AmmPoolApi {
-	fn asset_0(&self) -> Asset;
-	fn asset_1(&self) -> Asset;
-	fn liquidity_0(&self) -> AssetAmount;
-	fn liquidity_1(&self) -> AssetAmount;
-
-	fn pool_id(&self) -> PoolId {
-		(self.asset_0(), self.asset_1())
+impl SwappingApi for () {
+	fn swap(
+		_from: Asset,
+		_to: Asset,
+		_input_amount: AssetAmount,
+	) -> Result<AssetAmount, DispatchError> {
+		Ok(Default::default())
 	}
+}
 
-	fn get_exchange_rate(&self) -> ExchangeRate;
+/// API to interface with the Pools pallet to manage Uniswap v3 style Exchange Pools.
+/// All pools are Asset <-> USDC
+pub trait LiquidityPoolApi<AccountId> {
+	const STABLE_ASSET: Asset;
 
-	fn get_liquidity_requirement(
-		&self,
-		position: &TradingPosition<AssetAmount>,
-	) -> Option<(AssetAmount, AssetAmount)>;
+	/// Deposit up to some amount of assets into an exchange pool.
+	///
+	/// The passed `try_debit` closure should debit the account balance and fail if this
+	/// is not possible.
+	///
+	/// Returns the harvested fees, if any.
+	fn mint(
+		lp: AccountId,
+		asset: Asset,
+		range: AmmRange,
+		liquidity_amount: Liquidity,
+		try_debit: impl FnOnce(PoolAssetMap<AssetAmount>) -> Result<(), DispatchError>,
+	) -> Result<PoolAssetMap<AssetAmount>, DispatchError>;
 
-	fn swap(input_amount: AssetAmount, fee: u16) -> (AssetAmount, AssetAmount);
+	/// Burn some liquidity from an exchange pool to withdraw assets and harvest fees.
+	fn burn(
+		lp: AccountId,
+		asset: Asset,
+		range: AmmRange,
+		burnt_liquidity: Liquidity,
+	) -> Result<BurnResult, DispatchError>;
+
+	/// Returns the LP's minted liquidity for a specific position in a pool.
+	fn minted_liquidity(lp: &AccountId, asset: &Asset, range: AmmRange) -> Liquidity;
+
+	/// Gets the current price of the pool in Tick.
+	fn current_tick(asset: &Asset) -> Option<Tick>;
 }
 
 // TODO Remove these in favour of a real mocks.
 impl<T: frame_system::Config> SwapIntentHandler for T {
 	type AccountId = T::AccountId;
 
-	fn schedule_swap(
+	fn on_swap_ingress(
+		_ingress_address: ForeignChainAddress,
 		_from: Asset,
 		_to: Asset,
 		_amount: AssetAmount,
 		_egress_address: ForeignChainAddress,
 		_relayer_id: Self::AccountId,
 		_relayer_commission_bps: u16,
-	) -> DispatchResult {
-		Ok(())
+	) {
 	}
 }
 
@@ -82,17 +108,5 @@ impl<T: frame_system::Config> LpProvisioningApi for T {
 	) -> DispatchResult {
 		// TODO
 		Ok(())
-	}
-}
-
-impl SwappingApi for () {
-	fn swap(
-		_from: Asset,
-		_to: Asset,
-		_input_amount: AssetAmount,
-		_fee: u16,
-	) -> (AssetAmount, (Asset, AssetAmount)) {
-		// TODO
-		(0, (Asset::Usdc, 0))
 	}
 }

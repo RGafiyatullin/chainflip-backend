@@ -13,6 +13,8 @@ mod tests;
 pub mod weights;
 pub use weights::WeightInfo;
 
+use cf_primitives::{EgressCounter, EgressId, ForeignChain};
+
 use cf_chains::{AllBatch, Chain, ChainAbi, ChainCrypto, FetchAssetParams, TransferAssetParams};
 use cf_primitives::{Asset, AssetAmount, ForeignChainAddress, IntentId};
 use cf_traits::{
@@ -21,14 +23,14 @@ use cf_traits::{
 };
 use frame_support::{pallet_prelude::*, sp_runtime::DispatchError};
 pub use pallet::*;
-use sp_runtime::traits::Saturating;
+use sp_runtime::{traits::Saturating, TransactionOutcome};
 pub use sp_std::{vec, vec::Vec};
 
 /// Enum wrapper for fetch and egress requests.
 #[derive(RuntimeDebug, Eq, PartialEq, Copy, Clone, Encode, Decode, MaxEncodedLen, TypeInfo)]
 pub enum FetchOrTransfer<C: Chain> {
 	Fetch { intent_id: IntentId, asset: C::ChainAsset },
-	Transfer { asset: C::ChainAsset, to: C::ChainAccount, amount: AssetAmount },
+	Transfer { egress_id: EgressId, asset: C::ChainAsset, to: C::ChainAccount, amount: AssetAmount },
 }
 
 impl<C: Chain> FetchOrTransfer<C> {
@@ -43,13 +45,15 @@ impl<C: Chain> FetchOrTransfer<C> {
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
+	use cf_primitives::BroadcastId;
 	use core::marker::PhantomData;
 	use sp_std::vec::Vec;
 
 	use cf_traits::{Chainflip, SwapIntentHandler};
 
 	use frame_support::{
-		pallet_prelude::{DispatchResultWithPostInfo, OptionQuery, ValueQuery},
+		pallet_prelude::{OptionQuery, ValueQuery},
+		storage::with_transaction,
 		traits::{EnsureOrigin, IsType},
 	};
 	use frame_system::pallet_prelude::{BlockNumberFor, OriginFor};
@@ -63,7 +67,7 @@ pub mod pallet {
 		pub ingress_address: C::ChainAccount,
 		pub asset: C::ChainAsset,
 		pub amount: AssetAmount,
-		pub tx_hash: <C as ChainCrypto>::TransactionHash,
+		pub tx_id: <C as ChainCrypto>::TransactionId,
 	}
 
 	/// Details used to determine the ingress of funds.
@@ -96,10 +100,11 @@ pub mod pallet {
 	#[pallet::disable_frame_system_supertrait_check]
 	pub trait Config<I: 'static = ()>: Chainflip {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
-		type Event: From<Event<Self, I>> + IsType<<Self as frame_system::Config>::Event>;
+		type RuntimeEvent: From<Event<Self, I>>
+			+ IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		/// Marks which chain this pallet is interacting with.
-		type TargetChain: ChainAbi;
+		type TargetChain: ChainAbi + Get<ForeignChain>;
 
 		/// Generates ingress addresses.
 		type AddressDerivation: AddressDerivationApi<Self::TargetChain>;
@@ -117,7 +122,7 @@ pub mod pallet {
 		type Broadcaster: Broadcaster<Self::TargetChain, ApiCall = Self::AllBatch>;
 
 		/// Governance origin to manage allowed assets
-		type EnsureGovernance: EnsureOrigin<Self::Origin>;
+		type EnsureGovernance: EnsureOrigin<Self::RuntimeOrigin>;
 
 		/// Benchmark weights
 		type WeightInfo: WeightInfo;
@@ -145,6 +150,11 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type IntentIdCounter<T: Config<I>, I: 'static = ()> = StorageValue<_, IntentId, ValueQuery>;
 
+	/// Stores the latest egress id used to generate an address.
+	#[pallet::storage]
+	pub type EgressIdCounter<T: Config<I>, I: 'static = ()> =
+		StorageValue<_, EgressCounter, ValueQuery>;
+
 	/// Scheduled fetch and egress for the Ethereum chain.
 	#[pallet::storage]
 	pub(crate) type ScheduledEgressRequests<T: Config<I>, I: 'static = ()> =
@@ -167,13 +177,14 @@ pub mod pallet {
 			ingress_address: TargetChainAccount<T, I>,
 			asset: TargetChainAsset<T, I>,
 			amount: AssetAmount,
-			tx_hash: <T::TargetChain as ChainCrypto>::TransactionHash,
+			tx_id: <T::TargetChain as ChainCrypto>::TransactionId,
 		},
 		AssetEgressDisabled {
 			asset: TargetChainAsset<T, I>,
 			disabled: bool,
 		},
 		EgressScheduled {
+			id: EgressId,
 			asset: TargetChainAsset<T, I>,
 			amount: AssetAmount,
 			egress_address: TargetChainAccount<T, I>,
@@ -183,8 +194,8 @@ pub mod pallet {
 			asset: TargetChainAsset<T, I>,
 		},
 		BatchBroadcastRequested {
-			fetch_batch_size: u32,
-			egress_batch_size: u32,
+			broadcast_id: BroadcastId,
+			egress_ids: Vec<EgressId>,
 		},
 	}
 
@@ -202,7 +213,7 @@ pub mod pallet {
 		fn on_idle(_block_number: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
 			// Ensure we have enough weight to send an non-empty batch, and request queue isn't
 			// empty.
-			if remaining_weight <= T::WeightInfo::egress_assets(1u32) ||
+			if remaining_weight.all_lte(T::WeightInfo::egress_assets(1u32)) ||
 				ScheduledEgressRequests::<T, I>::decode_len() == Some(0)
 			{
 				return T::WeightInfo::on_idle_with_nothing_to_send()
@@ -213,15 +224,17 @@ pub mod pallet {
 				.saturating_sub(T::WeightInfo::egress_assets(0u32));
 			let request_count = remaining_weight
 				.saturating_sub(T::WeightInfo::egress_assets(0u32))
-				.saturating_div(single_request_cost) as u32;
+				.ref_time()
+				.saturating_div(single_request_cost.ref_time()) as u32;
 
-			T::WeightInfo::egress_assets(Self::egress_scheduled_assets(Some(request_count)))
+			with_transaction(|| Self::egress_scheduled_assets(Some(request_count)))
+				.unwrap_or_else(|_| T::WeightInfo::egress_assets(0))
 		}
 
 		fn integrity_test() {
 			// Ensures the weights are benchmarked correctly.
-			assert!(T::WeightInfo::egress_assets(1) > T::WeightInfo::egress_assets(0));
-			assert!(T::WeightInfo::do_single_ingress() > 0);
+			assert!(T::WeightInfo::egress_assets(1).all_gte(T::WeightInfo::egress_assets(0)));
+			assert!(T::WeightInfo::do_single_ingress().all_gte(Weight::zero()));
 		}
 	}
 
@@ -265,9 +278,7 @@ pub mod pallet {
 			maybe_size: Option<u32>,
 		) -> DispatchResult {
 			let _ok = T::EnsureGovernance::ensure_origin(origin)?;
-
-			Self::egress_scheduled_assets(maybe_size);
-
+			with_transaction(|| Self::egress_scheduled_assets(maybe_size))?;
 			Ok(())
 		}
 
@@ -277,13 +288,13 @@ pub mod pallet {
 		pub fn do_ingress(
 			origin: OriginFor<T>,
 			ingress_witnesses: Vec<IngressWitness<T::TargetChain>>,
-		) -> DispatchResultWithPostInfo {
+		) -> DispatchResult {
 			T::EnsureWitnessed::ensure_origin(origin)?;
 
-			for IngressWitness { ingress_address, asset, amount, tx_hash } in ingress_witnesses {
-				Self::do_single_ingress(ingress_address, asset, amount, tx_hash)?;
+			for IngressWitness { ingress_address, asset, amount, tx_id } in ingress_witnesses {
+				Self::do_single_ingress(ingress_address, asset, amount, tx_id)?;
 			}
-			Ok(().into())
+			Ok(())
 		}
 	}
 }
@@ -295,13 +306,10 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 	/// Returns the actual number of transactions sent.
 	///
 	/// Egress transactions with Blacklisted assets are not sent, and kept in storage.
-	fn egress_scheduled_assets(maybe_size: Option<u32>) -> u32 {
-		if maybe_size == Some(0) {
-			return 0
-		}
-
-		let scheduled_egress_requests = ScheduledEgressRequests::<T, I>::get();
-
+	#[allow(clippy::type_complexity)]
+	fn egress_scheduled_assets(
+		maybe_size: Option<u32>,
+	) -> TransactionOutcome<Result<Weight, DispatchError>> {
 		let batch_to_send: Vec<_> =
 			ScheduledEgressRequests::<T, I>::mutate(|requests: &mut Vec<_>| {
 				// Take up to batch_size requests to be sent
@@ -323,17 +331,22 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 			});
 
 		if batch_to_send.is_empty() {
-			return 0
+			return TransactionOutcome::Rollback(Err(DispatchError::Other(
+				"Nothing to send, batch to send is empty, rolled back storage",
+			)))
 		}
 
 		let mut fetch_params = vec![];
 		let mut egress_params = vec![];
+		let mut egress_ids = vec![];
+
 		for request in batch_to_send {
 			match request {
 				FetchOrTransfer::<T::TargetChain>::Fetch { intent_id, asset } => {
 					fetch_params.push(FetchAssetParams { intent_id, asset });
 				},
-				FetchOrTransfer::<T::TargetChain>::Transfer { asset, to, amount } => {
+				FetchOrTransfer::<T::TargetChain>::Transfer { asset, to, amount, egress_id } => {
+					egress_ids.push(egress_id);
 					egress_params.push(TransferAssetParams { asset, to, amount });
 				},
 			}
@@ -345,17 +358,18 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 		#[allow(clippy::unit_arg)]
 		match T::AllBatch::new_unsigned(fetch_params, egress_params) {
 			Ok(egress_transaction) => {
-				T::Broadcaster::threshold_sign_and_broadcast(egress_transaction);
+				let broadcast_id = T::Broadcaster::threshold_sign_and_broadcast(egress_transaction);
 				Self::deposit_event(Event::<T, I>::BatchBroadcastRequested {
-					fetch_batch_size,
-					egress_batch_size,
+					broadcast_id,
+					egress_ids,
 				});
-				fetch_batch_size.saturating_add(egress_batch_size)
+				TransactionOutcome::Commit(Ok(T::WeightInfo::egress_assets(
+					fetch_batch_size.saturating_add(egress_batch_size),
+				)))
 			},
-			Err(_) => {
-				ScheduledEgressRequests::<T, I>::put(scheduled_egress_requests);
-				0
-			},
+			Err(_) => TransactionOutcome::Rollback(Err(DispatchError::Other(
+				"AllBatch Apicall creation failed, rolled back storage",
+			))),
 		}
 	}
 
@@ -378,7 +392,7 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 		ingress_address: TargetChainAccount<T, I>,
 		asset: TargetChainAsset<T, I>,
 		amount: AssetAmount,
-		tx_hash: <T::TargetChain as ChainCrypto>::TransactionHash,
+		tx_id: <T::TargetChain as ChainCrypto>::TransactionId,
 	) -> DispatchResult {
 		let ingress = IntentIngressDetails::<T, I>::get(&ingress_address)
 			.ok_or(Error::<T, I>::InvalidIntent)?;
@@ -406,17 +420,18 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 				egress_asset,
 				relayer_id,
 				relayer_commission_bps,
-			} => T::SwapIntentHandler::schedule_swap(
+			} => T::SwapIntentHandler::on_swap_ingress(
+				ingress_address.clone().into(),
 				asset.into(),
 				egress_asset,
 				amount,
 				egress_address,
 				relayer_id,
 				relayer_commission_bps,
-			)?,
+			),
 		};
 
-		Self::deposit_event(Event::IngressCompleted { ingress_address, asset, amount, tx_hash });
+		Self::deposit_event(Event::IngressCompleted { ingress_address, asset, amount, tx_id });
 		Ok(())
 	}
 }
@@ -426,14 +441,23 @@ impl<T: Config<I>, I: 'static> EgressApi<T::TargetChain> for Pallet<T, I> {
 		asset: TargetChainAsset<T, I>,
 		amount: AssetAmount,
 		egress_address: TargetChainAccount<T, I>,
-	) {
+	) -> EgressId {
+		let egress_counter = EgressIdCounter::<T, I>::get().saturating_add(1);
+		let egress_id = (<T as Config<I>>::TargetChain::get(), egress_counter);
 		ScheduledEgressRequests::<T, I>::append(FetchOrTransfer::<T::TargetChain>::Transfer {
 			asset,
 			to: egress_address.clone(),
 			amount,
+			egress_id,
 		});
-
-		Self::deposit_event(Event::<T, I>::EgressScheduled { asset, amount, egress_address });
+		EgressIdCounter::<T, I>::put(egress_counter);
+		Self::deposit_event(Event::<T, I>::EgressScheduled {
+			id: egress_id,
+			asset,
+			amount,
+			egress_address,
+		});
+		egress_id
 	}
 }
 

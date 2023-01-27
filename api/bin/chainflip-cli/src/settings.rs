@@ -1,19 +1,19 @@
-use chainflip_api::primitives::{AccountRole, Asset, Hash, ProposalId};
+use chainflip_api::primitives::{AccountRole, Asset, Hash};
 pub use chainflip_engine::settings::StateChain;
 use chainflip_engine::{
 	constants::{CONFIG_ROOT, DEFAULT_CONFIG_ROOT},
 	settings::{CfSettings, Eth, EthOptions, StateChainOptions},
 };
 use clap::Parser;
-use config::{ConfigError, Source, Value};
+use config::{ConfigBuilder, ConfigError, Source, Value};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Parser, Clone, Debug)]
 #[clap(version = env!("SUBSTRATE_CLI_IMPL_VERSION"))]
 pub struct CLICommandLineOptions {
 	#[clap(short = 'c', long = "config-root", env = CONFIG_ROOT, default_value = DEFAULT_CONFIG_ROOT)]
-	config_root: String,
+	pub config_root: String,
 
 	#[clap(flatten)]
 	state_chain_opts: StateChainOptions,
@@ -84,10 +84,18 @@ pub enum LiquidityProviderSubcommands {
 	},
 }
 
-#[derive(clap::Subcommand, Clone, Debug)]
-pub enum Claim {
-	#[clap(about = "Submit an extrinsic to request generation of a claim certificate")]
-	Request {
+#[derive(Parser, Clone, Debug)]
+pub enum CliCommand {
+	/// Relayer specific commands
+	#[clap(subcommand)]
+	Relayer(RelayerSubcommands),
+	/// Liquidity provider specific commands
+	#[clap(subcommand, name = "lp")]
+	LiquidityProvider(LiquidityProviderSubcommands),
+	#[clap(
+		about = "Request a claim. After requesting the claim, please proceed to the Staking app to complete the claiming process."
+	)]
+	Claim {
 		#[clap(
 			help = "Amount to claim in FLIP (omit this option to claim all available FLIP)",
 			long = "exact"
@@ -95,27 +103,7 @@ pub enum Claim {
 		amount: Option<f64>,
 		#[clap(help = "The Ethereum address you wish to claim your FLIP to")]
 		eth_address: String,
-
-		#[clap(long = "register", hide = true)]
-		should_register_claim: bool,
 	},
-	#[clap(about = "Get claim certificate for your recently submitted claim")]
-	Check,
-}
-
-#[derive(Parser, Clone, Debug)]
-pub enum CliCommand {
-	/// Relayer specific commands
-	#[cfg(feature = "ibiza")]
-	#[clap(subcommand)]
-	Relayer(RelayerSubcommands),
-	/// Liquidity provider specific commands
-	#[cfg(feature = "ibiza")]
-	#[clap(subcommand, name = "lp")]
-	LiquidityProvider(LiquidityProviderSubcommands),
-	#[clap(about = "Requesting and checking claims")]
-	#[clap(subcommand)]
-	Claim(Claim),
 	#[clap(
 		about = "Submit an extrinsic to request generation of a claim certificate (claiming all available FLIP)"
 	)]
@@ -145,9 +133,13 @@ pub enum CliCommand {
         hide = true,
         about = "Force a key rotation. This can only be executed by the governance dictator"
     )]
-	ForceRotation {
-		#[clap(help = "The governance proposal id that will be associated with this rotation.")]
-		id: ProposalId,
+	ForceRotation {},
+	#[clap(
+		about = "Generates the 3 key files needed to run a chainflip node (Node Key, Ethereum Key and Validator Key), then saves them to the filesystem."
+	)]
+	GenerateKeys {
+		#[clap(help = "Output path", parse(from_os_str))]
+		path: Option<PathBuf>,
 	},
 }
 
@@ -160,7 +152,7 @@ fn account_role_parser(s: &str) -> Result<AccountRole, String> {
 	} else if lower_str == "r" || lower_str == "relayer" {
 		Ok(AccountRole::Relayer)
 	} else {
-		Err(format!("{} is not a valid role. The valid roles (with their shorthand input) are: 'Validator' (v), 'Liquidity Provider' (lp), 'Relayer' (r)", s))
+		Err(format!("{s} is not a valid role. The valid roles (with their shorthand input) are: 'Validator' (v), 'Liquidity Provider' (lp), 'Relayer' (r)"))
 	}
 }
 
@@ -178,6 +170,27 @@ impl CfSettings for CLISettings {
 		self.eth.validate_settings()?;
 
 		self.state_chain.validate_settings()
+	}
+
+	fn set_defaults(
+		config_builder: ConfigBuilder<config::builder::DefaultState>,
+		config_root: &str,
+	) -> Result<ConfigBuilder<config::builder::DefaultState>, ConfigError> {
+		config_builder
+			.set_default(
+				"state_chain.signing_key_file",
+				PathBuf::from(config_root)
+					.join("keys/signing_key_file")
+					.to_str()
+					.expect("Invalid signing_key_file path"),
+			)?
+			.set_default(
+				"eth.private_key_file",
+				PathBuf::from(config_root)
+					.join("keys/eth_private_key")
+					.to_str()
+					.expect("Invalid eth_private_key path"),
+			)
 	}
 }
 

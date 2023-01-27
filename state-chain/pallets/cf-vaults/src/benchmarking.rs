@@ -114,7 +114,7 @@ benchmarks_instance_pallet! {
 		// Submit a key that doesn't verify the signature. This is approximately the same cost as success at time of writing.
 		// But is much easier to write, and we might add slashing, which would increase the cost of the failure. Making this test the more
 		// expensive of the two paths, therefore ensuring we have a more conservative benchmark
-	} : _(RawOrigin::Signed(caller), CEREMONY_ID, ReportedKeygenOutcomeFor::<T, I>::Ok(AggKeyFor::<T, I>::benchmark_value()))
+	} : _(RawOrigin::Signed(caller), CEREMONY_ID, KeygenOutcomeFor::<T, I>::Ok(AggKeyFor::<T, I>::benchmark_value()))
 	verify {
 		assert!(matches!(
 			PendingVaultRotation::<T, I>::get().unwrap(),
@@ -153,8 +153,8 @@ benchmarks_instance_pallet! {
 		);
 		let call = Call::<T, I>::vault_key_rotated {
 			new_public_key,
-			block_number: 5u64.into(),
-			tx_hash: Decode::decode(&mut &TX_HASH[..]).unwrap()
+			block_number: 5u32.into(),
+			tx_id: Decode::decode(&mut &TX_HASH[..]).unwrap()
 		};
 		let origin = T::EnsureWitnessedAtCurrentEpoch::successful_origin();
 	} : { call.dispatch_bypass_filter(origin)? }
@@ -165,19 +165,19 @@ benchmarks_instance_pallet! {
 		let origin = T::EnsureWitnessedAtCurrentEpoch::successful_origin();
 		let call = Call::<T, I>::vault_key_rotated_externally {
 			new_public_key: AggKeyFor::<T, I>::benchmark_value(),
-			block_number: 5u64.into(),
-			tx_hash: Decode::decode(&mut &TX_HASH[..]).unwrap()
+			block_number: 5u32.into(),
+			tx_id: Decode::decode(&mut &TX_HASH[..]).unwrap()
 		};
 	} : { call.dispatch_bypass_filter(origin)? }
 	verify {
 		assert!(Vaults::<T, I>::contains_key(T::EpochInfo::epoch_index().saturating_add(1)));
 	}
-	set_keygen_timeout {
+	set_keygen_response_timeout {
 		let old_timeout: T::BlockNumber = 5u32.into();
 		KeygenResponseTimeout::<T, I>::put(old_timeout);
 		let new_timeout: T::BlockNumber = old_timeout + 1u32.into();
 		// ensure it's a different value for most expensive path.
-		let call = Call::<T, I>::set_keygen_timeout { new_timeout };
+		let call = Call::<T, I>::set_keygen_response_timeout { new_timeout };
 	} : { call.dispatch_bypass_filter(T::EnsureGovernance::successful_origin())? }
 	verify {
 		assert_eq!(KeygenResponseTimeout::<T, I>::get(), new_timeout);

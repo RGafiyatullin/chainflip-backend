@@ -200,6 +200,7 @@ pub fn start(
 		logger,
 	};
 
+	slog::debug!(context.logger, "Registering peer info for {} peers", current_peers.len());
 	for peer_info in current_peers {
 		context.handle_peer_update(peer_info);
 	}
@@ -250,14 +251,25 @@ impl P2PContext {
 	fn send_messages(&self, messages: OutgoingMultisigStageMessages) {
 		match messages {
 			OutgoingMultisigStageMessages::Broadcast(account_ids, payload) => {
+				slog::trace!(
+					self.logger,
+					"Broadcasting a message to all {} peers",
+					account_ids.len()
+				);
 				for acc_id in account_ids {
 					self.send_message(acc_id, payload.clone());
 				}
 			},
-			OutgoingMultisigStageMessages::Private(messages) =>
+			OutgoingMultisigStageMessages::Private(messages) => {
+				slog::trace!(
+					self.logger,
+					"Sending private messages to all {} peers",
+					messages.len()
+				);
 				for (acc_id, payload) in messages {
 					self.send_message(acc_id, payload);
-				},
+				}
+			},
 		}
 	}
 
@@ -335,8 +347,6 @@ impl P2PContext {
 	}
 
 	fn connect_to_peer(&mut self, peer: PeerInfo) {
-		slog::debug!(self.logger, "Connecting to: {}", peer.account_id);
-
 		let account_id = peer.account_id.clone();
 
 		let socket = OutgoingSocket::new(&self.zmq_context, &self.key);
@@ -367,29 +377,27 @@ impl P2PContext {
 	}
 
 	fn add_or_update_peer(&mut self, peer: PeerInfo) {
-		slog::debug!(self.logger, "Received new peer info: {}", peer);
-
 		if let Some(existing_socket) = self.active_connections.remove(&peer.account_id) {
 			slog::debug!(
 				self.logger,
-				"Account id {} is already known, updating info and reconnecting",
-				&peer.account_id
+				"Received info for known peer with account id {}, updating info and reconnecting",
+				&peer.account_id;
+				"peer_info" => peer.to_string()
 			);
 
 			self.remove_peer_and_disconnect_socket(existing_socket);
+		} else {
+			slog::debug!(
+				self.logger,
+				"Received info for new peer with account id {}, adding to allowed peers and id mapping",
+				&peer.account_id;
+				"peer_info" => peer.to_string()
+			);
 		}
 
-		let peer_pubkey = &peer.pubkey;
-		self.authenticator.add_peer(*peer_pubkey);
+		self.authenticator.add_peer(&peer);
 
-		slog::trace!(
-			self.logger,
-			"Adding x25519 to account id mapping: {} -> {}",
-			&peer.account_id,
-			to_string(peer_pubkey)
-		);
-
-		self.x25519_to_account_id.insert(*peer_pubkey, peer.account_id.clone());
+		self.x25519_to_account_id.insert(peer.pubkey, peer.account_id.clone());
 
 		match &mut self.status {
 			RegistrationStatus::Pending(peers) => {
@@ -421,8 +429,8 @@ impl P2PContext {
 		socket.set_curve_secretkey(&self.key.secret_key.to_bytes()).unwrap();
 
 		// Listen on all interfaces
-		let endpoint = format!("tcp://0.0.0.0:{}", port);
-		slog::info!(self.logger, "Started listening for incoming p2p connections on: {}", endpoint);
+		let endpoint = format!("tcp://0.0.0.0:{port}");
+		slog::info!(self.logger, "Started listening for incoming p2p connections on: {endpoint}");
 
 		socket.bind(&endpoint).expect("invalid endpoint");
 

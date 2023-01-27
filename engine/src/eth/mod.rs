@@ -1,10 +1,11 @@
 pub mod chain_data_witnesser;
 pub mod contract_witnesser;
 pub mod erc20_witnesser;
+pub mod eth_block_witnessing;
 mod http_safe_stream;
 pub mod ingress_witnesser;
 pub mod key_manager;
-mod merged_block_items_stream;
+mod merged_block_stream;
 pub mod stake_manager;
 
 pub mod event;
@@ -25,8 +26,8 @@ use crate::{
 	constants::ETH_BLOCK_SAFETY_MARGIN,
 	eth::{
 		http_safe_stream::{safe_polling_http_head_stream, HTTP_POLL_INTERVAL},
-		merged_block_items_stream::merged_block_items_stream,
-		rpc::EthWsRpcApi,
+		merged_block_stream::merged_block_stream,
+		rpc::{EthDualRpcClient, EthRpcApi, EthWsRpcApi},
 		ws_safe_stream::safe_ws_head_stream,
 	},
 	logging::COMPONENT_KEY,
@@ -34,10 +35,8 @@ use crate::{
 	state_chain_observer::client::extrinsic_api::ExtrinsicApi,
 	witnesser::{block_head_stream_from::block_head_stream_from, BlockNumberable},
 };
-use ethbloom::{Bloom, Input};
-use futures::StreamExt;
+
 use slog::o;
-use sp_core::{H160, U256};
 use std::{
 	fmt::{self, Debug},
 	pin::Pin,
@@ -48,10 +47,7 @@ use thiserror::Error;
 use web3::{
 	ethabi::{self, Address, Contract},
 	signing::{Key, SecretKeyRef},
-	types::{
-		Block, BlockNumber, Bytes, CallRequest, FilterBuilder, TransactionParameters, H2048, H256,
-		U64,
-	},
+	types::{Block, Bytes, CallRequest, TransactionParameters, H160, H2048, H256, U256, U64},
 };
 use web3_secp256k1::SecretKey;
 
@@ -69,17 +65,31 @@ pub struct EthNumberBloom {
 }
 
 impl BlockNumberable for EthNumberBloom {
-	fn block_number(&self) -> u64 {
+	type BlockNumber = u64;
+
+	fn block_number(&self) -> Self::BlockNumber {
 		self.block_number.as_u64()
 	}
 }
 
-use self::rpc::{EthDualRpcClient, EthRpcApi};
+fn web3_u256(x: sp_core::U256) -> web3::types::U256 {
+	web3::types::U256(x.0)
+}
+
+fn core_h256(h: web3::types::H256) -> sp_core::H256 {
+	h.0.into()
+}
+
+fn web3_h160(h: sp_core::H160) -> web3::types::H160 {
+	h.0.into()
+}
+
+pub fn core_h160(h: web3::types::H160) -> sp_core::H160 {
+	h.0.into()
+}
 
 const EIP1559_TX_ID: u64 = 2;
 
-// TODO: Not possible to fix the clippy warning here. At the moment we
-// need to ignore it on a global level.
 #[derive(Error, Debug)]
 pub enum EventParseError {
 	#[error("Unexpected event signature in log subscription: {0:?}")]
@@ -89,7 +99,7 @@ pub enum EventParseError {
 }
 
 // The signature is recalculated on each Event::signature() call, so we use this structure to cache
-// the signture
+// the signature
 pub struct SignatureAndEvent {
 	pub signature: H256,
 	pub event: ethabi::Event,
@@ -182,12 +192,12 @@ where
 		unsigned_tx: cf_chains::eth::Transaction,
 	) -> Result<Bytes> {
 		let tx_params = TransactionParameters {
-			to: Some(unsigned_tx.contract),
+			to: Some(web3_h160(unsigned_tx.contract)),
 			data: unsigned_tx.data.clone().into(),
 			chain_id: Some(unsigned_tx.chain_id),
-			value: unsigned_tx.value,
-			max_fee_per_gas: unsigned_tx.max_fee_per_gas,
-			max_priority_fee_per_gas: unsigned_tx.max_priority_fee_per_gas,
+			value: web3_u256(unsigned_tx.value),
+			max_fee_per_gas: unsigned_tx.max_fee_per_gas.map(web3_u256),
+			max_priority_fee_per_gas: unsigned_tx.max_priority_fee_per_gas.map(web3_u256),
 			transaction_type: Some(web3::types::U64::from(EIP1559_TX_ID)),
 			gas: {
 				let gas_estimate = match unsigned_tx.gas_limit {
@@ -196,13 +206,13 @@ where
 						let zero = Some(U256::from(0u64));
 						let call_request = CallRequest {
 							from: None,
-							to: unsigned_tx.contract.into(),
+							to: Some(web3_h160(unsigned_tx.contract)),
 							// Set the gas really high (~half gas in a block) for the estimate,
 							// since the estimation call requires you to input at least as much gas
 							// as the estimate will return
 							gas: Some(U256::from(15_000_000u64)),
 							gas_price: None,
-							value: unsigned_tx.value.into(),
+							value: Some(web3_u256(unsigned_tx.value)),
 							data: Some(unsigned_tx.data.clone().into()),
 							transaction_type: Some(web3::types::U64::from(EIP1559_TX_ID)),
 							// Set the gas prices to zero for the estimate, so we don't get
@@ -217,7 +227,7 @@ where
 							.await
 							.context("Failed to estimate gas")?
 					},
-					Some(gas_limit) => gas_limit,
+					Some(gas_limit) => web3_u256(gas_limit),
 				};
 				// increase the estimate by 50%
 				let gas = gas_estimate
@@ -288,21 +298,20 @@ pub struct BlockWithItems<BlockItem: Debug> {
 	pub block_items: Vec<BlockItem>,
 }
 
-async fn eth_block_head_stream_from<BlockHeaderStream, EthRpc>(
+/// Same as [`safe_dual_block_subscription`] but prepends the stream with
+/// historical blocks from a given block number.
+pub async fn safe_dual_block_subscription_from(
 	from_block: u64,
-	safe_head_stream: BlockHeaderStream,
-	eth_rpc: EthRpc,
+	eth_dual_rpc: EthDualRpcClient,
 	logger: &slog::Logger,
-) -> Result<Pin<Box<dyn Stream<Item = EthNumberBloom> + Send + 'static>>>
-where
-	BlockHeaderStream: Stream<Item = EthNumberBloom> + 'static + Send,
-	EthRpc: 'static + EthRpcApi + Send + Sync + Clone,
-{
+) -> Result<Pin<Box<dyn Stream<Item = EthNumberBloom> + Send + 'static>>> {
+	let safe_head_stream = safe_dual_block_subscription(eth_dual_rpc.clone(), logger).await?;
+
 	block_head_stream_from(
 		from_block,
 		safe_head_stream,
 		move |block_number| {
-			let eth_rpc = eth_rpc.clone();
+			let eth_rpc = eth_dual_rpc.clone();
 			Box::pin(async move {
 				eth_rpc.block(U64::from(block_number)).await.and_then(|block| {
 					let number_bloom: Result<EthNumberBloom> =
@@ -316,121 +325,29 @@ where
 	.await
 }
 
-/// Takes a head stream and turns it into a stream of BlockEvents for consumption by the merged
-/// stream
-async fn block_events_stream_from_head_stream<BlockHeaderStream, EthRpc, EventParameters>(
-	from_block: u64,
-	contract_address: H160,
-	safe_head_stream: BlockHeaderStream,
-	decode_log_fn: DecodeLogClosure<EventParameters>,
-	eth_rpc: EthRpc,
-	logger: slog::Logger,
-) -> Result<
-	Pin<Box<dyn Stream<Item = BlockWithProcessedItems<Event<EventParameters>>> + Send + 'static>>,
->
-where
-	EventParameters: Debug + Send + Sync + 'static,
-	BlockHeaderStream: Stream<Item = EthNumberBloom> + 'static + Send,
-	EthRpc: 'static + EthRpcApi + Send + Sync + Clone,
-{
-	// convert from heads to blocks with events
-	Ok(Box::pin(
-		eth_block_head_stream_from(from_block, safe_head_stream, eth_rpc.clone(), &logger)
-			.await?
-			.then(move |header| {
-				let eth_rpc = eth_rpc.clone();
-
-				async move {
-					let block_number = header.block_number;
-					let mut contract_bloom = Bloom::default();
-					contract_bloom.accrue(Input::Raw(&contract_address.0));
-
-					// if we have logs for this block, fetch them.
-					let result_logs = if header.logs_bloom.contains_bloom(&contract_bloom) {
-						eth_rpc
-							.get_logs(
-								FilterBuilder::default()
-									// from_block *and* to_block are *inclusive*
-									.from_block(BlockNumber::Number(block_number))
-									.to_block(BlockNumber::Number(block_number))
-									.address(vec![contract_address])
-									.build(),
-							)
-							.await
-					} else {
-						// we know there won't be interesting logs, so don't fetch for events
-						Ok(vec![])
-					};
-
-					(block_number.as_u64(), result_logs)
-				}
-			})
-			.map(move |(block_number, result_logs)| BlockWithProcessedItems {
-				block_number,
-				processed_block_items: result_logs.and_then(|logs| {
-					logs.into_iter()
-						.map(|unparsed_log| -> Result<Event<EventParameters>, anyhow::Error> {
-							Event::<EventParameters>::new_from_unparsed_logs(
-								&decode_log_fn,
-								unparsed_log,
-							)
-						})
-						.collect::<Result<Vec<_>>>()
-				}),
-			}),
-	))
-}
-
-/// Get a block events stream for the contract, returning the stream only if the head of the stream
-/// is ahead of from_block (otherwise it will wait until we have reached from_block).
-pub async fn block_events_stream_for_contract_from<EventParameters, ContractWitnesser>(
-	from_block: u64,
-	contract_witnesser: &ContractWitnesser,
+/// Returns a safe stream of blocks from the latest block onward,
+/// using a dual (WS/HTTP) rpc subscription.
+async fn safe_dual_block_subscription(
 	eth_dual_rpc: EthDualRpcClient,
 	logger: &slog::Logger,
-) -> Result<Pin<Box<dyn Stream<Item = BlockWithItems<Event<EventParameters>>> + Send + 'static>>>
+) -> Result<Pin<Box<dyn Stream<Item = EthNumberBloom> + Send + 'static>>>
 where
-	EventParameters: Debug + Send + Sync + 'static,
-	ContractWitnesser: EthContractWitnesser<EventParameters = EventParameters>,
 {
-	let contract_address = contract_witnesser.contract_address();
-	slog::info!(
+	let safe_ws_head_stream = safe_ws_head_stream(
+		eth_dual_rpc.ws_client.subscribe_new_heads().await?,
+		ETH_BLOCK_SAFETY_MARGIN,
 		logger,
-		"Subscribing to ETH events from contract at address: {:?}",
-		hex::encode(contract_address)
 	);
 
-	let safe_ws_block_events = block_events_stream_from_head_stream(
-		from_block,
-		contract_address,
-		safe_ws_head_stream(
-			eth_dual_rpc.ws_client.subscribe_new_heads().await?,
-			ETH_BLOCK_SAFETY_MARGIN,
-			logger,
-		),
-		contract_witnesser.decode_log_closure()?,
-		eth_dual_rpc.ws_client,
-		logger.clone(),
+	let safe_http_head_stream = safe_polling_http_head_stream(
+		eth_dual_rpc.http_client.clone(),
+		HTTP_POLL_INTERVAL,
+		ETH_BLOCK_SAFETY_MARGIN,
+		logger,
 	)
-	.await?;
+	.await;
 
-	let safe_http_block_events = block_events_stream_from_head_stream(
-		from_block,
-		contract_address,
-		safe_polling_http_head_stream(
-			eth_dual_rpc.http_client.clone(),
-			HTTP_POLL_INTERVAL,
-			ETH_BLOCK_SAFETY_MARGIN,
-			logger,
-		)
-		.await,
-		contract_witnesser.decode_log_closure()?,
-		eth_dual_rpc.http_client,
-		logger.clone(),
-	)
-	.await?;
-
-	merged_block_items_stream(safe_ws_block_events, safe_http_block_events, logger.clone()).await
+	merged_block_stream(safe_ws_head_stream, safe_http_head_stream, logger.clone()).await
 }
 
 #[async_trait]

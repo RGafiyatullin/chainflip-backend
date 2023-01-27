@@ -9,9 +9,14 @@ use sp_runtime::AccountId32;
 use state_chain_runtime::{
 	chainflip::Offence,
 	constants::common::TX_FEE_MULTIPLIER,
-	runtime_apis::{ChainflipAccountStateWithPassive, CustomRuntimeApi, RuntimeApiPendingClaim},
+	runtime_apis::{ChainflipAccountStateWithPassive, CustomRuntimeApi},
 };
 use std::{marker::PhantomData, sync::Arc};
+
+#[allow(unused)]
+use state_chain_runtime::{Asset, AssetAmount, ExchangeRate};
+
+use cf_primitives::Tick;
 
 #[derive(Serialize, Deserialize)]
 pub struct RpcAccountInfo {
@@ -24,6 +29,22 @@ pub struct RpcAccountInfo {
 	pub reputation_points: i32,
 	pub withdrawal_address: String,
 	pub state: ChainflipAccountStateWithPassive,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RpcAccountInfoV2 {
+	pub stake: NumberOrHex,
+	pub bond: NumberOrHex,
+	pub last_heartbeat: u32,
+	pub online_credits: u32,
+	pub reputation_points: i32,
+	pub withdrawal_address: String,
+	pub keyholder_epochs: Vec<u32>,
+	pub is_current_authority: bool,
+	pub is_current_backup: bool,
+	pub is_qualified: bool,
+	pub is_online: bool,
+	pub is_bidding: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -115,20 +136,12 @@ pub trait CustomApi {
 		account_id: AccountId32,
 		at: Option<state_chain_runtime::Hash>,
 	) -> RpcResult<RpcAccountInfo>;
-	#[method(name = "pending_claim")]
-	fn cf_pending_claim(
+	#[method(name = "account_info_v2")]
+	fn cf_account_info_v2(
 		&self,
 		account_id: AccountId32,
 		at: Option<state_chain_runtime::Hash>,
-	) -> RpcResult<Option<RpcPendingClaim>>;
-
-	#[method(name = "get_claim_certificate")]
-	fn cf_get_claim_certificate(
-		&self,
-		account_id: AccountId32,
-		at: Option<state_chain_runtime::Hash>,
-	) -> RpcResult<Option<Vec<u8>>>;
-
+	) -> RpcResult<RpcAccountInfoV2>;
 	#[method(name = "penalties")]
 	fn cf_penalties(
 		&self,
@@ -326,47 +339,32 @@ where
 			state: account_info.state,
 		})
 	}
-	fn cf_pending_claim(
+	fn cf_account_info_v2(
 		&self,
 		account_id: AccountId32,
 		at: Option<<B as BlockT>::Hash>,
-	) -> RpcResult<Option<RpcPendingClaim>> {
-		let pending_claim: RuntimeApiPendingClaim = match self
+	) -> RpcResult<RpcAccountInfoV2> {
+		let account_info = self
 			.client
 			.runtime_api()
-			.cf_pending_claim(&self.query_block_id(at), account_id)
-			.map_err(to_rpc_error)?
-		{
-			Some(pending_claim) => pending_claim,
-			None => return Ok(None),
-		};
+			.cf_account_info_v2(&self.query_block_id(at), account_id)
+			.map_err(to_rpc_error)?;
 
-		Ok(Some(RpcPendingClaim {
-			amount: pending_claim.amount.into(),
-			expiry: pending_claim.expiry.into(),
-			address: hex::encode(pending_claim.address),
-			sig_data: pending_claim.sig_data,
-		}))
+		Ok(RpcAccountInfoV2 {
+			stake: account_info.stake.into(),
+			bond: account_info.bond.into(),
+			last_heartbeat: account_info.last_heartbeat,
+			online_credits: account_info.online_credits,
+			reputation_points: account_info.reputation_points,
+			withdrawal_address: hex::encode(account_info.withdrawal_address),
+			keyholder_epochs: account_info.keyholder_epochs,
+			is_current_authority: account_info.is_current_authority,
+			is_current_backup: account_info.is_current_backup,
+			is_qualified: account_info.is_qualified,
+			is_online: account_info.is_online,
+			is_bidding: account_info.is_bidding,
+		})
 	}
-
-	fn cf_get_claim_certificate(
-		&self,
-		account_id: AccountId32,
-		at: Option<state_chain_runtime::Hash>,
-	) -> RpcResult<Option<Vec<u8>>> {
-		let certificate = match self
-			.client
-			.runtime_api()
-			.cf_get_claim_certificate(&self.query_block_id(at), account_id)
-			.map_err(to_rpc_error)?
-		{
-			Some(cert) => cert,
-			None => return Ok(None),
-		};
-
-		Ok(Some(certificate))
-	}
-
 	fn cf_penalties(
 		&self,
 		at: Option<<B as BlockT>::Hash>,
@@ -420,5 +418,51 @@ where
 			min_stake: auction_state.min_stake.into(),
 			auction_size_range: auction_state.auction_size_range,
 		})
+	}
+}
+
+use pallet_cf_pools_runtime_api::PoolsApi;
+
+pub struct PoolsRpc<C, B> {
+	pub client: Arc<C>,
+	pub _phantom: PhantomData<B>,
+}
+
+impl<C, B> PoolsRpc<C, B>
+where
+	B: sp_runtime::traits::Block<Hash = state_chain_runtime::Hash>,
+	C: sp_api::ProvideRuntimeApi<B> + Send + Sync + 'static + HeaderBackend<B>,
+	C::Api: pallet_cf_pools_runtime_api::PoolsApi<B>,
+{
+	fn query_block_id(&self, from_rpc: Option<<B as BlockT>::Hash>) -> sp_api::BlockId<B> {
+		sp_api::BlockId::hash(from_rpc.unwrap_or_else(|| self.client.info().best_hash))
+	}
+}
+
+#[rpc(server, client, namespace = "cf")]
+pub trait PoolsApi {
+	#[method(name = "pool_tick_price")]
+	fn cf_pool_tick_price(
+		&self,
+		asset: Asset,
+		at: Option<state_chain_runtime::Hash>,
+	) -> RpcResult<Option<Tick>>;
+}
+
+impl<C, B> PoolsApiServer for PoolsRpc<C, B>
+where
+	B: sp_runtime::traits::Block<Hash = state_chain_runtime::Hash>,
+	C: sp_api::ProvideRuntimeApi<B> + Send + Sync + 'static + HeaderBackend<B>,
+	C::Api: pallet_cf_pools_runtime_api::PoolsApi<B>,
+{
+	fn cf_pool_tick_price(
+		&self,
+		asset: Asset,
+		at: Option<state_chain_runtime::Hash>,
+	) -> RpcResult<Option<Tick>> {
+		self.client
+			.runtime_api()
+			.cf_pool_tick_price(&self.query_block_id(at), asset)
+			.map_err(to_rpc_error)
 	}
 }

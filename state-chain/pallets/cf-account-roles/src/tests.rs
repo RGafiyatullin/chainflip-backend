@@ -12,7 +12,7 @@ fn test_ensure_stake_of_validator() {
 	new_test_ext().execute_with(|| {
 		AccountRoles::<Test>::insert(ALICE, AccountRole::None);
 		assert_ok!(Pallet::<Test>::register_account_role(
-			Origin::signed(ALICE),
+			RuntimeOrigin::signed(ALICE),
 			AccountRole::Validator
 		));
 	});
@@ -24,7 +24,10 @@ fn test_expect_validator_register_fails() {
 		MockBidInfo::set_min_bid(35);
 		AccountRoles::<Test>::insert(ALICE, AccountRole::None);
 		assert_noop!(
-			Pallet::<Test>::register_account_role(Origin::signed(ALICE), AccountRole::Validator),
+			Pallet::<Test>::register_account_role(
+				RuntimeOrigin::signed(ALICE),
+				AccountRole::Validator
+			),
 			crate::Error::<Test>::NotEnoughStake
 		);
 	});
@@ -33,6 +36,7 @@ fn test_expect_validator_register_fails() {
 #[test]
 fn test_ensure_origin_struct() {
 	new_test_ext().execute_with(|| {
+		SwappingEnabled::<Test>::put(true);
 		// Root and none should be invalid.
 		EnsureRelayer::<Test>::ensure_origin(OriginFor::<Test>::root()).unwrap_err();
 		EnsureRelayer::<Test>::ensure_origin(OriginFor::<Test>::none()).unwrap_err();
@@ -78,6 +82,7 @@ fn test_ensure_origin_struct() {
 #[test]
 fn test_ensure_origin_fn() {
 	new_test_ext().execute_with(|| {
+		SwappingEnabled::<Test>::put(true);
 		// Root and none should be invalid.
 		ensure_relayer::<Test>(OriginFor::<Test>::root()).unwrap_err();
 		ensure_relayer::<Test>(OriginFor::<Test>::none()).unwrap_err();
@@ -142,4 +147,23 @@ fn test_ensure_origin_fn() {
 		)
 		.unwrap();
 	});
+}
+
+#[test]
+fn cannot_register_swapping_roles_if_swapping_disabled() {
+	new_test_ext().execute_with(|| {
+		assert!(!SwappingEnabled::<Test>::get());
+
+		// As if the account is already staked.
+		AccountRoles::<Test>::insert(ALICE, AccountRole::None);
+
+		assert_noop!(Pallet::<Test>::register_as_relayer(&ALICE), Error::<Test>::SwappingDisabled);
+		assert_noop!(
+			Pallet::<Test>::register_as_liquidity_provider(&ALICE),
+			Error::<Test>::SwappingDisabled
+		);
+
+		// We can still register as a validator.
+		assert_ok!(Pallet::<Test>::register_as_validator(&ALICE));
+	})
 }

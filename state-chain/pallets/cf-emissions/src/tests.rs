@@ -1,21 +1,14 @@
 use crate::{mock::*, BlockEmissions, LastSupplyUpdateBlock, Pallet};
-use cf_traits::{mocks::system_state_info::MockSystemStateInfo, RewardsDistribution};
+use cf_traits::{
+	mocks::{egress_handler::MockEgressHandler, system_state_info::MockSystemStateInfo},
+	RewardsDistribution,
+};
 use frame_support::traits::OnInitialize;
 use pallet_cf_flip::Pallet as Flip;
 
-type Emissions = Pallet<Test>;
+use cf_chains::AnyChain;
 
-#[test]
-fn test_should_mint() {
-	// If supply_update_interval is zero, we mint on every block.
-	assert!(Emissions::should_update_supply(0, 0));
-	assert!(Emissions::should_update_supply(1, 0));
-	// If not enough blocks have elapsed we don't broadcast supply update.
-	assert!(!Emissions::should_update_supply(0, 1));
-	// If we are at or above the supply_update_interval, we broadcast supply update.
-	assert!(Emissions::should_update_supply(1, 1));
-	assert!(Emissions::should_update_supply(2, 1));
-}
+type Emissions = Pallet<Test>;
 
 #[test]
 fn test_should_mint_at() {
@@ -110,7 +103,7 @@ fn should_mint_and_initiate_broadcast() {
 		assert!(MockBroadcast::get_called().is_none());
 		Emissions::on_initialize(SUPPLY_UPDATE_INTERVAL.into());
 		let after = Flip::<Test>::total_issuance();
-		assert!(after > before, "Expected {:?} > {:?}", after, before);
+		assert!(after > before, "Expected {after:?} > {before:?}");
 		assert_eq!(
 			MockBroadcast::get_called().unwrap().new_total_supply,
 			Flip::<Test>::total_issuance()
@@ -146,4 +139,18 @@ fn test_example_block_reward_calcaulation() {
 	let inflation: u128 = 2720; // perbill
 	let expected: u128 = 1_813_333_333_333_333_333;
 	assert_eq!(calculate_inflation_to_block_reward(issuance, inflation, 150u128), expected);
+}
+
+#[test]
+fn burn_flip() {
+	new_test_ext(vec![1, 2], None).execute_with(|| {
+		Emissions::on_initialize(SUPPLY_UPDATE_INTERVAL.into());
+		assert_eq!(
+			MockBroadcast::get_called().unwrap().new_total_supply,
+			Flip::<Test>::total_issuance()
+		);
+		let egresses = MockEgressHandler::<AnyChain>::get_scheduled_egresses();
+		assert!(egresses.len() == 1);
+		assert_eq!(egresses.first().expect("should exist").1, FLIP_TO_BURN);
+	});
 }

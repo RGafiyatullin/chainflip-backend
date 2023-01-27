@@ -43,6 +43,7 @@ fn generate_on_signature_ready_call<T: pallet::Config<I>, I>() -> pallet::Call<T
 	Call::<T, I>::on_signature_ready {
 		threshold_request_id,
 		api_call: Box::new(ApiCallFor::<T, I>::benchmark_value()),
+		broadcast_id: 1,
 	}
 }
 
@@ -83,8 +84,7 @@ benchmarks_instance_pallet! {
 		assert!(Timeouts::<T, I>::contains_key(expiry_block));
 	}
 	on_signature_ready {
-		// We add one because one is added at genesis
-		let broadcast_id = 1;
+		let broadcast_id = 0;
 		let timeout_block = frame_system::Pallet::<T>::block_number() + T::BroadcastTimeout::get() + 1_u32.into();
 		let broadcast_attempt_id = BroadcastAttemptId {
 			broadcast_id,
@@ -96,12 +96,12 @@ benchmarks_instance_pallet! {
 		T::KeyProvider::set_key(valid_key);
 	} : { call.dispatch_bypass_filter(T::EnsureThresholdSigned::successful_origin())? }
 	verify {
-		assert_eq!(BroadcastIdCounter::<T, I>::get(), 1);
+		assert_eq!(BroadcastIdCounter::<T, I>::get(), 0);
 		assert_eq!(BroadcastAttemptCount::<T, I>::get(broadcast_id), 0);
 		assert!(Timeouts::<T, I>::contains_key(timeout_block));
 	}
 	start_next_broadcast_attempt {
-		let broadcast_attempt_id = Pallet::<T, I>::start_broadcast(&BenchmarkValue::benchmark_value(), BenchmarkValue::benchmark_value(), BenchmarkValue::benchmark_value());
+		let broadcast_attempt_id = Pallet::<T, I>::start_broadcast(&BenchmarkValue::benchmark_value(), BenchmarkValue::benchmark_value(), BenchmarkValue::benchmark_value(), 1);
 
 		T::KeyProvider::set_key(<<T as Config<I>>::TargetChain as ChainCrypto>::AggKey::benchmark_value());
 		let unsigned_tx = TransactionFor::<T, I>::benchmark_value();

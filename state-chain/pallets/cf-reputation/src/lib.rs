@@ -94,7 +94,7 @@ pub mod pallet {
 	#[pallet::disable_frame_system_supertrait_check]
 	pub trait Config: Chainflip {
 		/// The event type
-		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		/// For registering and verifying the account role.
 		type AccountRoleRegistry: AccountRoleRegistry<Self>;
@@ -120,7 +120,7 @@ pub mod pallet {
 		type Heartbeat: Heartbeat<ValidatorId = Self::ValidatorId, BlockNumber = Self::BlockNumber>;
 
 		/// Implementation of EnsureOrigin trait for governance
-		type EnsureGovernance: EnsureOrigin<Self::Origin>;
+		type EnsureGovernance: EnsureOrigin<Self::RuntimeOrigin>;
 
 		/// The number of blocks for the time frame we would test liveliness within
 		#[pallet::constant]
@@ -139,9 +139,7 @@ pub mod pallet {
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(current_block: T::BlockNumber) -> Weight {
 			if Self::blocks_since_new_interval(current_block) == Zero::zero() {
-				// Provide feedback via the `Heartbeat` trait on each interval
 				T::Heartbeat::on_heartbeat_interval(Self::current_network_state());
-
 				return T::WeightInfo::submit_network_state()
 			}
 			T::WeightInfo::on_initialize_no_action()
@@ -272,7 +270,7 @@ pub mod pallet {
 		) -> DispatchResultWithPostInfo {
 			T::EnsureGovernance::ensure_origin(origin)?;
 
-			let old_penalty = Penalties::<T>::mutate(&offence, |penalty| {
+			let old_penalty = Penalties::<T>::mutate(offence, |penalty| {
 				let old = penalty.clone();
 				*penalty = new_penalty.clone();
 				old
@@ -359,7 +357,7 @@ pub mod pallet {
 		pub accrual_ratio: (ReputationPoints, T::BlockNumber),
 		#[allow(clippy::type_complexity)]
 		pub penalties: Vec<(T::Offence, (ReputationPoints, T::BlockNumber))>,
-		pub genesis_nodes: Vec<T::ValidatorId>,
+		pub genesis_validators: Vec<T::ValidatorId>,
 	}
 
 	#[cfg(feature = "std")]
@@ -368,7 +366,7 @@ pub mod pallet {
 			Self {
 				accrual_ratio: (Zero::zero(), Zero::zero()),
 				penalties: Default::default(),
-				genesis_nodes: Default::default(),
+				genesis_validators: Default::default(),
 			}
 		}
 	}
@@ -384,7 +382,7 @@ pub mod pallet {
 				);
 			}
 			let current_block_number = frame_system::Pallet::<T>::current_block_number();
-			for node in &self.genesis_nodes {
+			for node in &self.genesis_validators {
 				LastHeartbeat::<T>::insert(node, current_block_number);
 			}
 		}
@@ -401,7 +399,7 @@ impl<T: Config> OffenceReporter for Pallet<T> {
 
 		if penalty.reputation > 0 {
 			for validator_id in validators {
-				Reputations::<T>::mutate(&validator_id, |rep| {
+				Reputations::<T>::mutate(validator_id, |rep| {
 					rep.deduct_reputation(penalty.reputation);
 				});
 				Self::deposit_event(Event::OffencePenalty {
@@ -418,7 +416,7 @@ impl<T: Config> OffenceReporter for Pallet<T> {
 	}
 
 	fn forgive_all(offence: impl Into<Self::Offence>) {
-		Suspensions::<T>::remove(&offence.into());
+		Suspensions::<T>::remove(offence.into());
 	}
 }
 
@@ -455,7 +453,6 @@ impl<T: Config> Pallet<T> {
 			});
 
 			if reputation_points < 0 {
-				// At this point we slash the node by the amount of blocks offline
 				T::Slasher::slash(&validator_id, T::HeartbeatBlockInterval::get());
 			}
 		}
@@ -498,7 +495,7 @@ impl<T: Config> Pallet<T> {
 	/// available.
 	fn resolve_penalty_for<O: Into<T::Offence>>(offence: O) -> Penalty<T> {
 		let offence: T::Offence = offence.into();
-		Penalties::<T>::get(&offence)
+		Penalties::<T>::get(offence)
 	}
 }
 

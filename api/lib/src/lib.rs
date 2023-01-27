@@ -1,19 +1,14 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use cf_chains::eth::H256;
-use cf_primitives::AccountRole;
-use futures::{FutureExt, Stream, StreamExt};
-use pallet_cf_governance::ProposalId;
+use cf_primitives::{AccountRole, Asset, ForeignChainAddress};
+use futures::{FutureExt, Stream};
 use pallet_cf_validator::MAX_LENGTH_FOR_VANITY_NAME;
+use rand_legacy::FromEntropy;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_core::{ed25519::Public as EdPublic, sr25519::Public as SrPublic, Bytes};
+use sp_core::{ed25519::Public as EdPublic, sr25519::Public as SrPublic, Bytes, Pair};
 use sp_finality_grandpa::AuthorityId as GrandpaId;
 use state_chain_runtime::opaque::SessionKeys;
-
-use custom_rpc::CustomApiClient;
-
-#[cfg(feature = "ibiza")]
-use cf_primitives::{Asset, ForeignChainAddress};
 
 pub mod primitives {
 	pub use cf_primitives::*;
@@ -22,12 +17,11 @@ pub mod primitives {
 	pub type ClaimAmount = pallet_cf_staking::ClaimAmount<FlipBalance>;
 }
 
+pub use chainflip_engine::settings;
 pub use chainflip_node::chain_spec::use_chainflip_account_id_encoding;
 
 use chainflip_engine::{
-	eth::{rpc::EthDualRpcClient, EthBroadcaster},
 	logging::utils::new_discard_logger,
-	settings,
 	state_chain_observer::client::{
 		base_rpc_api::{BaseRpcApi, BaseRpcClient, RawRpcApi},
 		extrinsic_api::ExtrinsicApi,
@@ -74,7 +68,7 @@ pub async fn request_block(
 	block_hash: state_chain_runtime::Hash,
 	state_chain_settings: &settings::StateChain,
 ) -> Result<state_chain_runtime::SignedBlock> {
-	println!("Querying the state chain for the block with hash {:x?}.", block_hash);
+	println!("Querying the state chain for the block with hash {block_hash:x?}.");
 
 	let state_chain_rpc_client = BaseRpcClient::new(state_chain_settings).await?;
 
@@ -90,9 +84,9 @@ async fn submit_and_ensure_success<Call, BlockStream>(
 	client: &StateChainClient,
 	block_stream: &mut BlockStream,
 	call: Call,
-) -> Result<(H256, Vec<state_chain_runtime::Event>)>
+) -> Result<(H256, Vec<state_chain_runtime::RuntimeEvent>)>
 where
-	Call: Into<state_chain_runtime::Call> + Clone + std::fmt::Debug + Send + Sync + 'static,
+	Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug + Send + Sync + 'static,
 	BlockStream: Stream<Item = state_chain_runtime::Header> + Unpin + Send + 'static,
 {
 	let logger = new_discard_logger();
@@ -103,7 +97,7 @@ where
 	if let Some(_failure) = events.iter().find(|event| {
 		matches!(
 			event,
-			state_chain_runtime::Event::System(frame_system::Event::ExtrinsicFailed { .. })
+			state_chain_runtime::RuntimeEvent::System(frame_system::Event::ExtrinsicFailed { .. })
 		)
 	}) {
 		Err(anyhow!("extrinsic execution failed"))
@@ -112,13 +106,12 @@ where
 	}
 }
 
-#[cfg(feature = "ibiza")]
 async fn connect_submit_and_get_events<Call>(
 	state_chain_settings: &settings::StateChain,
 	call: Call,
-) -> Result<Vec<state_chain_runtime::Event>>
+) -> Result<Vec<state_chain_runtime::RuntimeEvent>>
 where
-	Call: Into<state_chain_runtime::Call> + Clone + std::fmt::Debug + Send + Sync + 'static,
+	Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug + Send + Sync + 'static,
 {
 	task_scope(|scope| {
 		async {
@@ -184,118 +177,6 @@ pub async fn request_claim(
 	.await
 }
 
-/// Get claim certificate by polling the State Chain.
-/// Returns `None` if no certificate is detected after polling
-/// for `blocks_to_poll_limit` blocks.
-pub async fn poll_for_claim_certificate(
-	state_chain_settings: &settings::StateChain,
-	blocks_to_poll_limit: usize,
-) -> Result<Option<ClaimCertificate>> {
-	task_scope(|scope| {
-		async {
-			let logger = new_discard_logger();
-			let (_block_hash, mut block_stream, state_chain_client) = StateChainClient::new(
-				scope,
-				state_chain_settings,
-				AccountRole::None,
-				false,
-				&logger,
-			)
-			.await?;
-
-			let account_id = state_chain_client.account_id();
-
-			let mut blocks_polled = 0;
-
-			while let Some(_result_header) = block_stream.next().await {
-				if let Some(certificate) = state_chain_client
-					.base_rpc_client
-					.raw_rpc_client
-					.cf_get_claim_certificate(account_id.clone(), None)
-					.await?
-				{
-					return Ok(Some(certificate))
-				}
-
-				blocks_polled += 1;
-				if blocks_polled >= blocks_to_poll_limit {
-					return Ok(None)
-				}
-			}
-
-			Err(anyhow!("Block stream unexpectedly ended"))
-		}
-		.boxed()
-	})
-	.await
-}
-
-/// Register the claim certificate on Ethereum
-pub async fn register_claim(
-	eth_settings: &settings::Eth,
-	state_chain_settings: &settings::StateChain,
-	claim_cert: ClaimCertificate,
-) -> Result<H256> {
-	task_scope(|scope| {
-		async {
-			let logger = new_discard_logger();
-			let (_, _block_stream, state_chain_client) = StateChainClient::new(
-				scope,
-				state_chain_settings,
-				AccountRole::None,
-				false,
-				&logger,
-			)
-			.await?;
-
-			let block_hash =
-				state_chain_client.base_rpc_client.latest_finalized_block_hash().await?;
-
-			let chain_id = state_chain_client
-				.storage_value::<pallet_cf_environment::EthereumChainId<state_chain_runtime::Runtime>>(
-					block_hash,
-				)
-				.await
-				.expect("Failed to fetch EthereumChainId from the State Chain");
-			let stake_manager_address = state_chain_client
-				.storage_value::<pallet_cf_environment::EthereumStakeManagerAddress<state_chain_runtime::Runtime>>(
-					block_hash,
-				)
-				.await
-				.expect("Failed to fetch EthereumStakeManagerAddress from State Chain");
-
-			println!(
-				"Registering your claim on the Ethereum network, to StakeManager address: {:?}",
-				stake_manager_address
-			);
-
-			let eth_broadcaster = EthBroadcaster::new(
-				eth_settings,
-				EthDualRpcClient::new(eth_settings, chain_id.into(), &logger)
-					.await
-					.context("Could not create EthDualRpcClient")?,
-				&logger,
-			)?;
-
-			eth_broadcaster
-				.send(
-					eth_broadcaster
-						.encode_and_sign_tx(cf_chains::eth::Transaction {
-							chain_id,
-							contract: stake_manager_address.into(),
-							data: claim_cert,
-							..Default::default()
-						})
-						.await?
-						.0,
-				)
-				.await
-		}
-		.boxed()
-	})
-	.await
-}
-
 pub async fn register_account_role(
 	role: AccountRole,
 	state_chain_settings: &settings::StateChain,
@@ -319,7 +200,7 @@ pub async fn register_account_role(
 				)
 				.await
 				.expect("Could not set register account role for account");
-			println!("Account role set at tx {:#x}.", tx_hash);
+			println!("Account role set at tx {tx_hash:#x}.");
 			Ok(())
 		}
 		.boxed()
@@ -371,36 +252,37 @@ pub async fn rotate_keys(state_chain_settings: &settings::StateChain) -> Result<
 }
 
 // Account must be the governance dictator in order for this to work.
-pub async fn force_rotation(
-	id: ProposalId,
-	state_chain_settings: &settings::StateChain,
-) -> Result<()> {
-	task_scope(|scope| async {
-		let logger = new_discard_logger();
-		let (_, _, state_chain_client) =
-			StateChainClient::new(scope, state_chain_settings, AccountRole::None, false, &logger).await?;
-
-		state_chain_client
-			.submit_signed_extrinsic(
-				pallet_cf_governance::Call::propose_governance_extrinsic {
-					call: Box::new(pallet_cf_validator::Call::force_rotation {}.into()),
-				},
+pub async fn force_rotation(state_chain_settings: &settings::StateChain) -> Result<()> {
+	task_scope(|scope| {
+		async {
+			let logger = new_discard_logger();
+			let (_, _, state_chain_client) = StateChainClient::new(
+				scope,
+				state_chain_settings,
+				AccountRole::None,
+				false,
 				&logger,
 			)
-			.await
-			.expect("Should submit sudo governance proposal");
+			.await?;
 
-		println!("Submitting governance proposal for rotation.");
+			println!("Submitting governance proposal for rotation.");
+			state_chain_client
+				.submit_signed_extrinsic(
+					pallet_cf_governance::Call::propose_governance_extrinsic {
+						call: Box::new(pallet_cf_validator::Call::force_rotation {}.into()),
+					},
+					&logger,
+				)
+				.await
+				.expect("Should submit sudo governance proposal");
 
-		state_chain_client
-			.submit_signed_extrinsic(pallet_cf_governance::Call::approve { approved_id: id }, &logger)
-			.await
-			.expect("Should submit approval, triggering execution of the forced rotation");
+			println!("Rotation should begin soon :)");
 
-		println!("Approved governance proposal {}. Rotation should commence soon if you are the governance dictator", id);
-
-		Ok(())
-	}.boxed()).await
+			Ok(())
+		}
+		.boxed()
+	})
+	.await
 }
 
 pub async fn retire_account(state_chain_settings: &settings::StateChain) -> Result<()> {
@@ -419,7 +301,7 @@ pub async fn retire_account(state_chain_settings: &settings::StateChain) -> Resu
 				.submit_signed_extrinsic(pallet_cf_staking::Call::retire_account {}, &logger)
 				.await
 				.expect("Could not retire account");
-			println!("Account retired at tx {:#x}.", tx_hash);
+			println!("Account retired at tx {tx_hash:#x}.");
 			Ok(())
 		}
 		.boxed()
@@ -447,7 +329,7 @@ pub async fn activate_account(state_chain_settings: &settings::StateChain) -> Re
 					.submit_signed_extrinsic(pallet_cf_staking::Call::activate_account {}, &logger)
 					.await
 					.expect("Could not activate account");
-				println!("Account activated at tx {:#x}.", tx_hash);
+				println!("Account activated at tx {tx_hash:#x}.");
 			}
 			AccountRole::None => {
 				println!("You have not yet registered an account role. If you wish to activate your account to gain a chance at becoming an authority on the Chainflip network
@@ -488,7 +370,7 @@ pub async fn set_vanity_name(
 				)
 				.await
 				.expect("Could not set vanity name for your account");
-			println!("Vanity name set at tx {:#x}.", tx_hash);
+			println!("Vanity name set at tx {tx_hash:#x}.");
 			Ok(())
 		}
 		.boxed()
@@ -496,7 +378,6 @@ pub async fn set_vanity_name(
 	.await
 }
 
-#[cfg(feature = "ibiza")]
 pub async fn register_swap_intent(
 	state_chain_settings: &settings::StateChain,
 	ingress_asset: Asset,
@@ -515,13 +396,14 @@ pub async fn register_swap_intent(
 	)
 	.await?;
 
-	if let Some(state_chain_runtime::Event::Swapping(pallet_cf_swapping::Event::NewSwapIntent {
-		ingress_address,
-		..
-	})) = events.iter().find(|event| {
+	if let Some(state_chain_runtime::RuntimeEvent::Swapping(
+		pallet_cf_swapping::Event::NewSwapIntent { ingress_address, .. },
+	)) = events.iter().find(|event| {
 		matches!(
 			event,
-			state_chain_runtime::Event::Swapping(pallet_cf_swapping::Event::NewSwapIntent { .. })
+			state_chain_runtime::RuntimeEvent::Swapping(
+				pallet_cf_swapping::Event::NewSwapIntent { .. }
+			)
 		)
 	}) {
 		Ok(*ingress_address)
@@ -530,7 +412,6 @@ pub async fn register_swap_intent(
 	}
 }
 
-#[cfg(feature = "ibiza")]
 pub async fn liquidity_deposit(
 	state_chain_settings: &settings::StateChain,
 	asset: Asset,
@@ -541,12 +422,12 @@ pub async fn liquidity_deposit(
 	)
 	.await?;
 
-	if let Some(state_chain_runtime::Event::LiquidityProvider(
+	if let Some(state_chain_runtime::RuntimeEvent::LiquidityProvider(
 		pallet_cf_lp::Event::DepositAddressReady { ingress_address, intent_id: _ },
 	)) = events.iter().find(|event| {
 		matches!(
 			event,
-			state_chain_runtime::Event::LiquidityProvider(
+			state_chain_runtime::RuntimeEvent::LiquidityProvider(
 				pallet_cf_lp::Event::DepositAddressReady { .. }
 			)
 		)
@@ -555,4 +436,78 @@ pub async fn liquidity_deposit(
 	} else {
 		panic!("DepositAddressReady must have been generated");
 	}
+}
+
+use zeroize::Zeroize;
+
+#[derive(Debug, Zeroize)]
+/// Public and Secret keys as bytes
+pub struct KeyPair {
+	pub secret_key: Vec<u8>,
+	pub public_key: Vec<u8>,
+}
+
+/// Generate a new random node key.
+/// This key is used for secure communication between Validators.
+pub fn generate_node_key() -> KeyPair {
+	use rand::SeedableRng;
+
+	let mut rng = rand::rngs::StdRng::from_entropy();
+	let keypair = ed25519_dalek::Keypair::generate(&mut rng);
+
+	KeyPair {
+		secret_key: keypair.secret.as_bytes().to_vec(),
+		public_key: keypair.public.to_bytes().to_vec(),
+	}
+}
+
+/// Generate a signing key (aka validator key) using the seed phrase.
+/// If no seed phrase is provided, a new random seed phrase will be created.
+/// Returns the key and the seed phrase used to create it.
+/// This key is used to stake your node.
+pub fn generate_signing_key(seed_phrase: Option<&str>) -> Result<(KeyPair, String)> {
+	use bip39::{Language, Mnemonic, MnemonicType};
+
+	// Get a new random seed phrase if one was not provided
+	let mnemonic = Mnemonic::new(MnemonicType::Words12, Language::English);
+	let seed_phrase = seed_phrase.unwrap_or_else(|| mnemonic.phrase());
+
+	sp_core::Pair::from_phrase(seed_phrase, None)
+		.map(|(pair, seed)| {
+			let pair: sp_core::sr25519::Pair = pair;
+			(
+				KeyPair { secret_key: seed.to_vec(), public_key: pair.public().to_vec() },
+				seed_phrase.to_string(),
+			)
+		})
+		.map_err(|_| anyhow::Error::msg("Invalid seed phrase"))
+}
+
+/// Generate a new random ethereum key.
+/// A chainflip validator must have their own Ethereum private keys and be capable of submitting
+/// transactions. We recommend importing the generated secret key into metamask for account
+/// management.
+pub fn generate_ethereum_key() -> KeyPair {
+	use secp256k1::Secp256k1;
+
+	let mut rng = rand_legacy::rngs::StdRng::from_entropy();
+
+	let (secret_key, public_key) = Secp256k1::new().generate_keypair(&mut rng);
+
+	KeyPair { secret_key: secret_key[..].to_vec(), public_key: public_key.serialize().to_vec() }
+}
+
+#[test]
+fn test_generate_signing_key_with_known_seed() {
+	const SEED_PHRASE: &str =
+		"essay awesome afraid movie wish save genius eyebrow tonight milk agree pretty alcohol three whale";
+
+	let (generate_key, _) = generate_signing_key(Some(SEED_PHRASE)).unwrap();
+
+	// Compare the generated secret key with a known secret key generated using the `chainflip-node
+	// key generate` command
+	assert_eq!(
+		hex::encode(generate_key.secret_key),
+		"afabf42a9a99910cdd64795ef05ed71acfa2238f5682d26ae62028df3cc59727"
+	);
 }

@@ -24,7 +24,7 @@ use cf_traits::{
 type ValidatorId = u64;
 
 thread_local! {
-	pub static SLASHES: RefCell<Vec<(u64, u64)>> = RefCell::new(Default::default());
+	pub static SLASHES: RefCell<Vec<u64>> = RefCell::new(Default::default());
 }
 
 construct_runtime!(
@@ -46,8 +46,8 @@ impl frame_system::Config for Test {
 	type BaseCallFilter = frame_support::traits::Everything;
 	type BlockWeights = ();
 	type BlockLength = ();
-	type Origin = Origin;
-	type Call = Call;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -55,7 +55,7 @@ impl frame_system::Config for Test {
 	type AccountId = ValidatorId;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = BlockHashCount;
 	type DbWeight = ();
 	type Version = ();
@@ -92,8 +92,7 @@ pub struct MockSlasher;
 
 impl MockSlasher {
 	pub fn slash_count(validator_id: ValidatorId) -> usize {
-		SLASHES
-			.with(|slashes| slashes.borrow().iter().filter(|(id, _)| *id == validator_id).count())
+		SLASHES.with(|slashes| slashes.borrow().iter().filter(|id| **id == validator_id).count())
 	}
 }
 
@@ -101,10 +100,10 @@ impl Slashing for MockSlasher {
 	type AccountId = ValidatorId;
 	type BlockNumber = u64;
 
-	fn slash(validator_id: &Self::AccountId, blocks_offline: Self::BlockNumber) {
+	fn slash(validator_id: &Self::AccountId, _blocks: Self::BlockNumber) {
 		// Count those slashes
 		SLASHES.with(|count| {
-			count.borrow_mut().push((*validator_id, blocks_offline));
+			count.borrow_mut().push(*validator_id);
 		});
 	}
 }
@@ -116,7 +115,7 @@ impl Chainflip for Test {
 	type KeyId = Vec<u8>;
 	type ValidatorId = ValidatorId;
 	type Amount = u128;
-	type Call = Call;
+	type RuntimeCall = RuntimeCall;
 	type EnsureWitnessed = NeverFailingOriginCheck<Self>;
 	type EnsureWitnessedAtCurrentEpoch = NeverFailingOriginCheck<Self>;
 	type EpochInfo = MockEpochInfo;
@@ -160,7 +159,7 @@ impl From<PalletOffence> for AllOffences {
 }
 
 impl Config for Test {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type Offence = AllOffences;
 	type HeartbeatBlockInterval = HeartbeatBlockInterval;
 	type AccountRoleRegistry = ();
@@ -186,7 +185,7 @@ pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
 					(GRANDPA_EQUIVOCATION_PENALTY_POINTS, GRANDPA_SUSPENSION_DURATION),
 				),
 			],
-			genesis_nodes: vec![ALICE],
+			genesis_validators: vec![ALICE],
 		},
 	};
 

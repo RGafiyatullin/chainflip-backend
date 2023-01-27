@@ -1,10 +1,8 @@
-[profile.release]
-panic = 'unwind'
-
 [workspace]
 members = [
   'api/lib',
   'api/bin/chainflip-cli',
+  'api/bin/chainflip-relayer',
   'state-chain/chains',
   'state-chain/node',
   'state-chain/amm',
@@ -17,6 +15,8 @@ members = [
   'state-chain/pallets/cf-governance',
   'state-chain/pallets/cf-ingress-egress',
   'state-chain/pallets/cf-lp',
+  'state-chain/pallets/cf-pools',
+  'state-chain/pallets/cf-pools/runtime-api',
   'state-chain/pallets/cf-reputation',
   'state-chain/pallets/cf-staking',
   'state-chain/pallets/cf-threshold-signature',
@@ -39,3 +39,17 @@ members = [
   'state-chain/custom-rpc',
   'state-chain/cf-session-benchmarking',
 ]
+
+[profile.release]
+# Substrate runtime requires unwinding.
+panic = "unwind"
+
+[profile.production]
+inherits = "release"
+
+# Sacrifice compile speed for execution speed by using optimization flags:
+
+# https://doc.rust-lang.org/rustc/linker-plugin-lto.html
+lto = "fat"
+# https://doc.rust-lang.org/rustc/codegen-options/index.html#codegen-units
+codegen-units = 1

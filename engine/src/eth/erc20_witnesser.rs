@@ -1,10 +1,7 @@
-#![cfg(feature = "ibiza")]
-
 use std::{collections::BTreeSet, sync::Arc};
 
 use async_trait::async_trait;
 use cf_primitives::{chains::assets::eth, EpochIndex, EthAmount};
-use sp_core::H256;
 use state_chain_runtime::EthereumInstance;
 use web3::{
 	ethabi::{self, RawLog},
@@ -14,8 +11,8 @@ use web3::{
 use crate::state_chain_observer::client::extrinsic_api::ExtrinsicApi;
 
 use super::{
-	event::Event, rpc::EthRpcApi, utils, BlockWithItems, DecodeLogClosure, EthContractWitnesser,
-	SignatureAndEvent,
+	core_h160, core_h256, event::Event, rpc::EthRpcApi, utils, BlockWithItems, DecodeLogClosure,
+	EthContractWitnesser, SignatureAndEvent,
 };
 use pallet_cf_ingress_egress::IngressWitness;
 
@@ -38,8 +35,8 @@ pub struct Erc20Witnesser {
 	pub deployed_address: H160,
 	asset: eth::Asset,
 	contract: ethabi::Contract,
-	monitored_addresses: BTreeSet<H160>,
-	monitored_address_receiver: tokio::sync::mpsc::UnboundedReceiver<H160>,
+	monitored_addresses: BTreeSet<sp_core::H160>,
+	monitored_address_receiver: tokio::sync::mpsc::UnboundedReceiver<sp_core::H160>,
 }
 
 impl Erc20Witnesser {
@@ -47,8 +44,8 @@ impl Erc20Witnesser {
 	pub fn new(
 		deployed_address: H160,
 		asset: eth::Asset,
-		monitored_addresses: BTreeSet<H160>,
-		monitored_address_receiver: tokio::sync::mpsc::UnboundedReceiver<H160>,
+		monitored_addresses: BTreeSet<sp_core::H160>,
+		monitored_address_receiver: tokio::sync::mpsc::UnboundedReceiver<sp_core::H160>,
 	) -> Self {
 		Self {
 			deployed_address,
@@ -86,36 +83,38 @@ impl EthContractWitnesser for Erc20Witnesser {
 			self.monitored_addresses.insert(address);
 		}
 
-		let ingress_witnesses = block
+		let ingress_witnesses: Vec<_> = block
 			.block_items
 			.into_iter()
 			.filter_map(|event| match event.event_parameters {
 				Erc20Event::Transfer { to, value, from: _ }
-					if self.monitored_addresses.contains(&to) =>
+					if self.monitored_addresses.contains(&core_h160(to)) =>
 					Some(IngressWitness {
-						ingress_address: to,
+						ingress_address: core_h160(to),
 						amount: value,
 						asset: self.asset,
-						tx_hash: event.tx_hash,
+						tx_id: core_h256(event.tx_hash),
 					}),
 				_ => None,
 			})
 			.collect();
 
-		let _result = state_chain_client
-			.submit_signed_extrinsic(
-				pallet_cf_witnesser::Call::witness_at_epoch {
-					call: Box::new(
-						pallet_cf_ingress_egress::Call::<_, EthereumInstance>::do_ingress {
-							ingress_witnesses,
-						}
-						.into(),
-					),
-					epoch_index: epoch,
-				},
-				logger,
-			)
-			.await;
+		if !ingress_witnesses.is_empty() {
+			let _result = state_chain_client
+				.submit_signed_extrinsic(
+					pallet_cf_witnesser::Call::witness_at_epoch {
+						call: Box::new(
+							pallet_cf_ingress_egress::Call::<_, EthereumInstance>::do_ingress {
+								ingress_witnesses,
+							}
+							.into(),
+						),
+						epoch_index: epoch,
+					},
+					logger,
+				)
+				.await;
+		}
 
 		Ok(())
 	}
@@ -129,20 +128,26 @@ impl EthContractWitnesser for Erc20Witnesser {
 		let approval = SignatureAndEvent::new(&self.contract, "Approval")?;
 
 		Ok(Box::new(
-			move |event_signature: H256, raw_log: RawLog| -> Result<Self::EventParameters> {
+			move |event_signature: web3::types::H256,
+			      raw_log: RawLog|
+			      -> Result<Self::EventParameters> {
 				Ok(if event_signature == transfer.signature {
 					let log = transfer.event.parse_log(raw_log)?;
 					Erc20Event::Transfer {
 						from: utils::decode_log_param(&log, "from")?,
 						to: utils::decode_log_param(&log, "to")?,
-						value: utils::decode_log_param::<ethabi::Uint>(&log, "value")?.as_u128(),
+						value: utils::decode_log_param::<ethabi::Uint>(&log, "value")?
+							.try_into()
+							.expect("Transfer value should fit u128"),
 					}
 				} else if event_signature == approval.signature {
 					let log = approval.event.parse_log(raw_log)?;
 					Erc20Event::Approval {
 						owner: utils::decode_log_param(&log, "owner")?,
 						spender: utils::decode_log_param(&log, "spender")?,
-						value: utils::decode_log_param::<ethabi::Uint>(&log, "value")?.as_u128(),
+						value: utils::decode_log_param::<ethabi::Uint>(&log, "value")?
+							.try_into()
+							.expect("Approval value should fit u128"),
 					}
 				} else {
 					Erc20Event::Other(raw_log)
@@ -155,6 +160,8 @@ impl EthContractWitnesser for Erc20Witnesser {
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
+
+	use web3::types::H256;
 
 	use super::*;
 

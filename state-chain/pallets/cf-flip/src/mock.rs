@@ -9,6 +9,7 @@ use frame_support::{
 	traits::{ConstU128, ConstU8, HandleLifetime},
 	weights::{ConstantMultiplier, IdentityFee},
 };
+use frame_system::pallet_prelude::BlockNumberFor;
 use sp_core::H256;
 use sp_runtime::{
 	testing::Header,
@@ -45,8 +46,8 @@ impl frame_system::Config for Test {
 	type BlockWeights = ();
 	type BlockLength = ();
 	type DbWeight = ();
-	type Origin = Origin;
-	type Call = Call;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -54,7 +55,7 @@ impl frame_system::Config for Test {
 	type AccountId = AccountId;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = BlockHashCount;
 	type Version = ();
 	type PalletInfo = PalletInfo;
@@ -76,10 +77,10 @@ parameter_types! {
 }
 
 // Implement mock for WaivedFees
-impl_mock_waived_fees!(AccountId, Call);
+impl_mock_waived_fees!(AccountId, RuntimeCall);
 
 impl pallet_cf_flip::Config for Test {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type Balance = FlipBalance;
 	type ExistentialDeposit = ExistentialDeposit;
 	type EnsureGovernance = NeverFailingOriginCheck<Self>;
@@ -99,6 +100,7 @@ impl pallet_transaction_payment::Config for Test {
 	type FeeMultiplierUpdate = ();
 	type OperationalFeeMultiplier = ConstU8<5>;
 	type LengthToFee = ConstantMultiplier<u128, ConstU128<1_000_000>>;
+	type RuntimeEvent = RuntimeEvent;
 }
 
 // Build genesis storage according to the mock runtime.
@@ -148,7 +150,6 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 
 pub type SlashingRateType = Permill;
 pub type Bond = u128;
-pub type BlocksOffline = u64;
 pub type Mint = u128;
 
 #[derive(Clone, Debug)]
@@ -168,6 +169,6 @@ pub enum FlipOperation {
 	ExternalTransferOut(AccountId, FlipBalance),
 	ExternalTransferIn(AccountId, FlipBalance),
 	UpdateStakeAndBond(AccountId, FlipBalance, FlipBalance),
-	SlashAccount(AccountId, SlashingRateType, Bond, BlocksOffline, Mint),
+	SlashAccount(AccountId, SlashingRateType, Bond, Mint, BlockNumberFor<Test>),
 	AccountToAccount(AccountId, AccountId, FlipBalance, FlipBalance),
 }

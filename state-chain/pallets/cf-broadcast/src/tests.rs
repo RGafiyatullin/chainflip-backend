@@ -32,7 +32,7 @@ thread_local! {
 }
 
 // When calling on_idle, we should broadcast everything with this excess weight.
-const LARGE_EXCESS_WEIGHT: Weight = 20_000_000_000;
+const LARGE_EXCESS_WEIGHT: Weight = Weight::from_ref_time(20_000_000_000);
 
 struct MockCfe;
 
@@ -45,9 +45,9 @@ impl MockCfe {
 		}
 	}
 
-	fn process_event(event: Event, scenario: Scenario) {
+	fn process_event(event: RuntimeEvent, scenario: Scenario) {
 		match event {
-			Event::Broadcaster(broadcast_event) => match broadcast_event {
+			RuntimeEvent::Broadcaster(broadcast_event) => match broadcast_event {
 				BroadcastEvent::TransactionBroadcastRequest {
 					broadcast_attempt_id,
 					nominee,
@@ -124,6 +124,7 @@ fn signature_accepted_results_in_refund_for_signer() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 		let tx_sig_request =
 			AwaitingBroadcast::<Test, Instance1>::get(broadcast_attempt_id).unwrap();
@@ -133,7 +134,7 @@ fn signature_accepted_results_in_refund_for_signer() {
 		assert_eq!(TransactionFeeDeficit::<Test, Instance1>::get(nominee), 0);
 
 		assert_ok!(Broadcaster::signature_accepted(
-			Origin::root(),
+			RuntimeOrigin::root(),
 			MockThresholdSignature::default(),
 			nominee,
 			ETH_TX_FEE,
@@ -159,6 +160,7 @@ fn test_abort_after_number_of_attempts_is_equal_to_the_number_of_authorities() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 
 		for _ in 0..MockEpochInfo::current_authority_count() {
@@ -174,7 +176,7 @@ fn test_abort_after_number_of_attempts_is_equal_to_the_number_of_authorities() {
 
 		assert_eq!(
 			System::events().pop().expect("an event").event,
-			Event::Broadcaster(crate::Event::BroadcastAborted {
+			RuntimeEvent::Broadcaster(crate::Event::BroadcastAborted {
 				broadcast_id: broadcast_attempt_id.broadcast_id
 			})
 		);
@@ -191,6 +193,7 @@ fn on_idle_caps_broadcasts_when_not_enough_weight() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 
 		MockCfe::respond(Scenario::SigningFailure);
@@ -199,6 +202,7 @@ fn on_idle_caps_broadcasts_when_not_enough_weight() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 
 		MockCfe::respond(Scenario::SigningFailure);
@@ -230,6 +234,7 @@ fn test_transaction_signing_failed() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 		assert!(
 			AwaitingBroadcast::<Test, Instance1>::get(broadcast_attempt_id)
@@ -298,6 +303,7 @@ fn signature_accepted_after_timeout_reports_failed_nodes() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 
 		let mut failed_authorities = vec![];
@@ -313,7 +319,7 @@ fn signature_accepted_after_timeout_reports_failed_nodes() {
 		}
 
 		assert_ok!(Broadcaster::signature_accepted(
-			Origin::root(),
+			RuntimeOrigin::root(),
 			MockThresholdSignature::default(),
 			Default::default(),
 			ETH_TX_FEE,
@@ -334,6 +340,7 @@ fn test_signature_request_expiry() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 		let first_broadcast_id = broadcast_attempt_id.broadcast_id;
 		assert!(
@@ -400,6 +407,7 @@ fn test_transmission_request_expiry() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 		let first_broadcast_id = broadcast_attempt_id.broadcast_id;
 		MockCfe::respond(Scenario::HappyPath);
@@ -448,10 +456,11 @@ fn re_request_threshold_signature() {
 			&MockThresholdSignature::default(),
 			MockTransaction,
 			MockApiCall::default(),
+			1,
 		);
 		// Expect the threshold signature pipeline to be empty
 		assert_eq!(
-			MockThresholdSigner::<MockEthereum, Call>::signature_result(0),
+			MockThresholdSigner::<MockEthereum, RuntimeCall>::signature_result(0),
 			AsyncResult::Void
 		);
 		assert!(AwaitingBroadcast::<Test, Instance1>::get(broadcast_attempt_id).is_some());
@@ -477,7 +486,7 @@ fn re_request_threshold_signature() {
 			.is_none());
 		// Verify that we have a new signature request in the pipeline
 		assert_eq!(
-			MockThresholdSigner::<MockEthereum, Call>::signature_result(0),
+			MockThresholdSigner::<MockEthereum, RuntimeCall>::signature_result(0),
 			AsyncResult::Pending
 		);
 	});

@@ -58,7 +58,7 @@ use self::{
 
 use super::{
 	crypto::{CryptoScheme, ECPoint},
-	Rng, SigningPayload,
+	Rng,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,14 +116,14 @@ pub trait MultisigClientApi<C: CryptoScheme> {
 		&self,
 		ceremony_id: CeremonyId,
 		participants: BTreeSet<AccountId>,
-	) -> BoxFuture<'_, Result<C::Point, (BTreeSet<AccountId>, KeygenFailureReason)>>;
+	) -> BoxFuture<'_, Result<C::AggKey, (BTreeSet<AccountId>, KeygenFailureReason)>>;
 
 	fn initiate_signing(
 		&self,
 		ceremony_id: CeremonyId,
 		key_id: KeyId,
 		signers: BTreeSet<AccountId>,
-		payload: SigningPayload,
+		payload: C::SigningPayload,
 	) -> BoxFuture<'_, Result<C::Signature, (BTreeSet<AccountId>, SigningFailureReason)>>;
 
 	fn update_latest_ceremony_id(&self, ceremony_id: CeremonyId);
@@ -154,8 +154,8 @@ where
 	C: CryptoScheme,
 {
 	pub participants: BTreeSet<AccountId>,
-	pub payload: SigningPayload,
-	pub keygen_result_info: KeygenResultInfo<<C as CryptoScheme>::Point>,
+	pub payload: C::SigningPayload,
+	pub keygen_result_info: KeygenResultInfo<C>,
 	pub rng: Rng,
 	pub result_sender: CeremonyResultSender<SigningCeremony<C>>,
 }
@@ -194,7 +194,7 @@ impl<C: CryptoScheme> MultisigClientApi<C> for MultisigClient<C> {
 		&self,
 		ceremony_id: CeremonyId,
 		participants: BTreeSet<AccountId>,
-	) -> BoxFuture<'_, Result<C::Point, (BTreeSet<AccountId>, KeygenFailureReason)>> {
+	) -> BoxFuture<'_, Result<C::AggKey, (BTreeSet<AccountId>, KeygenFailureReason)>> {
 		assert!(participants.contains(&self.my_account_id));
 
 		slog::info!(
@@ -232,7 +232,7 @@ impl<C: CryptoScheme> MultisigClientApi<C> for MultisigClient<C> {
 
 					self.key_store.lock().unwrap().set_key(key_id, keygen_result_info.clone());
 
-					Ok(keygen_result_info.key.get_public_key())
+					Ok(C::agg_key(&keygen_result_info.key.get_public_key()))
 				},
 				Err((reported_parties, failure_reason)) => {
 					failure_reason.log(
@@ -252,14 +252,14 @@ impl<C: CryptoScheme> MultisigClientApi<C> for MultisigClient<C> {
 		ceremony_id: CeremonyId,
 		key_id: KeyId,
 		signers: BTreeSet<AccountId>,
-		payload: SigningPayload,
+		payload: C::SigningPayload,
 	) -> BoxFuture<'_, Result<C::Signature, (BTreeSet<AccountId>, SigningFailureReason)>> {
 		assert!(signers.contains(&self.my_account_id));
 
 		slog::debug!(
 			self.logger,
 			"Received a request to sign";
-			"message_hash" => payload.to_string(),
+			"payload" => payload.to_string(),
 			"signers" => format_iterator(&signers).to_string(),
 			CEREMONY_ID_KEY => ceremony_id
 		);

@@ -2,8 +2,10 @@
 #![doc = include_str!("../README.md")]
 #![doc = include_str!("../../cf-doc-head.md")]
 
-#[cfg(feature = "ibiza")]
-use cf_chains::dot::{PolkadotAccountId, PolkadotIndex, PolkadotMetadata, PolkadotPublicKey};
+use cf_chains::{
+	dot::{api::CreatePolkadotVault, Polkadot, PolkadotAccountId, PolkadotIndex, PolkadotMetadata},
+	ChainCrypto,
+};
 
 use cf_primitives::{Asset, EthereumAddress};
 pub use cf_traits::EthEnvironmentProvider;
@@ -65,7 +67,11 @@ pub mod cfe {
 
 #[frame_support::pallet]
 pub mod pallet {
-	use cf_primitives::Asset;
+
+	use cf_chains::dot::PolkadotPublicKey;
+	use cf_primitives::{Asset, TxId};
+
+	use cf_traits::{Broadcaster, VaultKeyWitnessedHandler};
 
 	use super::*;
 
@@ -73,9 +79,18 @@ pub mod pallet {
 	pub trait Config: frame_system::Config {
 		/// Because we want to emit events when there is a config change during
 		/// an runtime upgrade
-		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		/// Governance origin to secure extrinsic
-		type EnsureGovernance: EnsureOrigin<Self::Origin>;
+		type EnsureGovernance: EnsureOrigin<Self::RuntimeOrigin>;
+		/// Polkadot Vault Creation Apicall
+
+		type CreatePolkadotVault: CreatePolkadotVault;
+		/// Polkadot broadcaster
+
+		type PolkadotBroadcaster: Broadcaster<Polkadot, ApiCall = Self::CreatePolkadotVault>;
+		/// On new key witnessed handler for Polkadot
+
+		type PolkadotVaultKeyWitnessedHandler: VaultKeyWitnessedHandler<Polkadot>;
 		/// Weight information
 		type WeightInfo: WeightInfo;
 	}
@@ -139,24 +154,15 @@ pub mod pallet {
 
 	//              POLKADOT CHAIN RELATED ENVIRONMENT ITEMS
 
-	#[cfg(feature = "ibiza")]
 	#[pallet::storage]
 	#[pallet::getter(fn polkadot_vault_account_id)]
 	/// The Polkadot Vault Anonymous Account
 	pub type PolkadotVaultAccountId<T> = StorageValue<_, PolkadotAccountId, OptionQuery>;
 
-	#[cfg(feature = "ibiza")]
-	#[pallet::storage]
-	#[pallet::getter(fn polkadot_current_proxy_account_id)]
-	/// The current proxy Account for polkadot vault
-	pub type PolkadotCurrentProxyAccountId<T> = StorageValue<_, PolkadotAccountId, OptionQuery>;
-
-	#[cfg(feature = "ibiza")]
 	#[pallet::storage]
 	/// Current Nonce of the current Polkadot Proxy Account
 	pub type PolkadotProxyAccountNonce<T> = StorageValue<_, PolkadotIndex, ValueQuery>;
 
-	#[cfg(feature = "ibiza")]
 	#[pallet::storage]
 	#[pallet::getter(fn polkadot_network_metadata)]
 	/// The Polkadot Network Metadata
@@ -173,9 +179,10 @@ pub mod pallet {
 		AddedNewEthAsset(Asset, EthereumAddress),
 		/// The address of an supported ETH asset was updated
 		UpdatedEthAsset(Asset, EthereumAddress),
-		#[cfg(feature = "ibiza")]
-		/// The AccountId of the new Polkadot Vault Proxy
-		PolkadotProxyAccountUpdated(PolkadotAccountId),
+		/// Polkadot Vault Creation Call was initiated
+		PolkadotVaultCreationCallInitiated { agg_key: <Polkadot as ChainCrypto>::AggKey },
+		/// Polkadot Vault Account is successfully set
+		PolkadotVaultAccountSet { polkadot_vault_account_id: PolkadotAccountId },
 	}
 
 	#[pallet::call]
@@ -198,6 +205,7 @@ pub mod pallet {
 			SystemStateProvider::<T>::set_system_state(state);
 			Ok(().into())
 		}
+
 		/// Adds or updates an asset address in the map of supported ETH assets.
 		///
 		/// ## Events
@@ -226,6 +234,7 @@ pub mod pallet {
 			});
 			Ok(().into())
 		}
+
 		/// Sets the current on-chain CFE settings
 		///
 		/// ## Events
@@ -249,6 +258,79 @@ pub mod pallet {
 			Self::deposit_event(Event::<T>::CfeSettingsUpdated { new_cfe_settings: cfe_settings });
 			Ok(().into())
 		}
+
+		/// Initiates the Polkadot Vault Creation Apicall. This governance action needs to be called
+		/// when the first rotation is initiated after polkadot activation. The rotation will stall
+		/// after keygen is completed and emit the event AwaitingGovernanceAction after which this
+		/// governance extrinsic needs to be called
+		///
+		/// ## Events
+		///
+		/// - [PolkadotVaultCreationCallInitiated](Event::PolkadotVaultCreationCallInitiated)
+		///
+		/// ## Errors
+		///
+		/// - [BadOrigin](frame_support::error::BadOrigin)
+		#[allow(unused_variables)]
+		#[pallet::weight(0)]
+		pub fn create_polkadot_vault(
+			origin: OriginFor<T>,
+			dot_aggkey: PolkadotPublicKey,
+		) -> DispatchResultWithPostInfo {
+			T::EnsureGovernance::ensure_origin(origin)?;
+
+			T::PolkadotBroadcaster::threshold_sign_and_broadcast(
+				T::CreatePolkadotVault::new_unsigned(dot_aggkey),
+			);
+			Self::deposit_event(Event::<T>::PolkadotVaultCreationCallInitiated {
+				agg_key: dot_aggkey,
+			});
+			Ok(().into())
+		}
+
+		/// Manually initiates Polkadot vault key rotation completion steps so Epoch rotation can be
+		/// continued and sets the Polkadot Pure Proxy Vault in environment pallet. The extrinsic
+		/// takes in the dot_pure_proxy_vault_key, which is obtained from the Polkadot blockchain as
+		/// a result of creating a polkadot vault which is done by executing the extrinsic
+		/// create_polkadot_vault(), dot_witnessed_aggkey, the aggkey which initiated the polkadot
+		/// creation transaction and the tx hash and block number of the Polkadot block the
+		/// vault creation transaction was witnessed in. This extrinsic should complete the Polkadot
+		/// initiation process and the vault should rotate successfully.
+		///
+		/// ## Events
+		///
+		/// - [PolkadotVaultCreationCallInitiated](Event::PolkadotVaultCreationCallInitiated)
+		///
+		/// ## Errors
+		///
+		/// - [BadOrigin](frame_support::error::BadOrigin)
+		#[allow(unused_variables)]
+		#[pallet::weight(0)]
+		pub fn witness_polkadot_vault_creation(
+			origin: OriginFor<T>,
+			dot_pure_proxy_vault_key: PolkadotAccountId,
+			dot_witnessed_aggkey: PolkadotPublicKey,
+			tx_id: TxId,
+		) -> DispatchResultWithPostInfo {
+			T::EnsureGovernance::ensure_origin(origin)?;
+
+			use cf_traits::VaultKeyWitnessedHandler;
+
+			// Set Polkadot Pure Proxy Vault Account
+			PolkadotVaultAccountId::<T>::put(dot_pure_proxy_vault_key.clone());
+			Self::deposit_event(Event::<T>::PolkadotVaultAccountSet {
+				polkadot_vault_account_id: dot_pure_proxy_vault_key,
+			});
+
+			// Witness the agg_key rotation manually in the vaults pallet for polkadot
+			let dispatch_result = T::PolkadotVaultKeyWitnessedHandler::on_new_key_activated(
+				dot_witnessed_aggkey,
+				tx_id.block_number,
+				tx_id,
+			)?;
+			Self::next_polkadot_proxy_account_nonce();
+			Ok(dispatch_result)
+		}
 	}
 
 	#[pallet::genesis_config]
@@ -261,11 +343,9 @@ pub mod pallet {
 		pub eth_vault_address: EthereumAddress,
 		pub ethereum_chain_id: u64,
 		pub cfe_settings: cfe::CfeSettings,
-		#[cfg(feature = "ibiza")]
+
 		pub polkadot_vault_account_id: Option<PolkadotAccountId>,
-		#[cfg(feature = "ibiza")]
-		pub polkadot_proxy_account_id: Option<PolkadotAccountId>,
-		#[cfg(feature = "ibiza")]
+
 		pub polkadot_network_metadata: PolkadotMetadata,
 	}
 
@@ -281,13 +361,11 @@ pub mod pallet {
 			CurrentSystemState::<T>::set(SystemState::Normal);
 			EthereumSupportedAssets::<T>::insert(Asset::Flip, self.flip_token_address);
 			EthereumSupportedAssets::<T>::insert(Asset::Usdc, self.eth_usdc_address);
-			#[cfg(feature = "ibiza")]
+
 			PolkadotVaultAccountId::<T>::set(self.polkadot_vault_account_id.clone());
-			#[cfg(feature = "ibiza")]
-			PolkadotCurrentProxyAccountId::<T>::set(self.polkadot_proxy_account_id.clone());
-			#[cfg(feature = "ibiza")]
+
 			PolkadotNetworkMetadata::<T>::set(self.polkadot_network_metadata.clone());
-			#[cfg(feature = "ibiza")]
+
 			PolkadotProxyAccountNonce::<T>::set(0);
 		}
 	}
@@ -326,14 +404,13 @@ impl<T: Config> SystemStateManager for SystemStateProvider<T> {
 }
 
 impl<T: Config> EthEnvironmentProvider for Pallet<T> {
-	fn flip_token_address() -> EthereumAddress {
-		EthereumSupportedAssets::<T>::get(Asset::Flip)
-			.expect("FLIP address should be added at genesis")
+	fn token_address(asset: Asset) -> Option<EthereumAddress> {
+		EthereumSupportedAssets::<T>::get(asset)
 	}
 	fn key_manager_address() -> EthereumAddress {
 		EthereumKeyManagerAddress::<T>::get()
 	}
-	fn eth_vault_address() -> EthereumAddress {
+	fn vault_address() -> EthereumAddress {
 		EthereumVaultAddress::<T>::get()
 	}
 	fn stake_manager_address() -> EthereumAddress {
@@ -352,7 +429,6 @@ impl<T: Config> Pallet<T> {
 		})
 	}
 
-	#[cfg(feature = "ibiza")]
 	pub fn next_polkadot_proxy_account_nonce() -> PolkadotIndex {
 		PolkadotProxyAccountNonce::<T>::mutate(|nonce| {
 			*nonce += 1;
@@ -360,27 +436,15 @@ impl<T: Config> Pallet<T> {
 		})
 	}
 
-	#[cfg(feature = "ibiza")]
 	pub fn get_polkadot_network_metadata() -> PolkadotMetadata {
 		PolkadotNetworkMetadata::<T>::get()
 	}
 
-	#[cfg(feature = "ibiza")]
 	pub fn get_polkadot_vault_account() -> Option<PolkadotAccountId> {
 		PolkadotVaultAccountId::<T>::get()
 	}
 
-	#[cfg(feature = "ibiza")]
-	pub fn get_current_polkadot_proxy_account() -> Option<PolkadotAccountId> {
-		PolkadotCurrentProxyAccountId::<T>::get()
-	}
-	#[cfg(feature = "ibiza")]
-	pub fn set_new_proxy_account(new_polkadot_key: PolkadotPublicKey) {
-		use sp_runtime::{traits::IdentifyAccount, MultiSigner};
-
-		let new_account = MultiSigner::Sr25519(new_polkadot_key.0).into_account();
-		PolkadotCurrentProxyAccountId::<T>::set(Some(new_account.clone()));
+	pub fn reset_polkadot_proxy_account_nonce() {
 		PolkadotProxyAccountNonce::<T>::set(0);
-		Self::deposit_event(Event::<T>::PolkadotProxyAccountUpdated(new_account));
 	}
 }

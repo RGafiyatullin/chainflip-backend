@@ -51,7 +51,7 @@ impl ChainCrypto for Ethereum {
 	type AggKey = eth::AggKey;
 	type Payload = eth::H256;
 	type ThresholdSignature = SchnorrVerificationComponents;
-	type TransactionHash = eth::H256;
+	type TransactionId = eth::H256;
 	type GovKey = eth::Address;
 
 	fn verify_threshold_signature(
@@ -476,13 +476,6 @@ impl TryFrom<Vec<u8>> for AggKey {
 
 	fn try_from(serialized: Vec<u8>) -> Result<Self, Self::Error> {
 		serialized.as_slice().try_into()
-	}
-}
-
-#[cfg(feature = "std")]
-impl From<&secp256k1::PublicKey> for AggKey {
-	fn from(key: &secp256k1::PublicKey) -> Self {
-		AggKey::from_pubkey_compressed(key.serialize())
 	}
 }
 

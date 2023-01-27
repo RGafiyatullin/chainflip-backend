@@ -13,7 +13,7 @@ use cf_traits::{
 		ceremony_id_provider::MockCeremonyIdProvider, signer_nomination::MockNominator,
 		system_state_info::MockSystemStateInfo,
 	},
-	AsyncResult, Chainflip, KeyState, ThresholdSigner,
+	AsyncResult, Chainflip, EpochKey, KeyState, ThresholdSigner,
 };
 use codec::{Decode, Encode};
 use frame_support::{
@@ -55,8 +55,8 @@ impl frame_system::Config for Test {
 	type BlockWeights = ();
 	type BlockLength = ();
 	type DbWeight = ();
-	type Origin = Origin;
-	type Call = Call;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -64,7 +64,7 @@ impl frame_system::Config for Test {
 	type AccountId = u64;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = BlockHashCount;
 	type Version = ();
 	type PalletInfo = PalletInfo;
@@ -83,7 +83,7 @@ impl Chainflip for Test {
 	type KeyId = Vec<u8>;
 	type ValidatorId = u64;
 	type Amount = u128;
-	type Call = Call;
+	type RuntimeCall = RuntimeCall;
 	type EnsureWitnessed = NeverFailingOriginCheck<Self>;
 	type EnsureWitnessedAtCurrentEpoch = NeverFailingOriginCheck<Self>;
 	type EpochInfo = MockEpochInfo;
@@ -124,11 +124,11 @@ impl MockCallback<MockEthereum> {
 }
 
 impl UnfilteredDispatchable for MockCallback<MockEthereum> {
-	type Origin = Origin;
+	type RuntimeOrigin = RuntimeOrigin;
 
 	fn dispatch_bypass_filter(
 		self,
-		origin: Self::Origin,
+		origin: Self::RuntimeOrigin,
 	) -> frame_support::dispatch::DispatchResultWithPostInfo {
 		EnsureThresholdSigned::<Test, Instance1>::ensure_origin(origin)?;
 		self.call();
@@ -142,8 +142,8 @@ pub const MOCK_AGG_KEY: [u8; 4] = *b"AKEY";
 pub struct MockKeyProvider;
 
 impl cf_traits::KeyProvider<MockEthereum> for MockKeyProvider {
-	fn current_key_epoch_index() -> KeyState<<MockEthereum as ChainCrypto>::AggKey> {
-		KeyState::Active { key: MOCK_AGG_KEY, epoch_index: Default::default() }
+	fn current_epoch_key() -> EpochKey<<MockEthereum as ChainCrypto>::AggKey> {
+		EpochKey { key: MOCK_AGG_KEY, epoch_index: Default::default(), key_state: KeyState::Active }
 	}
 }
 
@@ -167,9 +167,9 @@ pub type MockOffenceReporter =
 	cf_traits::mocks::offence_reporting::MockOffenceReporter<u64, PalletOffence>;
 
 impl pallet_cf_threshold_signature::Config<Instance1> for Test {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type Offence = PalletOffence;
-	type RuntimeOrigin = Origin;
+	type RuntimeOrigin = RuntimeOrigin;
 	type AccountRoleRegistry = ();
 	type ThresholdCallable = MockCallback<MockEthereum>;
 	type TargetChain = MockEthereum;

@@ -1,19 +1,15 @@
 use crate::{self as pallet_cf_tokenholder_governance};
-use cf_chains::{mocks::MockEthereum, ApiCall, ChainAbi, ChainCrypto};
+use cf_chains::eth::Address;
 use cf_traits::{
 	impl_mock_stake_transfer, impl_mock_waived_fees,
 	mocks::{
 		ensure_origin_mock::NeverFailingOriginCheck, epoch_info::MockEpochInfo,
 		system_state_info::MockSystemStateInfo,
 	},
-	Broadcaster, Chainflip, StakeTransfer, WaivedFees,
+	BroadcastAnyChainGovKey, BroadcastComKey, Chainflip, StakeTransfer, WaivedFees,
 };
-use codec::{Decode, Encode, MaxEncodedLen};
-use frame_support::{
-	parameter_types, storage, traits::HandleLifetime, StorageHasher, Twox64Concat,
-};
+use frame_support::{parameter_types, traits::HandleLifetime};
 use frame_system as system;
-use scale_info::TypeInfo;
 use sp_core::H256;
 use sp_runtime::{
 	testing::Header,
@@ -21,7 +17,6 @@ use sp_runtime::{
 	BuildStorage,
 };
 
-use cf_chains::{SetCommKeyWithAggKey, SetGovKeyWithAggKey};
 use system::pallet_prelude::BlockNumberFor;
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
@@ -55,8 +50,8 @@ impl system::Config for Test {
 	type BlockWeights = ();
 	type BlockLength = ();
 	type DbWeight = ();
-	type Origin = Origin;
-	type Call = Call;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -64,7 +59,7 @@ impl system::Config for Test {
 	type AccountId = AccountId;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = BlockHashCount;
 	type Version = ();
 	type PalletInfo = PalletInfo;
@@ -77,69 +72,13 @@ impl system::Config for Test {
 	type MaxConsumers = frame_support::traits::ConstU32<5>;
 }
 
-cf_traits::impl_mock_ensure_witnessed_for_origin!(Origin);
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen)]
-pub struct MockApiCalls {
-	pub nonce: <MockEthereum as ChainAbi>::ReplayProtection,
-	pub new_key: <MockEthereum as ChainCrypto>::GovKey,
-}
-
-impl SetGovKeyWithAggKey<MockEthereum> for MockApiCalls {
-	fn new_unsigned(new_key: <MockEthereum as ChainCrypto>::GovKey) -> Self {
-		Self { nonce: Default::default(), new_key }
-	}
-}
-
-impl ApiCall<MockEthereum> for MockApiCalls {
-	fn threshold_signature_payload(&self) -> <MockEthereum as ChainCrypto>::Payload {
-		[0xcf; 4]
-	}
-
-	fn signed(
-		self,
-		_threshold_signature: &<MockEthereum as ChainCrypto>::ThresholdSignature,
-	) -> Self {
-		unimplemented!()
-	}
-
-	fn chain_encoded(&self) -> Vec<u8> {
-		unimplemented!()
-	}
-
-	fn is_signed(&self) -> bool {
-		unimplemented!()
-	}
-}
-
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Encode, Decode, TypeInfo)]
-pub struct MockBroadcaster;
-
-impl SetCommKeyWithAggKey<MockEthereum> for MockApiCalls {
-	fn new_unsigned(new_key: <MockEthereum as ChainCrypto>::GovKey) -> Self {
-		Self { nonce: Default::default(), new_key }
-	}
-}
-
-impl Broadcaster<MockEthereum> for MockBroadcaster {
-	type ApiCall = MockApiCalls;
-
-	fn threshold_sign_and_broadcast(api_call: Self::ApiCall) {
-		storage::hashed::put(&<Twox64Concat as StorageHasher>::hash, b"GOV", &api_call);
-	}
-}
-
-impl MockBroadcaster {
-	pub fn get_called() -> Option<<MockBroadcaster as Broadcaster<MockEthereum>>::ApiCall> {
-		storage::hashed::get(&<Twox64Concat as StorageHasher>::hash, b"GOV")
-	}
-}
+cf_traits::impl_mock_ensure_witnessed_for_origin!(RuntimeOrigin);
 
 impl Chainflip for Test {
 	type KeyId = Vec<u8>;
 	type ValidatorId = u64;
 	type Amount = u128;
-	type Call = Call;
+	type RuntimeCall = RuntimeCall;
 	type EnsureWitnessed = MockEnsureWitnessed;
 	type EnsureWitnessedAtCurrentEpoch = MockEnsureWitnessed;
 	type EpochInfo = MockEpochInfo;
@@ -155,11 +94,29 @@ parameter_types! {
 }
 
 // Implement mock for RestrictionHandler
-impl_mock_waived_fees!(AccountId, Call);
+impl_mock_waived_fees!(AccountId, RuntimeCall);
 impl_mock_stake_transfer!(AccountId, u128);
 
+pub struct MockKeyBroadcaster;
+
+impl BroadcastAnyChainGovKey for MockKeyBroadcaster {
+	fn broadcast(
+		_chain: cf_chains::ForeignChain,
+		_old_key: Option<Vec<u8>>,
+		_new_key: Vec<u8>,
+	) -> Result<(), ()> {
+		Ok(())
+	}
+}
+
+impl BroadcastComKey for MockKeyBroadcaster {
+	type EthAddress = Address;
+
+	fn broadcast(_new_key: Self::EthAddress) {}
+}
+
 impl pallet_cf_flip::Config for Test {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type Balance = u128;
 	type ExistentialDeposit = ExistentialDeposit;
 	type EnsureGovernance = NeverFailingOriginCheck<Self>;
@@ -170,12 +127,11 @@ impl pallet_cf_flip::Config for Test {
 }
 
 impl pallet_cf_tokenholder_governance::Config for Test {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type FeePayment = Flip;
-	type Chain = MockEthereum;
 	type StakingInfo = Flip;
-	type ApiCalls = MockApiCalls;
-	type Broadcaster = MockBroadcaster;
+	type CommKeyBroadcaster = MockKeyBroadcaster;
+	type AnyChainGovKeyBroadcaster = MockKeyBroadcaster;
 	type WeightInfo = ();
 	type VotingPeriod = VotingPeriod;
 	type EnactmentDelay = EnactmentDelay;

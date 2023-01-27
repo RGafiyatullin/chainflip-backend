@@ -5,9 +5,13 @@
 use codec::{Codec, Decode, Encode};
 use frame_support::{
 	dispatch::{GetDispatchInfo, UnfilteredDispatchable, Weight},
+	ensure,
+	pallet_prelude::DispatchResultWithPostInfo,
+	storage::with_transaction,
 	traits::{EnsureOrigin, Get, UnixTime},
 };
 pub use pallet::*;
+use sp_runtime::{DispatchError, TransactionOutcome};
 use sp_std::{boxed::Box, ops::Add, vec::Vec};
 
 #[cfg(feature = "runtime-benchmarks")]
@@ -23,9 +27,14 @@ pub type GovCallHash = [u8; 32];
 mod mock;
 #[cfg(test)]
 mod tests;
+
+pub type ProposalId = u32;
 /// Implements the functionality of the Chainflip governance.
 #[frame_support::pallet]
 pub mod pallet {
+
+	use super::*;
+
 	use cf_traits::{Chainflip, ExecutionCondition, RuntimeUpgrade};
 	use frame_support::{
 		dispatch::GetDispatchInfo,
@@ -65,22 +74,21 @@ pub mod pallet {
 	type AccountId<T> = <T as frame_system::Config>::AccountId;
 	type OpaqueCall = Vec<u8>;
 	type Timestamp = u64;
-	pub type ProposalId = u32;
 
 	#[pallet::config]
 	#[pallet::disable_frame_system_supertrait_check]
 	pub trait Config: Chainflip {
 		/// Standard Event type.
-		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		/// The outer Origin needs to be compatible with this pallet's Origin
-		type Origin: From<RawOrigin>
+		type RuntimeOrigin: From<RawOrigin>
 			+ From<frame_system::RawOrigin<<Self as frame_system::Config>::AccountId>>;
 		/// Implementation of EnsureOrigin trait for governance
-		type EnsureGovernance: EnsureOrigin<<Self as pallet::Config>::Origin>;
+		type EnsureGovernance: EnsureOrigin<<Self as pallet::Config>::RuntimeOrigin>;
 		/// The overarching call type.
-		type Call: Member
+		type RuntimeCall: Member
 			+ Parameter
-			+ UnfilteredDispatchable<Origin = <Self as Config>::Origin>
+			+ UnfilteredDispatchable<RuntimeOrigin = <Self as Config>::RuntimeOrigin>
 			+ From<frame_system::Call<Self>>
 			+ From<Call<Self>>
 			+ GetDispatchInfo;
@@ -175,7 +183,7 @@ pub mod pallet {
 		/// CallHash whitelisted by the GovKey
 		GovKeyCallHashWhitelisted { call_hash: GovCallHash },
 		/// Failed GovKey call
-		GovKeyCallExecutionFailed { call_hash: GovCallHash },
+		GovKeyCallExecutionFailed { call_hash: GovCallHash, error: DispatchError },
 	}
 
 	#[pallet::error]
@@ -208,7 +216,7 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::propose_governance_extrinsic())]
 		pub fn propose_governance_extrinsic(
 			origin: OriginFor<T>,
-			call: Box<<T as Config>::Call>,
+			call: Box<<T as Config>::RuntimeCall>,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			// Ensure origin is part of the governance
@@ -216,6 +224,9 @@ pub mod pallet {
 			// Push proposal
 			let id = Self::push_proposal(call);
 			Self::deposit_event(Event::Proposed(id));
+
+			Self::inner_approve(who, id)?;
+
 			// Governance member don't pay fees
 			Ok(Pays::No.into())
 		}
@@ -289,27 +300,9 @@ pub mod pallet {
 			approved_id: ProposalId,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let members = Members::<T>::get();
-			ensure!(members.contains(&who), Error::<T>::NotMember);
-			ensure!(Proposals::<T>::contains_key(approved_id), Error::<T>::ProposalNotFound);
-
-			// Try to approve the proposal
-			let proposal = Proposals::<T>::mutate(approved_id, |proposal| {
-				if !proposal.approved.insert(who) {
-					return Err(Error::<T>::AlreadyApproved)
-				}
-				Self::deposit_event(Event::Approved(approved_id));
-				Ok(proposal.clone())
-			})?;
-
-			if proposal.approved.len() > (members.len() / 2) {
-				ExecutionPipeline::<T>::append((proposal.call, approved_id));
-				Proposals::<T>::remove(approved_id);
-				ActiveProposals::<T>::mutate(|proposals| {
-					proposals
-						.retain(|ActiveProposal { proposal_id, .. }| *proposal_id != approved_id)
-				});
-			}
+			// Ensure origin is part of the governance
+			ensure!(Members::<T>::get().contains(&who), Error::<T>::NotMember);
+			Self::inner_approve(who, approved_id)?;
 			// Governance members don't pay transaction fees
 			Ok(Pays::No.into())
 		}
@@ -329,7 +322,7 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::call_as_sudo().saturating_add(call.get_dispatch_info().weight))]
 		pub fn call_as_sudo(
 			origin: OriginFor<T>,
-			call: Box<<T as Config>::Call>,
+			call: Box<<T as Config>::RuntimeCall>,
 		) -> DispatchResultWithPostInfo {
 			T::EnsureGovernance::ensure_origin(origin)?;
 			// Execute the root call
@@ -374,7 +367,7 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::submit_govkey_call().saturating_add(call.get_dispatch_info().weight))]
 		pub fn submit_govkey_call(
 			origin: OriginFor<T>,
-			call: Box<<T as Config>::Call>,
+			call: Box<<T as Config>::RuntimeCall>,
 		) -> DispatchResultWithPostInfo {
 			ensure!(
 				(ensure_signed(origin.clone()).is_ok() ||
@@ -384,12 +377,11 @@ pub mod pallet {
 			let (call_hash, nonce) = Self::compute_gov_key_call_hash::<_>(call.clone());
 			match GovKeyWhitelistedCallHash::<T>::get() {
 				Some(whitelisted_call_hash) if whitelisted_call_hash == call_hash => {
-					Self::deposit_event(
-						match call.dispatch_bypass_filter(RawOrigin::GovernanceApproval.into()) {
-							Ok(_) => Event::GovKeyCallExecuted { call_hash },
-							Err(_) => Event::GovKeyCallExecutionFailed { call_hash },
-						},
-					);
+					Self::deposit_event(match Self::dispatch_governance_call(*call) {
+						Ok(_) => Event::GovKeyCallExecuted { call_hash },
+						Err(err) =>
+							Event::GovKeyCallExecutionFailed { call_hash, error: err.error },
+					});
 					NextGovKeyCallHashNonce::<T>::put(nonce.wrapping_add(1));
 					GovKeyWhitelistedCallHash::<T>::kill();
 
@@ -428,7 +420,7 @@ pub mod pallet {
 	pub type Origin = RawOrigin;
 
 	/// The raw origin enum for this pallet.
-	#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
+	#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo, MaxEncodedLen)]
 	pub enum RawOrigin {
 		GovernanceApproval,
 	}
@@ -461,6 +453,28 @@ where
 }
 
 impl<T: Config> Pallet<T> {
+	pub fn inner_approve(who: T::AccountId, approved_id: ProposalId) -> Result<(), DispatchError> {
+		ensure!(Proposals::<T>::contains_key(approved_id), Error::<T>::ProposalNotFound);
+
+		// Try to approve the proposal
+		let proposal = Proposals::<T>::mutate(approved_id, |proposal| {
+			if !proposal.approved.insert(who) {
+				return Err(Error::<T>::AlreadyApproved)
+			}
+			Self::deposit_event(Event::Approved(approved_id));
+			Ok(proposal.clone())
+		})?;
+
+		if proposal.approved.len() > (Members::<T>::get().len() / 2) {
+			ExecutionPipeline::<T>::append((proposal.call, approved_id));
+			Proposals::<T>::remove(approved_id);
+			ActiveProposals::<T>::mutate(|proposals| {
+				proposals.retain(|ActiveProposal { proposal_id, .. }| *proposal_id != approved_id)
+			});
+		}
+		Ok(())
+	}
+
 	pub fn compute_gov_key_call_hash<CallData>(data: CallData) -> (GovCallHash, u32)
 	where
 		CallData: Clone + Codec,
@@ -483,18 +497,21 @@ impl<T: Config> Pallet<T> {
 		ActiveProposals::<T>::set(active);
 		Self::expire_proposals(expired) + T::WeightInfo::on_initialize(num_proposals as u32)
 	}
+
 	fn execute_pending_proposals() -> Weight {
-		let mut execution_weight = 0;
+		let mut execution_weight = Weight::zero();
 		for (call, id) in ExecutionPipeline::<T>::take() {
-			Self::deposit_event(if let Ok(call) = <T as Config>::Call::decode(&mut &(*call)) {
-				execution_weight += call.get_dispatch_info().weight;
-				match call.dispatch_bypass_filter((RawOrigin::GovernanceApproval).into()) {
-					Ok(_) => Event::Executed(id),
-					Err(err) => Event::FailedExecution(err.error),
-				}
-			} else {
-				Event::DecodeOfCallFailed(id)
-			})
+			Self::deposit_event(
+				if let Ok(call) = <T as Config>::RuntimeCall::decode(&mut &(*call)) {
+					execution_weight.saturating_accrue(call.get_dispatch_info().weight);
+					match Self::dispatch_governance_call(call) {
+						Ok(_) => Event::Executed(id),
+						Err(err) => Event::FailedExecution(err.error),
+					}
+				} else {
+					Event::DecodeOfCallFailed(id)
+				},
+			)
 		}
 		execution_weight
 	}
@@ -507,7 +524,7 @@ impl<T: Config> Pallet<T> {
 		T::WeightInfo::expire_proposals(expired.len() as u32)
 	}
 
-	fn push_proposal(call: Box<<T as Config>::Call>) -> u32 {
+	fn push_proposal(call: Box<<T as Config>::RuntimeCall>) -> u32 {
 		let proposal_id = ProposalIdCounter::<T>::get().add(1);
 		Proposals::<T>::insert(
 			proposal_id,
@@ -519,5 +536,16 @@ impl<T: Config> Pallet<T> {
 			expiry_time: T::TimeSource::now().as_secs() + ExpiryTime::<T>::get(),
 		});
 		proposal_id
+	}
+
+	/// Dispatches a call from the governance origin, with transactional semantics, ie. if the call
+	/// dispatch returns `Err`, rolls back any storage updates.
+	fn dispatch_governance_call(call: <T as Config>::RuntimeCall) -> DispatchResultWithPostInfo {
+		with_transaction(move || {
+			match call.dispatch_bypass_filter(RawOrigin::GovernanceApproval.into()) {
+				r @ Ok(_) => TransactionOutcome::Commit(r),
+				r @ Err(_) => TransactionOutcome::Rollback(r),
+			}
+		})
 	}
 }

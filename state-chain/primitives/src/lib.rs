@@ -36,6 +36,10 @@ pub type AuthorityCount = u32;
 
 pub type IntentId = u64;
 
+pub type EgressCounter = u64;
+
+pub type EgressId = (ForeignChain, EgressCounter);
+
 pub type ExchangeRate = FixedU128;
 
 pub type EthereumAddress = [u8; 20];
@@ -44,9 +48,23 @@ pub type EthAmount = u128;
 
 pub type AssetAmount = u128;
 
+pub type BasisPoints = u16;
+
+pub type BroadcastId = u32;
+
 /// Alias to the opaque account ID type for this chain, actually a `AccountId32`. This is always
 /// 32 bytes.
 pub type PolkadotAccountId = AccountId32;
+
+pub type PolkadotBlockNumber = u32;
+
+// Polkadot extrinsics are uniquely identified by <block number>-<extrinsic index>
+// https://wiki.polkadot.network/docs/build-protocol-info
+#[derive(Clone, Encode, Decode, MaxEncodedLen, TypeInfo, Debug, PartialEq, Eq)]
+pub struct TxId {
+	pub block_number: PolkadotBlockNumber,
+	pub extrinsic_index: u32,
+}
 
 pub const ETHEREUM_ETH_ADDRESS: EthereumAddress = [0xEE; 20];
 
@@ -116,6 +134,15 @@ impl core::fmt::Display for ForeignChainAddress {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum AddressError {
 	InvalidAddress,
+}
+
+impl AsRef<[u8]> for ForeignChainAddress {
+	fn as_ref(&self) -> &[u8] {
+		match self {
+			ForeignChainAddress::Eth(address) => address.as_slice(),
+			ForeignChainAddress::Dot(address) => address.as_slice(),
+		}
+	}
 }
 
 impl TryFrom<ForeignChainAddress> for EthereumAddress {

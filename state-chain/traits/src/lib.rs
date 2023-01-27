@@ -12,15 +12,13 @@ use core::fmt::Debug;
 pub use async_result::AsyncResult;
 use sp_std::collections::btree_set::BTreeSet;
 
-#[cfg(feature = "ibiza")]
-use cf_chains::Polkadot;
 use cf_chains::{
-	benchmarking_value::BenchmarkValue, ApiCall, Chain, ChainAbi, ChainCrypto, Ethereum,
+	benchmarking_value::BenchmarkValue, ApiCall, Chain, ChainAbi, ChainCrypto, Ethereum, Polkadot,
 };
 
 use cf_primitives::{
-	chains::assets, AccountRole, Asset, AssetAmount, AuthorityCount, CeremonyId, EpochIndex,
-	ForeignChainAddress, IntentId,
+	chains::assets, AccountRole, Asset, AssetAmount, AuthorityCount, BroadcastId, CeremonyId,
+	EgressId, EpochIndex, EthereumAddress, ForeignChain, ForeignChainAddress, IntentId,
 };
 use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::{
@@ -65,12 +63,14 @@ pub trait Chainflip: frame_system::Config {
 	/// An id type for keys used in threshold signature ceremonies.
 	type KeyId: Member + Parameter + From<Vec<u8>> + BenchmarkValue;
 	/// The overarching call type.
-	type Call: Member + Parameter + UnfilteredDispatchable<Origin = Self::Origin>;
+	type RuntimeCall: Member
+		+ Parameter
+		+ UnfilteredDispatchable<RuntimeOrigin = Self::RuntimeOrigin>;
 	/// A type that allows us to check if a call was a result of witness consensus.
-	type EnsureWitnessed: EnsureOrigin<Self::Origin>;
+	type EnsureWitnessed: EnsureOrigin<Self::RuntimeOrigin>;
 	/// A type that allows us to check if a call was a result of witness consensus by the current
 	/// epoch.
-	type EnsureWitnessedAtCurrentEpoch: EnsureOrigin<Self::Origin>;
+	type EnsureWitnessedAtCurrentEpoch: EnsureOrigin<Self::RuntimeOrigin>;
 	/// Information about the current Epoch.
 	type EpochInfo: EpochInfo<ValidatorId = Self::ValidatorId, Amount = Self::Amount>;
 	/// Access to information about the current system state
@@ -183,9 +183,7 @@ pub trait VaultRotator {
 	fn activate();
 
 	#[cfg(feature = "runtime-benchmarks")]
-	fn set_status(_outcome: AsyncResult<VaultStatus<Self::ValidatorId>>) {
-		unimplemented!()
-	}
+	fn set_status(_outcome: AsyncResult<VaultStatus<Self::ValidatorId>>);
 }
 
 /// Handler for Epoch life cycle events.
@@ -253,10 +251,7 @@ pub trait StakeTransfer {
 	fn finalize_claim(account_id: &Self::AccountId) -> Result<(), DispatchError>;
 
 	/// Reverts a pending claim in the case of an expiry or cancellation.
-	fn revert_claim(
-		account_id: &Self::AccountId,
-		amount: Self::Balance,
-	) -> Result<(), DispatchError>;
+	fn revert_claim(account_id: &Self::AccountId) -> Result<(), DispatchError>;
 }
 
 /// Trait for managing token issuance.
@@ -293,10 +288,10 @@ pub trait EmissionsTrigger {
 
 /// Provides the environment data for ethereum-like chains.
 pub trait EthEnvironmentProvider {
-	fn flip_token_address() -> [u8; 20];
-	fn key_manager_address() -> [u8; 20];
-	fn stake_manager_address() -> [u8; 20];
-	fn eth_vault_address() -> [u8; 20];
+	fn token_address(asset: assets::any::Asset) -> Option<EthereumAddress>;
+	fn key_manager_address() -> EthereumAddress;
+	fn stake_manager_address() -> EthereumAddress;
+	fn vault_address() -> EthereumAddress;
 	fn chain_id() -> u64;
 }
 
@@ -334,13 +329,11 @@ pub trait EmergencyRotation {
 	fn request_emergency_rotation();
 }
 
-/// Slashing a node
 pub trait Slashing {
-	/// An identifier for our node
 	type AccountId;
-	/// Block number
 	type BlockNumber;
-	/// Function which implements the slashing logic
+
+	/// Slashes a validator for the equivalent of some number of blocks offline.
 	fn slash(validator_id: &Self::AccountId, blocks_offline: Self::BlockNumber);
 }
 
@@ -370,29 +363,25 @@ pub trait ThresholdSignerNomination {
 }
 
 #[derive(Default, Debug, TypeInfo, Decode, Encode, Clone, Copy, PartialEq, Eq)]
-pub enum KeyState<Key> {
-	Active {
-		key: Key,
-		epoch_index: EpochIndex,
-	},
+pub enum KeyState {
+	Active,
 	// We are currently transitioning to a new key or the key doesn't yet exist.
 	#[default]
 	Unavailable,
 }
 
-impl<Key> KeyState<Key> {
-	pub fn unwrap_key(self) -> Key {
-		match self {
-			Self::Active { key: key_id, epoch_index: _ } => key_id,
-			Self::Unavailable => panic!("KeyState is Unavailable!"),
-		}
-	}
+#[derive(Default, Debug, TypeInfo, Decode, Encode, Clone, Copy, PartialEq, Eq)]
+pub struct EpochKey<Key> {
+	pub key: Key,
+	pub epoch_index: EpochIndex,
+	pub key_state: KeyState,
 }
 
 /// Provides the currently valid key for multisig ceremonies.
 pub trait KeyProvider<C: ChainCrypto> {
-	/// Get the chain's current agg key and the epoch index for the current key.
-	fn current_key_epoch_index() -> KeyState<C::AggKey>;
+	/// Get the chain's current agg key, the epoch index for the current key and the state of that
+	/// key.
+	fn current_epoch_key() -> EpochKey<C::AggKey>;
 
 	#[cfg(feature = "runtime-benchmarks")]
 	fn set_key(_key: C::AggKey) {
@@ -466,7 +455,7 @@ pub trait Broadcaster<Api: ChainAbi> {
 	type ApiCall: ApiCall<Api>;
 
 	/// Request a threshold signature and then build and broadcast the outbound api call.
-	fn threshold_sign_and_broadcast(api_call: Self::ApiCall);
+	fn threshold_sign_and_broadcast(api_call: Self::ApiCall) -> BroadcastId;
 }
 
 /// The heartbeat of the network
@@ -491,8 +480,8 @@ pub trait BlockEmissions {
 /// Checks if the caller can execute free transactions
 pub trait WaivedFees {
 	type AccountId;
-	type Call;
-	fn should_waive_fees(call: &Self::Call, caller: &Self::AccountId) -> bool;
+	type RuntimeCall;
+	fn should_waive_fees(call: &Self::RuntimeCall, caller: &Self::AccountId) -> bool;
 }
 
 /// Qualify what is considered as a potential authority for the network
@@ -668,7 +657,6 @@ impl<T: frame_system::Config> IngressApi<Ethereum> for T {
 	}
 }
 
-#[cfg(feature = "ibiza")]
 impl<T: frame_system::Config> IngressApi<Polkadot> for T {
 	type AccountId = T::AccountId;
 	fn register_liquidity_ingress_intent(
@@ -705,7 +693,6 @@ impl AddressDerivationApi<Ethereum> for () {
 	}
 }
 
-#[cfg(feature = "ibiza")]
 impl AddressDerivationApi<Polkadot> for () {
 	fn generate_address(
 		_ingress_asset: <Polkadot as Chain>::ChainAsset,
@@ -730,18 +717,20 @@ pub trait AccountRoleRegistry<T: frame_system::Config> {
 		Self::register_account_role(account_id, AccountRole::Validator)
 	}
 
-	fn ensure_account_role(origin: T::Origin, role: AccountRole)
-		-> Result<T::AccountId, BadOrigin>;
+	fn ensure_account_role(
+		origin: T::RuntimeOrigin,
+		role: AccountRole,
+	) -> Result<T::AccountId, BadOrigin>;
 
-	fn ensure_relayer(origin: T::Origin) -> Result<T::AccountId, BadOrigin> {
+	fn ensure_relayer(origin: T::RuntimeOrigin) -> Result<T::AccountId, BadOrigin> {
 		Self::ensure_account_role(origin, AccountRole::Relayer)
 	}
 
-	fn ensure_liquidity_provider(origin: T::Origin) -> Result<T::AccountId, BadOrigin> {
+	fn ensure_liquidity_provider(origin: T::RuntimeOrigin) -> Result<T::AccountId, BadOrigin> {
 		Self::ensure_account_role(origin, AccountRole::LiquidityProvider)
 	}
 
-	fn ensure_validator(origin: T::Origin) -> Result<T::AccountId, BadOrigin> {
+	fn ensure_validator(origin: T::RuntimeOrigin) -> Result<T::AccountId, BadOrigin> {
 		Self::ensure_account_role(origin, AccountRole::Validator)
 	}
 	#[cfg(feature = "runtime-benchmarks")]
@@ -754,7 +743,7 @@ pub trait EgressApi<C: Chain> {
 		foreign_asset: C::ChainAsset,
 		amount: AssetAmount,
 		egress_address: C::ChainAccount,
-	);
+	) -> EgressId;
 }
 
 impl<T: frame_system::Config> EgressApi<Ethereum> for T {
@@ -762,22 +751,23 @@ impl<T: frame_system::Config> EgressApi<Ethereum> for T {
 		_foreign_asset: assets::eth::Asset,
 		_amount: AssetAmount,
 		_egress_address: <Ethereum as Chain>::ChainAccount,
-	) {
+	) -> EgressId {
+		(ForeignChain::Ethereum, 0)
 	}
 }
 
-#[cfg(feature = "ibiza")]
 impl<T: frame_system::Config> EgressApi<Polkadot> for T {
 	fn schedule_egress(
 		_foreign_asset: assets::dot::Asset,
 		_amount: AssetAmount,
 		_egress_address: <Polkadot as Chain>::ChainAccount,
-	) {
+	) -> EgressId {
+		(ForeignChain::Ethereum, 0)
 	}
 }
 
 pub trait VaultTransitionHandler<C: ChainCrypto> {
-	fn on_new_vault(_new_key: C::AggKey) {}
+	fn on_new_vault() {}
 }
 
 /// Provides information about current bids.
@@ -785,4 +775,29 @@ pub trait BidInfo {
 	type Balance;
 	/// Returns the smallest of all backup validator bids.
 	fn get_min_backup_bid() -> Self::Balance;
+}
+
+pub trait VaultKeyWitnessedHandler<C: ChainAbi> {
+	fn on_new_key_activated(
+		new_public_key: C::AggKey,
+		block_number: C::ChainBlockNumber,
+		tx_id: C::TransactionId,
+	) -> DispatchResultWithPostInfo;
+}
+
+pub trait BroadcastAnyChainGovKey {
+	#[allow(clippy::result_unit_err)]
+	fn broadcast(chain: ForeignChain, old_key: Option<Vec<u8>>, new_key: Vec<u8>)
+		-> Result<(), ()>;
+}
+
+pub trait BroadcastComKey {
+	type EthAddress;
+	fn broadcast(new_key: Self::EthAddress);
+}
+
+/// Provides an interface to access the amount of Flip that is ready to be burned.
+pub trait FlipBurnInfo {
+	/// Takes the available Flip and returns it.
+	fn take_flip_to_burn() -> AssetAmount;
 }
