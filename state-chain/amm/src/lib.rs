@@ -15,6 +15,7 @@
 //! Note: There are a few yet to be proved safe maths operations, there are marked below with `TODO:
 //! Prove`. We should resolve these issues before using this code in release.
 #![cfg_attr(not(feature = "std"), no_std)]
+
 use sp_std::collections::btree_map::BTreeMap;
 
 use codec::{Decode, Encode, MaxEncodedLen};
@@ -323,6 +324,11 @@ pub enum MintError<E> {
 	MaximumGrossLiquidity,
 	/// The provided callback function didn't succeed.
 	CallbackError(E),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SwapError {
+	InsufficientLiquidity,
 }
 
 #[derive(Debug)]
@@ -676,14 +682,20 @@ impl PoolState {
 	/// Swaps the specified Amount of Asset 0 into Asset 1. Returns the Output and Fee amount.
 	///
 	/// This function never panics
-	pub fn swap_from_asset_0_to_asset_1(&mut self, amount: AmountU256) -> (AmountU256, AmountU256) {
+	pub fn swap_from_asset_0_to_asset_1(
+		&mut self,
+		amount: AmountU256,
+	) -> Result<(AmountU256, AmountU256), SwapError> {
 		self.swap::<Asset0ToAsset1>(amount)
 	}
 
 	/// Swaps the specified Amount of Asset 1 into Asset 0. Returns the Output and Fee amount.
 	///
 	/// This function never panics
-	pub fn swap_from_asset_1_to_asset_0(&mut self, amount: AmountU256) -> (AmountU256, AmountU256) {
+	pub fn swap_from_asset_1_to_asset_0(
+		&mut self,
+		amount: AmountU256,
+	) -> Result<(AmountU256, AmountU256), SwapError> {
 		self.swap::<Asset1ToAsset0>(amount)
 	}
 
@@ -691,132 +703,142 @@ impl PoolState {
 	/// direction of the swap is controlled by the generic type parameter `SD`, by setting it to
 	/// `Asset0ToAsset1` or `Asset1ToAsset0`.
 	///
-	/// This function never panics
-	fn swap<SD: SwapDirection>(&mut self, mut amount: AmountU256) -> (AmountU256, AmountU256) {
+	/// Returns Ok((output_amount, liquidity_fee)) or SwapError.
+	fn swap<SD: SwapDirection>(
+		&mut self,
+		mut amount: AmountU256,
+	) -> Result<(AmountU256, AmountU256), SwapError> {
 		let mut total_amount_out = AmountU256::zero();
 		let mut total_fee_paid = AmountU256::zero();
 
-		while let Some(Some((target_tick, target_info))) =
-			(!amount.is_zero()).then(|| SD::target_tick(self.current_tick, &mut self.liquidity_map))
-		{
-			let sqrt_ratio_target = Self::sqrt_price_at_tick(*target_tick);
+		while !amount.is_zero() {
+			// Gets the next available liquidity, if there are any.
+			if let Some((target_tick, target_info)) =
+				SD::target_tick(self.current_tick, &mut self.liquidity_map)
+			{
+				let sqrt_ratio_target = Self::sqrt_price_at_tick(*target_tick);
 
-			let amount_minus_fees = mul_div_floor(
-				amount,
-				U256::from(ONE_IN_HUNDREDTH_BIPS - self.fee_100th_bips),
-				U256::from(ONE_IN_HUNDREDTH_BIPS),
-			); // This cannot overflow as we bound fee_100th_bips to <= ONE_IN_HUNDREDTH_BIPS/2 (TODO)
-
-			let amount_required_to_reach_target = SD::input_amount_delta_ceil(
-				self.current_sqrt_price,
-				sqrt_ratio_target,
-				self.current_liquidity,
-			);
-
-			let sqrt_ratio_next = if amount_minus_fees >= amount_required_to_reach_target {
-				sqrt_ratio_target
-			} else {
-				debug_assert!(self.current_liquidity != 0);
-				SD::next_sqrt_price_from_input_amount(
-					self.current_sqrt_price,
-					self.current_liquidity,
-					amount_minus_fees,
-				)
-			};
-
-			// Cannot overflow as if the swap traversed all ticks (MIN_TICK to MAX_TICK
-			// (inclusive)), assuming the maximum possible liquidity, total_amount_out would still
-			// be below U256::MAX (See test `output_amounts_bounded`)
-			total_amount_out += SD::output_amount_delta_floor(
-				self.current_sqrt_price,
-				sqrt_ratio_next,
-				self.current_liquidity,
-			);
-
-			// next_sqrt_price_from_input_amount rounds so this maybe Ok(()) even though
-			// amount_minus_fees < amount_required_to_reach_target (TODO Prove)
-			if sqrt_ratio_next == sqrt_ratio_target {
-				// Will not overflow as fee_100th_bips <= ONE_IN_HUNDREDTH_BIPS / 2
-				let fees = mul_div_ceil(
-					amount_required_to_reach_target,
-					U256::from(self.fee_100th_bips),
+				let amount_minus_fees = mul_div_floor(
+					amount,
 					U256::from(ONE_IN_HUNDREDTH_BIPS - self.fee_100th_bips),
+					U256::from(ONE_IN_HUNDREDTH_BIPS),
+				); // This cannot overflow as we bound fee_100th_bips to <= ONE_IN_HUNDREDTH_BIPS/2
+
+				let amount_required_to_reach_target = SD::input_amount_delta_ceil(
+					self.current_sqrt_price,
+					sqrt_ratio_target,
+					self.current_liquidity,
 				);
 
-				// DIFF: This behaviour is different to Uniswap's, we saturate instead of
-				// overflowing/bricking the pool. This means we just stop giving LPs fees, but this
-				// is exceptionally unlikely to occur due to the how large the maximum
-				// global_fee_growth value is. We also do this to avoid needing to consider the
-				// case of reverting an extrinsic's mutations which is expensive in Substrate based
-				// chains.
-				if self.current_liquidity > 0 {
-					self.global_fee_growth[SD::INPUT_SIDE] = self.global_fee_growth[SD::INPUT_SIDE]
-						.saturating_add(mul_div_floor(
-							fees,
-							U256::from(1) << 128u32,
-							self.current_liquidity,
-						));
-					target_info.fee_growth_outside = PoolAssetMap::new_from_fn(|side| {
-						self.global_fee_growth[side] - target_info.fee_growth_outside[side]
-					});
-				}
+				let sqrt_ratio_next = if amount_minus_fees >= amount_required_to_reach_target {
+					sqrt_ratio_target
+				} else {
+					debug_assert!(self.current_liquidity != 0);
+					SD::next_sqrt_price_from_input_amount(
+						self.current_sqrt_price,
+						self.current_liquidity,
+						amount_minus_fees,
+					)
+				};
 
-				self.current_sqrt_price = sqrt_ratio_target;
-				self.current_tick = SD::current_tick_after_crossing_target_tick(*target_tick);
-
-				// TODO: Prove these don't underflow
-				amount -= amount_required_to_reach_target;
-				amount -= fees;
-
-				total_fee_paid += fees;
-
-				// Since the liquidity value is used for the fee calculation, updating needs to be
-				// done at the end.
-				// Note conversion to i128 and addition don't overflow (See test `max_liquidity`)
-				self.current_liquidity = i128::try_from(self.current_liquidity)
-					.unwrap()
-					.checked_add(SD::liquidity_delta_on_crossing_tick(target_info))
-					.unwrap()
-					.try_into()
-					.unwrap();
-			} else {
-				let amount_in = SD::input_amount_delta_ceil(
+				// Cannot overflow as if the swap traversed all ticks (MIN_TICK to MAX_TICK
+				// (inclusive)), assuming the maximum possible liquidity, total_amount_out would
+				// still be below U256::MAX (See test `output_amounts_bounded`)
+				total_amount_out += SD::output_amount_delta_floor(
 					self.current_sqrt_price,
 					sqrt_ratio_next,
 					self.current_liquidity,
 				);
-				// Will not underflow due to rounding in flavor of the pool of both sqrt_ratio_next
-				// and amount_in. (TODO: Prove)
-				let fees = amount - amount_in;
-				total_fee_paid += fees;
 
-				// DIFF: This behaviour is different to Uniswap's,
-				// we saturate instead of overflowing/bricking the pool. This means we just stop
-				// giving LPs fees, but this is exceptionally unlikely to occur due to the how large
-				// the maximum global_fee_growth value is. We also do this to avoid needing to
-				// consider the case of reverting an extrinsic's mutations which is expensive in
-				// Substrate based chains.
-				if self.current_liquidity > 0 {
-					self.global_fee_growth[SD::INPUT_SIDE] = self.global_fee_growth[SD::INPUT_SIDE]
-						.saturating_add(mul_div_floor(
-							fees,
-							U256::from(1) << 128u32,
-							self.current_liquidity,
-						));
-				}
-				// Recompute unless we're on a lower tick boundary (i.e. already
-				// transitioned ticks), and haven't moved (test_updates_exiting &
-				// test_updates_entering)
-				if self.current_sqrt_price != sqrt_ratio_next {
-					self.current_sqrt_price = sqrt_ratio_next;
-					self.current_tick = Self::tick_at_sqrt_price(self.current_sqrt_price);
-				}
+				// next_sqrt_price_from_input_amount rounds so this maybe Ok(()) even though
+				// amount_minus_fees < amount_required_to_reach_target (TODO Prove)
+				if sqrt_ratio_next == sqrt_ratio_target {
+					// Will not overflow as fee_100th_bips <= ONE_IN_HUNDREDTH_BIPS / 2
+					let fees = mul_div_ceil(
+						amount_required_to_reach_target,
+						U256::from(self.fee_100th_bips),
+						U256::from(ONE_IN_HUNDREDTH_BIPS - self.fee_100th_bips),
+					);
 
-				break
-			};
+					// DIFF: This behaviour is different to Uniswap's, we saturate instead of
+					// overflowing/bricking the pool. This means we just stop giving LPs fees, but
+					// this is exceptionally unlikely to occur due to the how large the maximum
+					// global_fee_growth value is. We also do this to avoid needing to consider the
+					// case of reverting an extrinsic's mutations which is expensive in Substrate
+					// based chains.
+					if self.current_liquidity > 0 {
+						self.global_fee_growth[SD::INPUT_SIDE] =
+							self.global_fee_growth[SD::INPUT_SIDE].saturating_add(mul_div_floor(
+								fees,
+								U256::from(1) << 128u32,
+								self.current_liquidity,
+							));
+						target_info.fee_growth_outside = PoolAssetMap::new_from_fn(|side| {
+							self.global_fee_growth[side] - target_info.fee_growth_outside[side]
+						});
+					}
+
+					self.current_sqrt_price = sqrt_ratio_target;
+					self.current_tick = SD::current_tick_after_crossing_target_tick(*target_tick);
+
+					// TODO: Prove these don't underflow
+					amount = amount.saturating_sub(amount_required_to_reach_target);
+					amount = amount.saturating_sub(fees);
+
+					total_fee_paid += fees;
+
+					// Since the liquidity value is used for the fee calculation, updating needs to
+					// be done at the end.
+					// Note conversion to i128 and addition don't overflow (See test
+					// `max_liquidity`)
+					self.current_liquidity = i128::try_from(self.current_liquidity)
+						.unwrap()
+						.checked_add(SD::liquidity_delta_on_crossing_tick(target_info))
+						.unwrap()
+						.try_into()
+						.unwrap();
+				} else {
+					let amount_in = SD::input_amount_delta_ceil(
+						self.current_sqrt_price,
+						sqrt_ratio_next,
+						self.current_liquidity,
+					);
+					// Will not underflow due to rounding in flavor of the pool of both
+					// sqrt_ratio_next and amount_in. (TODO: Prove)
+					let fees = amount.saturating_sub(amount_in);
+					total_fee_paid += fees;
+
+					// DIFF: This behaviour is different to Uniswap's,
+					// we saturate instead of overflowing/bricking the pool. This means we just stop
+					// giving LPs fees, but this is exceptionally unlikely to occur due to the how
+					// large the maximum global_fee_growth value is. We also do this to avoid
+					// needing to consider the case of reverting an extrinsic's mutations which is
+					// expensive in Substrate based chains.
+					if self.current_liquidity > 0 {
+						self.global_fee_growth[SD::INPUT_SIDE] =
+							self.global_fee_growth[SD::INPUT_SIDE].saturating_add(mul_div_floor(
+								fees,
+								U256::from(1) << 128u32,
+								self.current_liquidity,
+							));
+					}
+					// Recompute unless we're on a lower tick boundary (i.e. already
+					// transitioned ticks), and haven't moved (test_updates_exiting &
+					// test_updates_entering)
+					if self.current_sqrt_price != sqrt_ratio_next {
+						self.current_sqrt_price = sqrt_ratio_next;
+						self.current_tick = Self::tick_at_sqrt_price(self.current_sqrt_price);
+					}
+
+					break
+				};
+			} else {
+				// There are not enough liquidity left in the pool to complete the swap.
+				return Err(SwapError::InsufficientLiquidity)
+			}
 		}
 
-		(total_amount_out, total_fee_paid)
+		Ok((total_amount_out, total_fee_paid))
 	}
 
 	fn liquidity_to_amounts<const ROUND_UP: bool>(
@@ -2086,8 +2108,8 @@ mod test {
 
 		let swap_input: u128 = expandto18decimals(1).as_u128();
 
-		pool.swap::<Asset0ToAsset1>((swap_input / 10).into());
-		pool.swap::<Asset1ToAsset0>((swap_input / 100).into());
+		assert!(pool.swap::<Asset0ToAsset1>((swap_input / 10).into()).is_ok());
+		assert!(pool.swap::<Asset1ToAsset0>((swap_input / 100).into()).is_ok());
 
 		match pool.burn(
 			id.clone(),
@@ -2221,8 +2243,8 @@ mod test {
 		)
 		.unwrap();
 
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
-		pool.swap::<Asset1ToAsset0>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
+		assert!(pool.swap::<Asset1ToAsset0>(expandto18decimals(1)).is_ok());
 
 		// Should be able to do only 1 burn (1000000000000000000 / 987654321000000000)
 
@@ -2258,8 +2280,8 @@ mod test {
 		)
 		.unwrap();
 
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
-		pool.swap::<Asset1ToAsset0>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
+		assert!(pool.swap::<Asset1ToAsset0>(expandto18decimals(1)).is_ok());
 
 		// Add a poke to update the fee growth and check it's value
 		let (returned_capital, fees_owed) = pool
@@ -2325,7 +2347,7 @@ mod test {
 		)
 		.unwrap();
 
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
 
 		pool.burn(
 			id,
@@ -2359,7 +2381,7 @@ mod test {
 			|_| Ok::<(), ()>(()),
 		)
 		.unwrap();
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
 
 		pool.burn(
 			id,
@@ -2393,7 +2415,7 @@ mod test {
 			|_| Ok::<(), ()>(()),
 		)
 		.unwrap();
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
 
 		pool.burn(
 			id,
@@ -2518,7 +2540,7 @@ mod test {
 		.unwrap();
 
 		let liquiditybefore = pool.current_liquidity;
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
 
 		assert!(pool.current_liquidity >= liquiditybefore);
 
@@ -2596,7 +2618,7 @@ mod test {
 		assert_eq!(pool.current_liquidity, expandto18decimals(3).as_u128());
 
 		// swap toward the left (just enough for the tick transition function to trigger)
-		pool.swap::<Asset0ToAsset1>((1).into());
+		assert!(pool.swap::<Asset0ToAsset1>((1).into()).is_ok());
 
 		assert_eq!(pool.current_tick, -1);
 		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
@@ -2614,7 +2636,7 @@ mod test {
 		assert_eq!(pool.current_liquidity, expandto18decimals(2).as_u128());
 
 		// swap toward the left (just enough for the tick transition function to trigger)
-		pool.swap::<Asset0ToAsset1>((1).into());
+		assert!(pool.swap::<Asset0ToAsset1>((1).into()).is_ok());
 
 		assert_eq!(pool.current_tick, -1);
 		assert_eq!(pool.current_liquidity, expandto18decimals(3).as_u128());
@@ -2640,7 +2662,9 @@ mod test {
 		assert_eq!(minted_capital[!PoolSide::Asset0], U256::from_dec_str("0").unwrap());
 
 		// somebody takes the limit order
-		pool.swap::<Asset1ToAsset0>(U256::from_dec_str("2000000000000000000").unwrap());
+		assert!(pool
+			.swap::<Asset1ToAsset0>(U256::from_dec_str("2000000000000000000").unwrap())
+			.is_ok());
 
 		let (burned, fees_owed) =
 			pool.burn(id.clone(), 0, 120, expandto18decimals(1).as_u128()).unwrap();
@@ -2677,7 +2701,9 @@ mod test {
 		assert_eq!(minted_capital[!PoolSide::Asset0], U256::from_dec_str("0").unwrap());
 
 		// somebody takes the limit order
-		pool.swap::<Asset1ToAsset0>(U256::from_dec_str("2000000000000000000").unwrap());
+		assert!(pool
+			.swap::<Asset1ToAsset0>(U256::from_dec_str("2000000000000000000").unwrap())
+			.is_ok());
 
 		let (burned, fees_owed) = pool.burn(id.clone(), 0, 120, 0).unwrap();
 		assert_eq!(burned[PoolSide::Asset0], U256::from_dec_str("0").unwrap());
@@ -2716,7 +2742,9 @@ mod test {
 		assert_eq!(minted_capital[PoolSide::Asset0], U256::from_dec_str("0").unwrap());
 
 		// somebody takes the limit order
-		pool.swap::<Asset0ToAsset1>(U256::from_dec_str("2000000000000000000").unwrap());
+		assert!(pool
+			.swap::<Asset0ToAsset1>(U256::from_dec_str("2000000000000000000").unwrap())
+			.is_ok());
 
 		let (burned, fees_owed) =
 			pool.burn(id.clone(), -120, 0, expandto18decimals(1).as_u128()).unwrap();
@@ -2753,7 +2781,9 @@ mod test {
 		assert_eq!(minted_capital[PoolSide::Asset0], U256::from_dec_str("0").unwrap());
 
 		// somebody takes the limit order
-		pool.swap::<Asset0ToAsset1>(U256::from_dec_str("2000000000000000000").unwrap());
+		assert!(pool
+			.swap::<Asset0ToAsset1>(U256::from_dec_str("2000000000000000000").unwrap())
+			.is_ok());
 
 		let (burned, fees_owed) = pool.burn(id.clone(), -120, 0, 0).unwrap();
 		assert_eq!(burned[!PoolSide::Asset0], U256::from_dec_str("0").unwrap());
@@ -2810,7 +2840,7 @@ mod test {
 		)
 		.unwrap();
 
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
 
 		// poke positions
 		let (burned, fees_owed) =
@@ -2949,7 +2979,7 @@ mod test {
 	fn test_base() {
 		let (mut pool, _, id) = lowpool_initialized_setfees();
 
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
 
 		assert_eq!(pool.global_fee_growth[PoolSide::Asset0], U256::MAX);
 		assert_eq!(pool.global_fee_growth[!PoolSide::Asset0], U256::MAX);
@@ -2965,7 +2995,7 @@ mod test {
 	fn test_pair() {
 		let (mut pool, _, id) = lowpool_initialized_setfees();
 
-		pool.swap::<Asset1ToAsset0>(expandto18decimals(1));
+		assert!(pool.swap::<Asset1ToAsset0>(expandto18decimals(1)).is_ok());
 
 		assert_eq!(pool.global_fee_growth[PoolSide::Asset0], U256::MAX);
 		assert_eq!(pool.global_fee_growth[!PoolSide::Asset0], U256::MAX);
@@ -3006,7 +3036,7 @@ mod test {
 		let (mut pool, _, id) = mediumpool_initialized_nomint();
 		pool.mint(id.clone(), 120000, 121200, 250000000000000000, |_| Ok::<(), ()>(()))
 			.unwrap();
-		pool.swap::<Asset1ToAsset0>(expandto18decimals(1));
+		assert!(pool.swap::<Asset1ToAsset0>(expandto18decimals(1)).is_ok());
 		let (returned_capital, fees_owed) =
 			pool.burn(id, 120000, 121200, 250000000000000000).unwrap();
 
@@ -3030,7 +3060,7 @@ mod test {
 		let (mut pool, _, id) = mediumpool_initialized_nomint();
 		pool.mint(id.clone(), -121200, -120000, 250000000000000000, |_| Ok::<(), ()>(()))
 			.unwrap();
-		pool.swap::<Asset0ToAsset1>(expandto18decimals(1));
+		assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
 		let (returned_capital, fees_owed) =
 			pool.burn(id, -121200, -120000, 250000000000000000).unwrap();
 
@@ -3071,7 +3101,8 @@ mod test {
 
 		// check the math works out to moving the price down 1, sending no amount out, and having
 		// some amount remaining
-		let (amount_swapped, _) = pool.swap::<Asset0ToAsset1>(U256::from_dec_str("3").unwrap());
+		let (amount_swapped, _) =
+			pool.swap::<Asset0ToAsset1>(U256::from_dec_str("3").unwrap()).unwrap();
 		assert_eq!(amount_swapped, U256::from_dec_str("0").unwrap());
 
 		assert_eq!(pool.current_tick, -24082);
@@ -3331,7 +3362,7 @@ mod test {
 	// sqrt_price_at_tick(tick_at_sqrt_price(sqrt_priceTarget)) != sqrt_priceTarget, due to the
 	// prices being between ticks - and therefore converting them to the closes tick.
 	#[test]
-	fn test_amount_capped_asset_1_to_asset_0_fail() {
+	fn test_returns_error_asset_1_to_asset_0_fail() {
 		let mut pool = PoolState::new(600, encodedprice1_1()).unwrap();
 		let id: AccountId = AccountId::from([0xcf; 32]);
 
@@ -3353,7 +3384,10 @@ mod test {
 
 		let _minted_capital = minted_capital.unwrap();
 		// Swap to the right towards price target
-		pool.swap::<Asset1ToAsset0>(expandto18decimals(1));
+		assert_eq!(
+			pool.swap::<Asset1ToAsset0>(expandto18decimals(1)),
+			Err(SwapError::InsufficientLiquidity)
+		);
 	}
 
 	// Fake computeswapstep => Stripped down version of the real swap
@@ -3520,7 +3554,9 @@ mod test {
 		assert_eq!(minted_capital[!PoolSide::Asset0], U256::from_dec_str("0").unwrap());
 
 		// somebody takes the limit order
-		pool.swap::<Asset1ToAsset0>(U256::from_dec_str("2000000000000000000").unwrap());
+		assert!(pool
+			.swap::<Asset1ToAsset0>(U256::from_dec_str("2000000000000000000").unwrap())
+			.is_ok());
 
 		let (_, fees_owed) = pool.mint(id.clone(), 0, 120, 1, |_| Ok::<(), ()>(())).unwrap();
 
@@ -3560,7 +3596,9 @@ mod test {
 		assert_eq!(minted_capital[PoolSide::Asset0], U256::from_dec_str("0").unwrap());
 
 		// somebody takes the limit order
-		pool.swap::<Asset0ToAsset1>(U256::from_dec_str("2000000000000000000").unwrap());
+		assert!(pool
+			.swap::<Asset0ToAsset1>(U256::from_dec_str("2000000000000000000").unwrap())
+			.is_ok());
 
 		let (_, fees_owed) = pool.mint(id.clone(), -120, 0, 1, |_| Ok::<(), ()>(())).unwrap();
 
