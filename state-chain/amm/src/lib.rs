@@ -145,7 +145,7 @@ struct TickInfoLimitOrder {
 	oneMinusPercSwap: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PoolState {
 	fee_pips: u32,
 	current_sqrt_price: SqrtPriceQ64F96,
@@ -3295,21 +3295,9 @@ mod test {
 			.unwrap();
 
 			let minted_capital = minted_capital.unwrap();
-			println!(
-				"upper tick: {:?}",
-				PoolState::tick_at_sqrt_price(
-					U256::from_dec_str("79623317895830914510487008059").unwrap(),
-				)
-			);
-			println!(
-				"Reversed target price: {:?}",
-				PoolState::sqrt_price_at_tick(PoolState::tick_at_sqrt_price(
-					U256::from_dec_str("79623317895830914510487008059").unwrap(),
-				))
-			);
+
 			// Swap to the right towards price target
 			let amount_swapped = pool.swap::<PairToBase>((expandto18decimals(1)).into());
-			println!("Amount swapped: {:?}", amount_swapped);
 		}
 
 		// Fake computeswapstep => Stripped down version of the real swap
@@ -5601,6 +5589,59 @@ mod test {
 			assert_eq!(pool.current_tick, 150000)
 		}
 
-		// Continue test_chainflipPool.py l.2190
+		///////////////////////////////////////////////////////////
+		///             Extra limit order tests                ////
+		///////////////////////////////////////////////////////////
+
+		// This function will probably be implemented inside the AMM - most likely in a better way,
+		// as squaring the sqrt price is not optimal.
+		fn aux_get_price_at_tick(tick: Tick) -> U256 {
+			PoolState::sqrt_price_at_tick(tick).pow(U256::from_dec_str("2").unwrap())
+		}
+		// Continue test_chainflipPool.py l.2414
+
+		// Initial tick == -23028
+		// Initially no LO
+
+		// Skipped collect tests
+		#[test]
+		fn test_swap0for1_partial_swap() {
+			let (mut pool, _, id) = mediumpool_initialized_nomint();
+
+			let ini_liquidity = pool.current_liquidity;
+			let ini_tick = pool.current_tick;
+			let ini_price = pool.current_sqrt_price;
+
+			let tick_limit_order = TICKSPACING_UNISWAP_MEDIUM * 10;
+			let liquidity_amount = expandto18decimals(1).as_u128();
+
+			// Limit order should partially been swapped
+			let price_lo = aux_get_price_at_tick(tick_limit_order);
+			// Pool has been initialized at around 1 : 10
+			let price_ini = aux_get_price_at_tick(ini_tick);
+
+			// Check that lo price is > than initial price
+			assert!(price_lo > price_ini);
+
+			pool.mint_limit_order(id, tick_limit_order, liquidity_amount, Ticker::Pair, |_| true)
+				.unwrap();
+
+			let amount_to_swap = expandto18decimals(1) / 10;
+
+			pool.swap::<BaseToPair>((amount_to_swap).into());
+
+			// Check swap outcomes
+			// Tick, sqrtPrice and liquidity haven't changed (range order pool)
+			assert_eq!(pool.current_liquidity, ini_liquidity);
+			assert_eq!(pool.current_tick, ini_tick);
+			assert_eq!(pool.current_sqrt_price, ini_price);
+
+			check_limitorder_swap_one_tick_exactin();
+		}
+
+		////// LO Testing utilities //////
+
+		// Check partially swapped single limit order
+		fn check_limitorder_swap_one_tick_exactin() {}
 	}
 }
