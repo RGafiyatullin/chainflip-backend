@@ -576,7 +576,8 @@ impl PoolState {
 		_asset: PoolSide,
 		_try_debit: impl FnOnce(PoolAssetMap<AmountU256>) -> Result<(), E>,
 	) -> Result<(PoolAssetMap<AmountU256>, u128), MintError<E>> {
-		if (tick < MIN_TICK) || (tick > MAX_TICK) {
+		//if (tick < MIN_TICK) || (tick > MAX_TICK) {
+		if !(MIN_TICK..=MAX_TICK).contains(&tick) {
 			return Err(MintError::InvalidTickRange)
 		}
 		Ok(Default::default())
