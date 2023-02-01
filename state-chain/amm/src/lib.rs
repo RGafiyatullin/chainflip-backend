@@ -568,11 +568,11 @@ impl PoolState {
 	// writing the tests.
 	pub fn mint_limit_order<E>(
 		&mut self,
-		lp: AccountId,
+		_lp: AccountId,
 		tick: Tick,
-		minted_liquidity: Liquidity,
-		asset: PoolSide,
-		try_debit: impl FnOnce(PoolAssetMap<AmountU256>) -> Result<(), E>,
+		_minted_liquidity: Liquidity,
+		_asset: PoolSide,
+		_try_debit: impl FnOnce(PoolAssetMap<AmountU256>) -> Result<(), E>,
 	) -> Result<(PoolAssetMap<AmountU256>, u128), MintError<E>> {
 		// To be implemented
 		if MIN_TICK_LO <= tick && tick <= MAX_TICK_LO {
@@ -583,10 +583,10 @@ impl PoolState {
 	}
 	pub fn burn_limit_order(
 		&mut self,
-		lp: AccountId,
-		tick: Tick,
-		burnt_liquidity: Liquidity,
-		asset: PoolSide,
+		_lp: AccountId,
+		_tick: Tick,
+		_burnt_liquidity: Liquidity,
+		_asset: PoolSide,
 	) -> Result<(PoolAssetMap<AmountU256>, u128), PositionError> {
 		// To be implemented
 		Ok(Default::default())

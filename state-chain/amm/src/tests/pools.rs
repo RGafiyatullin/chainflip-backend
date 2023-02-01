@@ -2575,6 +2575,7 @@ fn checklotickisclear(pool: &PoolState, asset: PoolSide, tick: &Tick) {
 	}
 }
 
+#[allow(dead_code)]
 fn checkloticknotclear(pool: &PoolState, asset: PoolSide, tick: &Tick) {
 	match get_tickinfo_limit_orders(pool, asset, tick) {
 		None => panic!("Expected Key"),
@@ -2770,15 +2771,6 @@ fn clearstick_iflastposition_lo() {
 	pool.burn_limit_order(id.clone(), ticklow, 1, PoolSide::Asset0).unwrap();
 
 	// Assert position have been burnt
-	match get_tickinfo_limit_orders(&pool, PoolSide::Asset0, &ticklow) {
-		None => {},
-		_ => panic!("Expected NonExistent Key"),
-	}
-	match get_tickinfo_limit_orders(&pool, PoolSide::Asset1, &tickhigh) {
-		None => {},
-		_ => panic!("Expected NonExistent Key"),
-	}
-
 	checklotickisclear(&pool, PoolSide::Asset0, &ticklow);
 	checklotickisclear(&pool, PoolSide::Asset1, &tickhigh);
 }
@@ -3689,7 +3681,7 @@ fn calculate_amount(
 // Initial tick == -23028
 // Initially no LO
 fn mint_pool_no_lo() -> (PoolState, PoolAssetMap<AmountU256>, AccountId) {
-	let mut pool = PoolState::new(300, encodedprice1_10()).unwrap();
+	let pool = PoolState::new(300, encodedprice1_10()).unwrap();
 	let id: AccountId = AccountId::from([0xcf; 32]);
 	let minted_amounts: PoolAssetMap<AmountU256> = Default::default();
 
@@ -3745,16 +3737,11 @@ fn partial_swap_lo(
 
 	let amount_to_swap = expandto18decimals(1) / 10;
 
-	let mut total_amount_out = Default::default();
-	let mut total_fee_paid = Default::default();
-	if asset_in == PoolSide::Asset0 {
-		(total_amount_out, total_fee_paid) =
-			pool.swap::<Asset0ToAsset1>((amount_to_swap).into()).unwrap();
+	let (total_amount_out, total_fee_paid) = if asset_in == PoolSide::Asset0 {
+		pool.swap::<Asset0ToAsset1>(amount_to_swap).unwrap()
 	} else {
-		(total_amount_out, total_fee_paid) =
-			pool.swap::<Asset1ToAsset0>((amount_to_swap).into()).unwrap();
-	}
-
+		pool.swap::<Asset1ToAsset0>(amount_to_swap).unwrap()
+	};
 	// Check swap outcomes
 	// Tick, sqrtPrice and liquidity haven't changed (range order pool)
 	assert_eq!(pool.current_liquidity, ini_liquidity);
@@ -3820,15 +3807,11 @@ fn full_swap_lo(
 	.unwrap();
 
 	let amount_to_swap = expandto18decimals(1) / 15;
-	let mut total_amount_out = Default::default();
-	let mut total_fee_paid = Default::default();
-	if asset_in == PoolSide::Asset0 {
-		(total_amount_out, total_fee_paid) =
-			pool.swap::<Asset0ToAsset1>((amount_to_swap).into()).unwrap();
+	let (total_amount_out, total_fee_paid) = if asset_in == PoolSide::Asset0 {
+		pool.swap::<Asset0ToAsset1>(amount_to_swap).unwrap()
 	} else {
-		(total_amount_out, total_fee_paid) =
-			pool.swap::<Asset1ToAsset0>((amount_to_swap).into()).unwrap();
-	}
+		pool.swap::<Asset1ToAsset0>(amount_to_swap).unwrap()
+	};
 
 	// This should have partially swapped the limit order placed
 	let price_limit_order_0 = aux_get_price_at_tick(tick_limit_order_0);
@@ -4287,8 +4270,7 @@ fn test_burn_partiallyswapped_multiplesteps_asset1() {
 
 fn burn_partiallyswapped_multiplesteps(asset_in: PoolSide) {
 	let (mut pool, _, id) = mint_pool_no_lo();
-	let (tick_minted, amount_swap_in, amount_swap_out, total_fee_paid, liquidity_amount) =
-		partial_swap_lo(&mut pool, id.clone(), asset_in);
+	let (tick_minted, _, _, _, _) = partial_swap_lo(&mut pool, id.clone(), asset_in);
 
 	let mut pool_copy = pool.clone();
 
@@ -4308,7 +4290,7 @@ fn burn_partiallyswapped_multiplesteps(asset_in: PoolSide) {
 		let mut returned_capital_1_accum = returned_capital_0.clone(); // just to initialize
 		let mut fees_owed_1_accum: u128 = Default::default();
 		// Loop for value of i
-		for j in 0..i {
+		for _j in 0..i {
 			// Fees owed will be returned in the first iteration
 			let (returned_capital_1, fees_owed_1) = pool_copy
 				.burn_limit_order(
@@ -4352,8 +4334,7 @@ fn test_mint_on_swapped_position_asset1() {
 
 fn mint_on_swapped_position(asset_in: PoolSide) {
 	let (mut pool, _, id) = mint_pool_no_lo();
-	let (tick_minted, amount_swap_in, amount_swap_out, total_fee_paid, liquidity_amount) =
-		partial_swap_lo(&mut pool, id.clone(), asset_in);
+	let (tick_minted, _, _, _, liquidity_amount) = partial_swap_lo(&mut pool, id.clone(), asset_in);
 
 	let mut pool_copy = pool.clone();
 
