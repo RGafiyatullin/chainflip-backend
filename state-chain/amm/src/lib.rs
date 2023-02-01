@@ -338,7 +338,7 @@ pub enum SwapError {
 #[derive(Debug)]
 pub enum CollectError {}
 
-#[derive(Debug, TypeInfo, PartialEq, Eq, Encode, Decode)]
+#[derive(Clone, Debug, TypeInfo, PartialEq, Eq, Encode, Decode)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct PoolState {
 	enabled: bool,
@@ -2271,7 +2271,7 @@ mod test {
 			987654321000000000,
 		) {
 			Err(PositionError::PositionLacksLiquidity) => {},
-			_ => panic!("Expected InsufficientLiquidity"),
+			_ => panic!("Expected PositionLacksLiquidity"),
 		}
 	}
 
@@ -3021,8 +3021,6 @@ mod test {
 
 	// Medium Fee, tickSpacing = 12, 1:1 price
 	fn mediumpool_initialized_nomint() -> (PoolState, PoolAssetMap<AmountU256>, AccountId) {
-		// fee_pips shall be one order of magnitude smaller than in the Uniswap pool (because
-		// ONE_IN_PIPS is /10)
 		let pool = PoolState::new(3000, encodedprice1_1()).unwrap();
 		let id: AccountId = AccountId::from([0xcf; 32]);
 		let minted_amounts: PoolAssetMap<AmountU256> = Default::default();
@@ -4692,7 +4690,7 @@ mod test {
 				PoolSide::Asset0,
 			) {
 				Err(PositionError::PositionLacksLiquidity) => {},
-				_ => panic!("Expected InsufficientLiquidity"),
+				_ => panic!("Expected PositionLacksLiquidity"),
 			}
 
 			pool.burn_limit_order(
@@ -4710,7 +4708,7 @@ mod test {
 				PoolSide::Asset1,
 			) {
 				Err(PositionError::PositionLacksLiquidity) => {},
-				_ => panic!("Expected InsufficientLiquidity"),
+				_ => panic!("Expected PositionLacksLiquidity"),
 			}
 		}
 
@@ -6292,6 +6290,253 @@ mod test {
 			);
 		}
 
-		// Continue test_chainflipPool.py l. 3147
+		#[test]
+		fn test_limitorder_currenttick() {
+			let (mut pool, _, id) = mediumpool_initialized_nomint();
+
+			let ini_tick = pool.current_tick;
+			// Check no limit order exists
+			assert!(pool.liquidity_map_base_lo.is_empty());
+			assert!(pool.liquidity_map_pair_lo.is_empty());
+
+			// Loop through the two assets, minting a position and check the tick info
+			for asset in [PoolSide::Asset0, PoolSide::Asset1].iter() {
+				pool.mint_limit_order(
+					id.clone(),
+					ini_tick,
+					expandto18decimals(1).as_u128(),
+					*asset,
+					|_| Ok::<(), ()>(()),
+				)
+				.unwrap();
+			}
+			let tick_info_0 =
+				get_tickinfo_limit_orders(&pool, PoolSide::Asset0, &ini_tick).unwrap();
+			let tick_info_1 =
+				get_tickinfo_limit_orders(&pool, PoolSide::Asset1, &ini_tick).unwrap();
+
+			assert_eq!(tick_info_0.liquidity_gross, expandto18decimals(1).as_u128());
+			assert_eq!(tick_info_0.one_minus_percswap, U256::from(1));
+			assert_eq!(tick_info_1.liquidity_gross, expandto18decimals(1).as_u128());
+			assert_eq!(tick_info_1.one_minus_percswap, U256::from(1));
+
+			// Swap asset0 for asset1
+			assert!(pool.swap::<Asset1ToAsset0>((expandto18decimals(1)).into()).is_ok());
+
+			assert_eq!(pool.current_tick, ini_tick);
+
+			let tick_info_0 =
+				get_tickinfo_limit_orders(&pool, PoolSide::Asset0, &ini_tick).unwrap();
+			let tick_info_1 =
+				get_tickinfo_limit_orders(&pool, PoolSide::Asset1, &ini_tick).unwrap();
+
+			// Tick 1 not altered
+			assert_eq!(tick_info_1.liquidity_gross, expandto18decimals(1).as_u128());
+			assert_eq!(tick_info_1.one_minus_percswap, U256::from(1));
+
+			// In one direction the limit order is taken
+			assert_eq!(tick_info_0.liquidity_gross, expandto18decimals(1).as_u128());
+			// Should be almost zero (not zero bc there are fees). Just checking that it has been
+			// used.
+			assert!(tick_info_0.one_minus_percswap < U256::from(1));
+
+			// Swap asset1 for asset0
+			assert!(pool.swap::<Asset1ToAsset0>((expandto18decimals(1)).into()).is_ok());
+
+			let tick_info_0 =
+				get_tickinfo_limit_orders(&pool, PoolSide::Asset0, &ini_tick).unwrap();
+			let tick_info_1 =
+				get_tickinfo_limit_orders(&pool, PoolSide::Asset1, &ini_tick).unwrap();
+
+			// In the other direction it is taken but not until the range orders don't change the
+			// pool price
+			assert_ne!(pool.current_tick, ini_tick);
+			// Not ending at the border (MIN_TICK) but rather going to the next best LO tick - 1
+			assert_eq!(pool.current_tick, ini_tick - 1);
+
+			// Tick 0 not altered
+			assert_eq!(tick_info_0.liquidity_gross, expandto18decimals(1).as_u128());
+			assert!(tick_info_0.one_minus_percswap < U256::from(1));
+
+			// Tick1 used
+			assert_eq!(tick_info_1.liquidity_gross, expandto18decimals(1).as_u128());
+			// Should be almost zero (not zero bc there are fees). Just checking that it has been
+			// used.
+			assert!(tick_info_1.one_minus_percswap < U256::from(1));
+		}
+
+		#[test]
+		fn test_no_rangeorder_limitorder_worseprice_asset0() {
+			no_rangeorder_limitorder_worseprice(PoolSide::Asset0);
+		}
+		#[test]
+		fn test_no_rangeorder_limitorder_worseprice_asset1() {
+			no_rangeorder_limitorder_worseprice(PoolSide::Asset1);
+		}
+
+		fn no_rangeorder_limitorder_worseprice(asset_in: PoolSide) {
+			let (mut pool, _, id) = mediumpool_initialized_nomint();
+
+			// Tick == 0
+			let ini_tick = pool.current_tick;
+
+			let tick_limit_order = if asset_in == PoolSide::Asset0 {
+				ini_tick - TICKSPACING_UNISWAP_MEDIUM * 10
+			} else {
+				ini_tick + TICKSPACING_UNISWAP_MEDIUM * 10
+			};
+
+			pool.mint_limit_order(
+				id.clone(),
+				tick_limit_order,
+				expandto18decimals(1).as_u128(),
+				!asset_in,
+				|_| Ok::<(), ()>(()),
+			)
+			.unwrap();
+
+			assert_ne!(pool.current_tick, ini_tick);
+
+			// Order should be taken but not until the range orders don't change the pool price.
+			// Not ending at the border but rather going to the next best LO tick.
+			if asset_in == PoolSide::Asset1 {
+				assert_eq!(pool.current_tick, tick_limit_order);
+			} else {
+				assert_eq!(pool.current_tick, tick_limit_order - 1);
+			}
+			assert!(
+				get_tickinfo_limit_orders(&pool, !asset_in, &ini_tick)
+					.unwrap()
+					.one_minus_percswap < U256::from(1)
+			);
+			assert_eq!(
+				get_tickinfo_limit_orders(&pool, asset_in, &ini_tick)
+					.unwrap()
+					.one_minus_percswap,
+				U256::from(1)
+			);
+		}
+
+		#[test]
+		fn test_burn_partiallyswapped_multiplesteps_asset0() {
+			burn_partiallyswapped_multiplesteps(PoolSide::Asset0);
+		}
+
+		#[test]
+		fn test_burn_partiallyswapped_multiplesteps_asset1() {
+			burn_partiallyswapped_multiplesteps(PoolSide::Asset1);
+		}
+
+		fn burn_partiallyswapped_multiplesteps(asset_in: PoolSide) {
+			let (mut pool, _, id) = mint_pool_no_lo();
+			let (tick_minted, amount_swap_in, amount_swap_out, total_fee_paid, liquidity_amount) =
+				partial_swap_lo(&mut pool, id.clone(), asset_in);
+
+			let mut pool_copy = pool.clone();
+
+			let (returned_capital_0, fees_owed_0) = pool_copy
+				.burn_limit_order(
+					id.clone(),
+					tick_minted,
+					expandto18decimals(1).as_u128(),
+					!asset_in,
+				)
+				.unwrap();
+
+			match pool_copy.burn_limit_order(id.clone(), tick_minted, 1, !asset_in) {
+				Ok(_) => panic!("Should not be able to burn more than minted"),
+				Err(PositionError::NonExistent) => {},
+				Err(_) => panic!("Wrong error"),
+			}
+
+			// Arbitrary numbers (2,4)
+			for i in 2..=4 {
+				let mut pool_copy = pool.clone();
+				let mut returned_capital_1_accum = returned_capital_0.clone(); // just to initialize
+				let mut fees_owed_1_accum: u128 = Default::default();
+				// Loop for value of i
+				for j in 0..i {
+					// Fees owed will be returned in the first iteration
+					let (returned_capital_1, fees_owed_1) = pool_copy
+						.burn_limit_order(
+							id.clone(),
+							tick_minted,
+							expandto18decimals(1).as_u128() / i,
+							!asset_in,
+						)
+						.unwrap();
+					returned_capital_1_accum[PoolSide::Asset0] +=
+						returned_capital_1[PoolSide::Asset0];
+					returned_capital_1_accum[PoolSide::Asset1] +=
+						returned_capital_1[PoolSide::Asset1];
+					fees_owed_1_accum += fees_owed_1;
+				}
+				match pool_copy.burn_limit_order(id.clone(), tick_minted, 1, !asset_in) {
+					Ok(_) => panic!("Should not be able to burn more than minted"),
+					Err(PositionError::NonExistent) => {},
+					Err(_) => panic!("Wrong error"),
+				}
+				// There can be a small rounding error in favour of the pool when burning in
+				// multiple steps
+				assert_eq!(
+					returned_capital_0[PoolSide::Asset0],
+					returned_capital_1_accum[PoolSide::Asset0] + 1
+				);
+				assert_eq!(
+					returned_capital_0[PoolSide::Asset1],
+					returned_capital_1_accum[PoolSide::Asset1] + 1
+				);
+				assert_eq!(fees_owed_0, fees_owed_1_accum);
+			}
+		}
+
+		#[test]
+		fn test_mint_on_swapped_position_asset0() {
+			mint_on_swapped_position(PoolSide::Asset0);
+		}
+		#[test]
+		fn test_mint_on_swapped_position_asset1() {
+			mint_on_swapped_position(PoolSide::Asset1);
+		}
+
+		fn mint_on_swapped_position(asset_in: PoolSide) {
+			let (mut pool, _, id) = mint_pool_no_lo();
+			let (tick_minted, amount_swap_in, amount_swap_out, total_fee_paid, liquidity_amount) =
+				partial_swap_lo(&mut pool, id.clone(), asset_in);
+
+			let mut pool_copy = pool.clone();
+
+			// Amount of swapped tokens that should get burnt regardless of newly
+			// minted orders on top
+			let (returned_capital_0, fees_owed_0) = pool_copy
+				.burn_limit_order(id.clone(), tick_minted, liquidity_amount, !asset_in)
+				.unwrap();
+
+			pool.mint_limit_order(
+				id.clone(),
+				tick_minted,
+				liquidity_amount * 1000,
+				!asset_in,
+				|_| Ok::<(), ()>(()),
+			)
+			.unwrap();
+
+			assert_eq!(
+				get_limit_order(&pool, id.clone(), tick_minted, !asset_in).unwrap().liquidity,
+				liquidity_amount * (1000 + 1)
+			);
+			// Burn to check if now the entire position gets swapped by the percentatge
+			// swapped in the first swap
+			let (returned_capital_1, fees_owed_1) = pool
+				.burn_limit_order(id.clone(), tick_minted, liquidity_amount * (1001), !asset_in)
+				.unwrap();
+
+			assert_eq!(returned_capital_0[asset_in], returned_capital_1[asset_in]);
+			assert_eq!(
+				returned_capital_0[!asset_in],
+				returned_capital_1[!asset_in] - liquidity_amount * 1000
+			);
+			assert_eq!(fees_owed_0, fees_owed_1);
+		}
 	}
 }
