@@ -84,7 +84,8 @@ struct LimitOrders {
 	liquidity: Liquidity,
 	// Only one side needed
 	last_fee_growth_inside: FeeGrowthQ128F128,
-	// f64 has issues so just setting a uU256 for now. We will need a very precise type
+	// f64 has issues with serialization so just setting a U256 for now. We will need a very
+	// precise type
 	last_one_minus_percswap: U256,
 }
 
@@ -162,7 +163,8 @@ struct TickInfoLimitOrder {
 	liquidity_gross: u128,
 	// Only need one side of the fee_growth
 	fee_growth_inside: FeeGrowthQ128F128,
-	// f64 has issues so just setting a uU256 for now. We will need a very precise type
+	// f64 has issues with serialization so just setting a U256 for now. We will need a very
+	// precise type
 	one_minus_percswap: U256,
 }
 
@@ -574,12 +576,10 @@ impl PoolState {
 		_asset: PoolSide,
 		_try_debit: impl FnOnce(PoolAssetMap<AmountU256>) -> Result<(), E>,
 	) -> Result<(PoolAssetMap<AmountU256>, u128), MintError<E>> {
-		// To be implemented
-		if MIN_TICK_LO <= tick && tick <= MAX_TICK_LO {
-			Ok(Default::default())
-		} else {
-			Err(MintError::InvalidTickRange)
+		if (tick < MIN_TICK) || (tick > MAX_TICK) {
+			return Err(MintError::InvalidTickRange)
 		}
+		Ok(Default::default())
 	}
 	pub fn burn_limit_order(
 		&mut self,
