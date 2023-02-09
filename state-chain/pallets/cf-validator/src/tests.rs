@@ -486,11 +486,12 @@ fn highest_bond() {
 }
 
 #[test]
-fn test_setting_vanity_names_() {
+fn test_setting_vanity_names() {
 	new_test_ext().execute_with(|| {
 		let validators: &[u64] = &[123, 456, 789, 101112];
 		assert_ok!(ValidatorPallet::set_vanity_name(RuntimeOrigin::signed(validators[0]), "Test Validator 1".as_bytes().to_vec()));
 		assert_ok!(ValidatorPallet::set_vanity_name(RuntimeOrigin::signed(validators[2]), "Test Validator 2".as_bytes().to_vec()));
+		assert_noop!(ValidatorPallet::set_vanity_name(RuntimeOrigin::signed(validators[2]), "Test Validator 1".as_bytes().to_vec()), crate::Error::<Test>::NameAlreadyTaken);
 		let vanity_names = crate::VanityNames::<Test>::get();
 		assert_eq!(sp_std::str::from_utf8(vanity_names.get(&validators[0]).unwrap()).unwrap(), "Test Validator 1");
 		assert_eq!(sp_std::str::from_utf8(vanity_names.get(&validators[2]).unwrap()).unwrap(), "Test Validator 2");

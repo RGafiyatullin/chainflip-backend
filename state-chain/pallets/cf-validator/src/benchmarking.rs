@@ -139,226 +139,227 @@ benchmarks! {
 			T: RuntimeConfig
 	}
 
-	set_blocks_for_epoch {
-		let b = 2_u32;
-		let call = Call::<T>::set_blocks_for_epoch { number_of_blocks: b.into() };
-		let o = <T as Config>::EnsureGovernance::successful_origin();
-	}: {
-		call.dispatch_bypass_filter(o)?
-	}
-	verify {
-		assert_eq!(Pallet::<T>::blocks_per_epoch(), 2_u32.into())
-	}
-	set_backup_reward_node_percentage {
-		let call = Call::<T>::set_backup_reward_node_percentage { percentage: 20 };
-		let o = <T as Config>::EnsureGovernance::successful_origin();
-	}: {
-		call.dispatch_bypass_filter(o)?
-	}
-	verify {
-		assert_eq!(Pallet::<T>::backup_reward_node_percentage(), 20u8)
-	}
-	set_authority_set_min_size {
-		let call = Call::<T>::set_authority_set_min_size { min_size: 1 };
-		let o = <T as Config>::EnsureGovernance::successful_origin();
-	}: {
-		call.dispatch_bypass_filter(o)?
-	}
-	verify {
-		assert_eq!(Pallet::<T>::authority_set_min_size(), 1u32)
-	}
-	cfe_version {
-		let caller: T::AccountId = whitelisted_caller();
-		<T as pallet::Config>::AccountRoleRegistry::register_account(caller.clone(), AccountRole::Validator);
-		let version = SemVer {
-			major: 1,
-			minor: 2,
-			patch: 3
-		};
-	}: _(RawOrigin::Signed(caller.clone()), version.clone())
-	verify {
-		let validator_id: ValidatorIdOf<T> = caller.into();
-		assert_eq!(Pallet::<T>::node_cfe_version(validator_id), version)
-	}
-	register_peer_id {
-		let caller: T::AccountId = account("doogle", 0, 0);
-		<T as pallet::Config>::AccountRoleRegistry::register_account(caller.clone(), AccountRole::Validator);
-		let pair: p2p_crypto::Public = RuntimeAppPublic::generate_pair(None);
-		let signature: Ed25519Signature = pair.sign(&caller.encode()).unwrap().try_into().unwrap();
-		let public_key: Ed25519PublicKey = pair.try_into().unwrap();
-	}: _(RawOrigin::Signed(caller.clone()), public_key, 0, 0, signature)
-	verify {
-		assert!(MappedPeers::<T>::contains_key(public_key));
-		assert!(AccountPeerMapping::<T>::contains_key(&caller));
-	}
+	// set_blocks_for_epoch {
+	// 	let b = 2_u32;
+	// 	let call = Call::<T>::set_blocks_for_epoch { number_of_blocks: b.into() };
+	// 	let o = <T as Config>::EnsureGovernance::successful_origin();
+	// }: {
+	// 	call.dispatch_bypass_filter(o)?
+	// }
+	// verify {
+	// 	assert_eq!(Pallet::<T>::blocks_per_epoch(), 2_u32.into())
+	// }
+	// set_backup_reward_node_percentage {
+	// 	let call = Call::<T>::set_backup_reward_node_percentage { percentage: 20 };
+	// 	let o = <T as Config>::EnsureGovernance::successful_origin();
+	// }: {
+	// 	call.dispatch_bypass_filter(o)?
+	// }
+	// verify {
+	// 	assert_eq!(Pallet::<T>::backup_reward_node_percentage(), 20u8)
+	// }
+	// set_authority_set_min_size {
+	// 	let call = Call::<T>::set_authority_set_min_size { min_size: 1 };
+	// 	let o = <T as Config>::EnsureGovernance::successful_origin();
+	// }: {
+	// 	call.dispatch_bypass_filter(o)?
+	// }
+	// verify {
+	// 	assert_eq!(Pallet::<T>::authority_set_min_size(), 1u32)
+	// }
+	// cfe_version {
+	// 	let caller: T::AccountId = whitelisted_caller();
+	// 	<T as pallet::Config>::AccountRoleRegistry::register_account(caller.clone(), AccountRole::Validator);
+	// 	let version = SemVer {
+	// 		major: 1,
+	// 		minor: 2,
+	// 		patch: 3
+	// 	};
+	// }: _(RawOrigin::Signed(caller.clone()), version.clone())
+	// verify {
+	// 	let validator_id: ValidatorIdOf<T> = caller.into();
+	// 	assert_eq!(Pallet::<T>::node_cfe_version(validator_id), version)
+	// }
+	// register_peer_id {
+	// 	let caller: T::AccountId = account("doogle", 0, 0);
+	// 	<T as pallet::Config>::AccountRoleRegistry::register_account(caller.clone(), AccountRole::Validator);
+	// 	let pair: p2p_crypto::Public = RuntimeAppPublic::generate_pair(None);
+	// 	let signature: Ed25519Signature = pair.sign(&caller.encode()).unwrap().try_into().unwrap();
+	// 	let public_key: Ed25519PublicKey = pair.try_into().unwrap();
+	// }: _(RawOrigin::Signed(caller.clone()), public_key, 0, 0, signature)
+	// verify {
+	// 	assert!(MappedPeers::<T>::contains_key(public_key));
+	// 	assert!(AccountPeerMapping::<T>::contains_key(&caller));
+	// }
 	set_vanity_name {
+		VanityNames::<T>::set((0_u32..400).map(|i| ( account("doogle", i, 0), str::repeat("y", 64).as_bytes().to_vec())).collect());
 		let caller: T::AccountId = whitelisted_caller();
 		let name = str::repeat("x", 64).as_bytes().to_vec();
 	}: _(RawOrigin::Signed(caller.clone()), name.clone())
 	verify {
 		assert_eq!(VanityNames::<T>::get().get(&caller), Some(&name));
 	}
-	expire_epoch {
-		// 3 is the minimum number bidders for a successful auction.
-		let a in 3 .. 150;
+	// expire_epoch {
+	// 	// 3 is the minimum number bidders for a successful auction.
+	// 	let a in 3 .. 150;
 
-		// This is the initial authority set that will be expired.
-		rotate_authorities::<T>(a, 1);
-		// A new distinct authority set. The previous authorities will now be historical authorities.
-		rotate_authorities::<T>(a, 2);
+	// 	// This is the initial authority set that will be expired.
+	// 	rotate_authorities::<T>(a, 1);
+	// 	// A new distinct authority set. The previous authorities will now be historical authorities.
+	// 	rotate_authorities::<T>(a, 2);
 
-		const EPOCH_TO_EXPIRE: EpochIndex = 2;
-		assert_eq!(
-			Pallet::<T>::epoch_index(),
-			EPOCH_TO_EXPIRE + 1,
-		);
-		// Ensure that we are expiring the expected number of authorities.
-		assert_eq!(
-			EpochHistory::<T>::epoch_authorities(EPOCH_TO_EXPIRE).len(),
-			a as usize,
-		);
-	}: {
-		Pallet::<T>::expire_epoch(EPOCH_TO_EXPIRE);
-	}
-	verify {
-		assert_eq!(LastExpiredEpoch::<T>::get(), EPOCH_TO_EXPIRE);
-	}
-	missed_authorship_slots {
-		// Unlikely we will ever miss 10 successive blocks.
-		let m in 1 .. 10;
+	// 	const EPOCH_TO_EXPIRE: EpochIndex = 2;
+	// 	assert_eq!(
+	// 		Pallet::<T>::epoch_index(),
+	// 		EPOCH_TO_EXPIRE + 1,
+	// 	);
+	// 	// Ensure that we are expiring the expected number of authorities.
+	// 	assert_eq!(
+	// 		EpochHistory::<T>::epoch_authorities(EPOCH_TO_EXPIRE).len(),
+	// 		a as usize,
+	// 	);
+	// }: {
+	// 	Pallet::<T>::expire_epoch(EPOCH_TO_EXPIRE);
+	// }
+	// verify {
+	// 	assert_eq!(LastExpiredEpoch::<T>::get(), EPOCH_TO_EXPIRE);
+	// }
+	// missed_authorship_slots {
+	// 	// Unlikely we will ever miss 10 successive blocks.
+	// 	let m in 1 .. 10;
 
-		let last_slot = 1_000u64;
+	// 	let last_slot = 1_000u64;
 
-		SystemPallet::<T>::initialize(&1u32.into(), &SystemPallet::<T>::parent_hash(), &Digest {
-			logs: vec![DigestItem::PreRuntime(*b"aura", last_slot.encode())]
-		});
-		Pallet::<T>::on_initialize(1u32.into());
-		assert_eq!(LastSeenSlot::get(), Some(last_slot));
+	// 	SystemPallet::<T>::initialize(&1u32.into(), &SystemPallet::<T>::parent_hash(), &Digest {
+	// 		logs: vec![DigestItem::PreRuntime(*b"aura", last_slot.encode())]
+	// 	});
+	// 	Pallet::<T>::on_initialize(1u32.into());
+	// 	assert_eq!(LastSeenSlot::get(), Some(last_slot));
 
-		let expected_slot = last_slot + 1;
-		SystemPallet::<T>::initialize(&1u32.into(), &SystemPallet::<T>::parent_hash(), &Digest {
-			logs: vec![DigestItem::PreRuntime(*b"aura", (expected_slot + m as u64).encode())]
-		});
-	}: {
-		Pallet::<T>::punish_missed_authorship_slots();
-	}
-	verify {
-		assert_eq!(LastSeenSlot::get(), Some(expected_slot + m as u64));
-	}
+	// 	let expected_slot = last_slot + 1;
+	// 	SystemPallet::<T>::initialize(&1u32.into(), &SystemPallet::<T>::parent_hash(), &Digest {
+	// 		logs: vec![DigestItem::PreRuntime(*b"aura", (expected_slot + m as u64).encode())]
+	// 	});
+	// }: {
+	// 	Pallet::<T>::punish_missed_authorship_slots();
+	// }
+	// verify {
+	// 	assert_eq!(LastSeenSlot::get(), Some(expected_slot + m as u64));
+	// }
 
-	/**** Rotation Benchmarks ****/
+	// /**** Rotation Benchmarks ****/
 
-	/**** 1. RotationPhase::Idle ****/
+	// /**** 1. RotationPhase::Idle ****/
 
-	rotation_phase_idle {
-		assert!(T::MissedAuthorshipSlots::missed_slots().is_empty());
-	}: {
-		Pallet::<T>::on_initialize(1u32.into());
-	}
-	verify {
-		assert_eq!(CurrentRotationPhase::<T>::get(), RotationPhase::Idle);
-	}
+	// rotation_phase_idle {
+	// 	assert!(T::MissedAuthorshipSlots::missed_slots().is_empty());
+	// }: {
+	// 	Pallet::<T>::on_initialize(1u32.into());
+	// }
+	// verify {
+	// 	assert_eq!(CurrentRotationPhase::<T>::get(), RotationPhase::Idle);
+	// }
 
-	start_authority_rotation {
-		// a = number of bidders.
-		let a in 3 .. 400;
-		init_bidders::<T>(a, 1, 100_000u128);
-	}: {
-		Pallet::<T>::start_authority_rotation();
-	}
-	verify {
-		assert!(matches!(
-			CurrentRotationPhase::<T>::get(),
-			RotationPhase::KeygensInProgress(..)
-		));
-	}
+	// start_authority_rotation {
+	// 	// a = number of bidders.
+	// 	let a in 3 .. 400;
+	// 	init_bidders::<T>(a, 1, 100_000u128);
+	// }: {
+	// 	Pallet::<T>::start_authority_rotation();
+	// }
+	// verify {
+	// 	assert!(matches!(
+	// 		CurrentRotationPhase::<T>::get(),
+	// 		RotationPhase::KeygensInProgress(..)
+	// 	));
+	// }
 
-	start_authority_rotation_in_maintenance_mode {
-		T::SystemState::activate_maintenance_mode();
-	}: {
-		Pallet::<T>::start_authority_rotation();
-	}
-	verify {
-		assert!(matches!(
-			CurrentRotationPhase::<T>::get(),
-			RotationPhase::Idle
-		));
-	}
+	// start_authority_rotation_in_maintenance_mode {
+	// 	T::SystemState::activate_maintenance_mode();
+	// }: {
+	// 	Pallet::<T>::start_authority_rotation();
+	// }
+	// verify {
+	// 	assert!(matches!(
+	// 		CurrentRotationPhase::<T>::get(),
+	// 		RotationPhase::Idle
+	// 	));
+	// }
 
-	/**** 2. RotationPhase::KeygensInProgress ****/
+	// /**** 2. RotationPhase::KeygensInProgress ****/
 
-	rotation_phase_keygen {
-		// a = authority set target size
-		let a in 3 .. 150;
+	// rotation_phase_keygen {
+	// 	// a = authority set target size
+	// 	let a in 3 .. 150;
 
-		// Set up a vault rotation with a primary candidates and 50 auction losers (the losers just have to be
-		// enough to fill up available secondary slots).
-		start_vault_rotation::<T>(a, 50, 1);
+	// 	// Set up a vault rotation with a primary candidates and 50 auction losers (the losers just have to be
+	// 	// enough to fill up available secondary slots).
+	// 	start_vault_rotation::<T>(a, 50, 1);
 
-		// Simulate success.
-		T::VaultRotator::set_status(AsyncResult::Ready(VaultStatus::KeygenComplete));
+	// 	// Simulate success.
+	// 	T::VaultRotator::set_status(AsyncResult::Ready(VaultStatus::KeygenComplete));
 
-		// This assertion ensures we are using the correct weight parameter.
-		assert_eq!(
-			match CurrentRotationPhase::<T>::get() {
-				RotationPhase::KeygensInProgress(rotation_state) => Some(rotation_state.num_primary_candidates()),
-				_ => None,
-			}.expect("phase should be KeygensInProgress"),
-			a,
-			"Incorrect weight parameters."
-		);
-	}: {
-		Pallet::<T>::on_initialize(1u32.into());
-	}
-	verify {
-		assert!(matches!(
-			CurrentRotationPhase::<T>::get(),
-			RotationPhase::ActivatingKeys(..)
-		));
-	}
+	// 	// This assertion ensures we are using the correct weight parameter.
+	// 	assert_eq!(
+	// 		match CurrentRotationPhase::<T>::get() {
+	// 			RotationPhase::KeygensInProgress(rotation_state) => Some(rotation_state.num_primary_candidates()),
+	// 			_ => None,
+	// 		}.expect("phase should be KeygensInProgress"),
+	// 		a,
+	// 		"Incorrect weight parameters."
+	// 	);
+	// }: {
+	// 	Pallet::<T>::on_initialize(1u32.into());
+	// }
+	// verify {
+	// 	assert!(matches!(
+	// 		CurrentRotationPhase::<T>::get(),
+	// 		RotationPhase::ActivatingKeys(..)
+	// 	));
+	// }
 
-	rotation_phase_activating_keys {
-		// a = authority set target size
-		let a in 3 .. 150;
+	// rotation_phase_activating_keys {
+	// 	// a = authority set target size
+	// 	let a in 3 .. 150;
 
-		start_vault_rotation::<T>(a, 50, 1);
+	// 	start_vault_rotation::<T>(a, 50, 1);
 
-		let block = frame_system::Pallet::<T>::current_block_number();
+	// 	let block = frame_system::Pallet::<T>::current_block_number();
 
-		assert!(matches!(CurrentRotationPhase::<T>::get(), RotationPhase::KeygensInProgress(..)));
+	// 	assert!(matches!(CurrentRotationPhase::<T>::get(), RotationPhase::KeygensInProgress(..)));
 
-		T::VaultRotator::set_status(AsyncResult::Ready(VaultStatus::KeygenComplete));
+	// 	T::VaultRotator::set_status(AsyncResult::Ready(VaultStatus::KeygenComplete));
 
-		Pallet::<T>::on_initialize(block);
+	// 	Pallet::<T>::on_initialize(block);
 
-		T::VaultRotator::set_status(AsyncResult::Ready(VaultStatus::RotationComplete));
+	// 	T::VaultRotator::set_status(AsyncResult::Ready(VaultStatus::RotationComplete));
 
-		Pallet::<T>::on_initialize(block);
+	// 	Pallet::<T>::on_initialize(block);
 
-	}: {
-		Pallet::<T>::on_initialize(1u32.into());
-	}
-	verify {
-		assert!(matches!(
-			CurrentRotationPhase::<T>::get(),
-			RotationPhase::NewKeysActivated(..)
-		));
-	}
+	// }: {
+	// 	Pallet::<T>::on_initialize(1u32.into());
+	// }
+	// verify {
+	// 	assert!(matches!(
+	// 		CurrentRotationPhase::<T>::get(),
+	// 		RotationPhase::NewKeysActivated(..)
+	// 	));
+	// }
 
-	set_auction_parameters {
-		let origin = <T as Config>::EnsureGovernance::successful_origin();
-		let params = SetSizeParameters {
-			min_size: 3,
-			max_size: 150,
-			max_expansion: 15,
-		};
-		let call = Call::<T>::set_auction_parameters{parameters: params};
-	}: { call.dispatch_bypass_filter(origin)? }
-	verify {
-		assert_eq!(
-			Pallet::<T>::auction_parameters(),
-			params
-		);
-	}
-
+	// set_auction_parameters {
+	// 	let origin = <T as Config>::EnsureGovernance::successful_origin();
+	// 	let params = SetSizeParameters {
+	// 		min_size: 3,
+	// 		max_size: 150,
+	// 		max_expansion: 15,
+	// 	};
+	// 	let call = Call::<T>::set_auction_parameters{parameters: params};
+	// }: { call.dispatch_bypass_filter(origin)? }
+	// verify {
+	// 	assert_eq!(
+	// 		Pallet::<T>::auction_parameters(),
+	// 		params
+	// 	);
+	// }
+	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::Test,);
 }

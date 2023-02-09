@@ -361,6 +361,8 @@ pub mod pallet {
 		NameTooLong,
 		/// Invalid characters in the name.
 		InvalidCharactersInName,
+		/// Vanity name is already in use
+		NameAlreadyTaken,
 		/// Invalid minimum authority set size.
 		InvalidAuthoritySetMinSize,
 		/// Auction parameters are invalid.
@@ -691,7 +693,7 @@ pub mod pallet {
 			})
 		}
 
-		/// Allow a node to set a "Vanity Name" for themselves. This is functionally
+		/// Allow a node to set a unique "Vanity Name" for themselves. This is functionally
 		/// useless but can be used to make the network a bit more friendly for
 		/// observers. Names are required to be <= MAX_LENGTH_FOR_VANITY_NAME (64)
 		/// UTF-8 bytes.
@@ -707,6 +709,7 @@ pub mod pallet {
 		/// - [BadOrigin](frame_system::error::BadOrigin)
 		/// - [NameTooLong](Error::NameTooLong)
 		/// - [InvalidCharactersInName](Error::InvalidCharactersInName)
+		/// - [NameAlreadyTaken](Error::NameAlreadyTaken)
 		///
 		/// ## Dependencies
 		///
@@ -717,6 +720,7 @@ pub mod pallet {
 			ensure!(name.len() <= MAX_LENGTH_FOR_VANITY_NAME, Error::<T>::NameTooLong);
 			ensure!(sp_std::str::from_utf8(&name).is_ok(), Error::<T>::InvalidCharactersInName);
 			let mut vanity_names = VanityNames::<T>::get();
+			ensure!(!vanity_names.values().any(|n| n == &name), Error::<T>::NameAlreadyTaken);
 			vanity_names.insert(account_id.clone(), name.clone());
 			VanityNames::<T>::put(vanity_names);
 			Self::deposit_event(Event::VanityNameSet(account_id, name));
