@@ -39,7 +39,9 @@ pub struct StateChainClient<
 		state_chain_runtime::RuntimeCall,
 		oneshot::Sender<Result<H256, anyhow::Error>>,
 	)>,
-	_task_handle: ScopedJoinHandle<()>,
+	_block_producer: ScopedJoinHandle<()>,
+	_unsigned_extrinsic_consumer: ScopedJoinHandle<()>,
+	_signed_extrinsic_consumer: ScopedJoinHandle<()>,
 	pub base_rpc_client: Arc<BaseRpcClient>,
 }
 
@@ -246,16 +248,19 @@ impl StateChainClient {
 			mpsc::unbounded_channel();
 
 		const BLOCK_CAPACITY: usize = 10;
-		let (block_sender, block_receiver) = async_broadcast::broadcast(BLOCK_CAPACITY);
+		let (block_sender, block_receiver) =
+			async_broadcast::broadcast::<state_chain_runtime::Header>(BLOCK_CAPACITY);
 
 		let state_chain_client = Arc::new(StateChainClient {
 			genesis_hash,
 			account_id: signer.account_id.clone(),
 			signed_extrinsic_request_sender,
 			unsigned_extrinsic_request_sender,
-			_task_handle: scope.spawn_with_handle({
+			_signed_extrinsic_consumer: scope.spawn_with_handle({
 				let logger = logger.clone();
 				let base_rpc_client = base_rpc_client.clone();
+				let mut signed_extrinsic_consumer_block_receiver = block_receiver.clone();
+
 				let mut runtime_version = base_rpc_client.runtime_version().await?;
 				let mut account_nonce = account_nonce;
 
@@ -342,63 +347,77 @@ impl StateChainClient {
 										}
 									}
 								});
+							},
+							Ok(block_header) = signed_extrinsic_consumer_block_receiver.recv() => {
+								latest_block_hash = block_header.hash();
+								latest_block_number = block_header.number;
 							}
-							Some((call, result_sender)) = unsigned_extrinsic_request_receiver.recv() => {
-								let _result = result_sender.send({
-									let extrinsic = state_chain_runtime::UncheckedExtrinsic::new_unsigned(call.clone());
-									let expected_hash = sp_runtime::traits::BlakeTwo256::hash_of(&extrinsic);
-									match base_rpc_client.submit_extrinsic(extrinsic).await {
-										Ok(tx_hash) => {
-											slog::info!(
-												logger,
-												"Unsigned extrinsic {:?} submitted successfully with tx_hash: {:#x}",
-												&call,
-												tx_hash
-											);
-											assert_eq!(
-												tx_hash, expected_hash,
-												"tx_hash returned from RPC does not match expected hash"
-											);
-											Ok(tx_hash)
-										},
-										Err(rpc_err) => {
-											match rpc_err {
-												// POOL_ALREADY_IMPORTED error occurs when the transaction is already in the
-												// pool More than one node can submit the same unsigned extrinsic. E.g. in the
-												// case of a threshold signature success. Thus, if we get a "Transaction already
-												// in pool" "error" we know that this particular extrinsic has already been
-												// submitted. And so we can ignore the error and return the transaction hash
-												jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(ref obj)) if obj.code() == 1013 => {
-													slog::trace!(
-														logger,
-														"Unsigned extrinsic {:?} with tx_hash {:#x} already in pool.",
-														&call,
-														expected_hash
-													);
-													Ok(expected_hash)
-												},
-												_ => {
-													slog::error!(
-														logger,
-														"Unsigned extrinsic failed with error: {}. Extrinsic: {:?}",
-														rpc_err,
-														&call
-													);
-													Err(rpc_err.into())
-												},
-											}
-										},
-									}
-								});
-							}
-							option_block_header = finalized_block_header_stream.next() => {
-								let current_block_header = option_block_header.unwrap()?;
-								latest_block_hash = current_block_header.hash();
-								latest_block_number = current_block_header.number;
-								let _result = block_sender.broadcast(current_block_header).await;
-							}
+							else => break Ok(())
 						}
 					}
+				}
+			}),
+			_unsigned_extrinsic_consumer: scope.spawn_with_handle({
+				let logger = logger.clone();
+				let base_rpc_client = base_rpc_client.clone();
+
+				async move {
+					while let Some((call, result_sender)) = unsigned_extrinsic_request_receiver.recv().await {
+						let _result = result_sender.send({
+							let extrinsic = state_chain_runtime::UncheckedExtrinsic::new_unsigned(call.clone());
+							let expected_hash = sp_runtime::traits::BlakeTwo256::hash_of(&extrinsic);
+							match base_rpc_client.submit_extrinsic(extrinsic).await {
+								Ok(tx_hash) => {
+									slog::info!(
+										logger,
+										"Unsigned extrinsic {:?} submitted successfully with tx_hash: {:#x}",
+										&call,
+										tx_hash
+									);
+									assert_eq!(
+										tx_hash, expected_hash,
+										"tx_hash returned from RPC does not match expected hash"
+									);
+									Ok(tx_hash)
+								},
+								Err(rpc_err) => {
+									match rpc_err {
+										// POOL_ALREADY_IMPORTED error occurs when the transaction is already in the
+										// pool More than one node can submit the same unsigned extrinsic. E.g. in the
+										// case of a threshold signature success. Thus, if we get a "Transaction already
+										// in pool" "error" we know that this particular extrinsic has already been
+										// submitted. And so we can ignore the error and return the transaction hash
+										jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(ref obj)) if obj.code() == 1013 => {
+											slog::trace!(
+												logger,
+												"Unsigned extrinsic {:?} with tx_hash {:#x} already in pool.",
+												&call,
+												expected_hash
+											);
+											Ok(expected_hash)
+										},
+										_ => {
+											slog::error!(
+												logger,
+												"Unsigned extrinsic failed with error: {}. Extrinsic: {:?}",
+												rpc_err,
+												&call
+											);
+											Err(rpc_err.into())
+										},
+									}
+								},
+							}
+						});
+					}
+
+					Ok(())
+				}
+			}),
+			_block_producer: scope.spawn_with_handle({
+				async move {
+					while let Ok(_ok) = block_sender.broadcast(finalized_block_header_stream.next().await.unwrap()?).await {}
+					Ok(())
 				}
 			}),
 			base_rpc_client,
