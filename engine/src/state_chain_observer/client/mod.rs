@@ -7,14 +7,15 @@ use base_rpc_api::BaseRpcApi;
 
 use anyhow::{anyhow, bail, Context, Result};
 use cf_primitives::AccountRole;
-use frame_support::pallet_prelude::InvalidTransaction;
+use frame_support::{dispatch::DispatchInfo, pallet_prelude::InvalidTransaction};
 use futures::{Stream, StreamExt, TryStreamExt};
 
+use itertools::Itertools;
 use slog::o;
 use sp_core::{Pair, H256};
-use sp_runtime::traits::Hash;
+use sp_runtime::{traits::Hash, DispatchError, MultiAddress};
 use state_chain_runtime::AccountId;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -262,95 +263,307 @@ impl StateChainClient {
 				let mut signed_extrinsic_consumer_block_receiver = block_receiver.clone();
 
 				let mut runtime_version = base_rpc_client.runtime_version().await?;
-				let mut account_nonce = account_nonce;
+
+				let mut finalized_nonce = account_nonce;
+				let mut anticipated_nonce = account_nonce;
 
 				let mut latest_block_number = latest_block_number;
 				let mut latest_block_hash = latest_block_hash;
 
 				async move {
+					type ExtrinsicRequestID = u64;
+
+					enum ExtrinsicFailure {
+						/// The requested transaction was included in a finalized block
+						Finalized(DispatchInfo, DispatchError, Vec<state_chain_runtime::RuntimeEvent>),
+						TimedOut(NonFinalizedStatus),
+					}
+
+					enum NonFinalizedStatus {
+						Guaranteed,
+						Unknown
+					}
+
+					struct ExtrinsicRequest {
+						submissions: usize,
+						failed_submissions: usize,
+						allow_unknown_finalized_status_on_death: bool,
+						lifetime: std::ops::RangeToInclusive<cf_primitives::BlockNumber>,
+						call: state_chain_runtime::RuntimeCall,
+						result_sender: oneshot::Sender<Result<(DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>), ExtrinsicFailure>>,
+					}
+
+					struct SignedExtrinsicSubmission {
+						lifetime: std::ops::RangeTo<cf_primitives::BlockNumber>,
+						tx_hash: H256,
+						request_id: ExtrinsicRequestID,
+					}
+
+					struct SignedExtrinsicSubmitter {
+						signer: signer::PairSigner<sp_core::sr25519::Pair>,
+						anticipated_nonce: state_chain_runtime::Index,
+						finalized_nonce: state_chain_runtime::Index,
+						runtime_version: sp_version::RuntimeVersion,
+						submissions_by_nonce: BTreeMap<state_chain_runtime::Index, Vec<SignedExtrinsicSubmission>>,
+						base_rpc_client: Arc<base_rpc_api::BaseRpcClient<jsonrpsee::ws_client::WsClient>>,
+					}
+
+					enum SubmissionLogicError {
+						NonceTooLow,
+					}
+
+					impl SignedExtrinsicSubmitter {
+						fn new(signer: signer::PairSigner<sp_core::sr25519::Pair>, finalized_nonce: state_chain_runtime::Index) -> Self {
+							todo!()
+						}
+
+						async fn try_submit_extrinsic(&mut self, call: state_chain_runtime::RuntimeCall, nonce: state_chain_runtime::Index, genesis_hash: H256, latest_block_hash: H256, latest_block_number: state_chain_runtime::BlockNumber, request_id: ExtrinsicRequestID) -> Result<Result<(), SubmissionLogicError>, anyhow::Error> {
+							loop {
+								let (signed_extrinsic, lifetime) = self.signer.new_signed_extrinsic(
+									call.clone(),
+									&self.runtime_version,
+									genesis_hash,
+									latest_block_hash,
+									latest_block_number,
+									SIGNED_EXTRINSIC_LIFETIME,
+									nonce,
+								);
+
+								match self.base_rpc_client
+									.submit_extrinsic(signed_extrinsic)
+									.await
+								{
+									Ok(tx_hash) => {
+										self.submissions_by_nonce.entry(self.anticipated_nonce).or_default().push(SignedExtrinsicSubmission {
+											lifetime,
+											tx_hash,
+											request_id,
+										});
+										break Ok(Ok(()))
+									},
+									Err(rpc_err) => match rpc_err {
+										// This occurs when a transaction with the same nonce is in the transaction pool
+										// (and the priority is <= priority of that existing tx)
+										jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(ref obj)) if obj.code() == 1014 => {
+											break Ok(Err(SubmissionLogicError::NonceTooLow))
+										},
+										// This occurs when the nonce has already been *consumed* i.e a transaction with
+										// that nonce is in a block
+										jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(ref obj))
+											if obj == &invalid_err_obj(InvalidTransaction::Stale) =>
+										{
+											break Ok(Err(SubmissionLogicError::NonceTooLow))
+										},
+										jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(ref obj))
+											if obj == &invalid_err_obj(InvalidTransaction::BadProof) =>
+										{
+											/*slog::warn!(
+												logger,
+												"Extrinsic submission failed with nonce: {}. Error: {:?}. Refetching the runtime version.",
+												account_nonce,
+												rpc_err
+											);*/
+											let new_runtime_version = self.base_rpc_client.runtime_version().await?;
+											if new_runtime_version == self.runtime_version {
+												// slog::warn!(logger, "Fetched RuntimeVersion of {:?} is the same as the previous RuntimeVersion. This is not expected.", &runtime_version);
+												// break, as the error is now very unlikely to be solved by fetching
+												// again
+												return Err(anyhow!("Fetched RuntimeVersion of {:?} is the same as the previous RuntimeVersion. This is not expected.", self.runtime_version))
+											}
+
+											self.runtime_version = new_runtime_version;
+										},
+										err => break Err(err.into()),
+									}
+								}
+							}
+						}
+
+						async fn submit_extrinsic(&mut self, call: state_chain_runtime::RuntimeCall, genesis_hash: H256, latest_block_hash: H256, latest_block_number: state_chain_runtime::BlockNumber, request_id: ExtrinsicRequestID) -> Result<(), anyhow::Error> {
+							loop {
+								match self.try_submit_extrinsic(call.clone(), self.anticipated_nonce, genesis_hash, latest_block_hash, latest_block_number, request_id).await? {
+									Ok(()) => {
+										self.anticipated_nonce += 1;
+										break
+									},
+									Err(SubmissionLogicError::NonceTooLow) => {
+										self.anticipated_nonce += 1;
+									}
+								}
+							}
+
+							Ok(())
+						}
+					}
+
+					let mut signed_extrinsic_submitter = SignedExtrinsicSubmitter::new(signer, finalized_nonce);
+					let mut next_request_id: ExtrinsicRequestID = 0;
+					let mut extrinsic_requests: BTreeMap<ExtrinsicRequestID, ExtrinsicRequest> = Default::default();
+
 					loop {
 						tokio::select! {
 							Some((call, result_sender)) = signed_extrinsic_request_receiver.recv() => {
-								let _result = result_sender.send({
-									let mut retries = 0..crate::constants::MAX_EXTRINSIC_RETRY_ATTEMPTS;
-									loop {
-										if retries.next().is_none() {
-											break Err(anyhow!("Exceeded maximum number of retry attempts"))
-										} else {
-											match base_rpc_client
-												.submit_extrinsic(signer.new_signed_extrinsic(
-													call.clone(),
-													&runtime_version,
-													genesis_hash,
-													latest_block_hash,
-													latest_block_number,
-													SIGNED_EXTRINSIC_LIFETIME,
-													account_nonce,
-												))
-												.await
-											{
-												Ok(tx_hash) => {
-													account_nonce += 1;
-													break Ok(tx_hash)
-												},
-												Err(rpc_err) => match rpc_err {
-													// This occurs when a transaction with the same nonce is in the transaction pool
-													// (and the priority is <= priority of that existing tx)
-													jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(ref obj)) if obj.code() == 1014 => {
-														slog::warn!(
-															logger,
-															"Extrinsic submission failed with nonce: {}. Error: {:?}. Transaction with same nonce found in transaction pool.",
-															account_nonce,
-															rpc_err
-														);
-														account_nonce += 1;
-													},
-													// This occurs when the nonce has already been *consumed* i.e a transaction with
-													// that nonce is in a block
-													jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(ref obj))
-														if obj == &invalid_err_obj(InvalidTransaction::Stale) =>
-													{
-														// Since we can submit, crash (lose in-memory nonce state), restart => fetch
-														// nonce from finalised. If the tx we submitted is not yet finalised, we
-														// will fetch a nonce that will be too low. Which would cause this warning
-														// on startup at submission of first (possibly couple) of extrinsics.
-														slog::warn!(
-															logger,
-															"Extrinsic submission failed with nonce: {}. Error: {:?}. Transaction stale.",
-															account_nonce,
-															rpc_err
-														);
-														account_nonce += 1;
-													},
-													jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(ref obj))
-														if obj == &invalid_err_obj(InvalidTransaction::BadProof) =>
-													{
-														slog::warn!(
-															logger,
-															"Extrinsic submission failed with nonce: {}. Error: {:?}. Refetching the runtime version.",
-															account_nonce,
-															rpc_err
-														);
-														let new_runtime_version = base_rpc_client.runtime_version().await?;
-														if new_runtime_version == runtime_version {
-															slog::warn!(logger, "Fetched RuntimeVersion of {:?} is the same as the previous RuntimeVersion. This is not expected.", &runtime_version);
-															// break, as the error is now very unlikely to be solved by fetching
-															// again
-															break Err(anyhow!("Fetched RuntimeVersion of {:?} is the same as the previous RuntimeVersion. This is not expected.", &runtime_version))
-														}
+								signed_extrinsic_submitter.submit_extrinsic(
+									call.clone(),
+									genesis_hash,
+									latest_block_hash,
+									latest_block_number,
+									next_request_id,
+								).await?;
+								extrinsic_requests.insert(
+									next_request_id,
+									ExtrinsicRequest {
+										submissions: 1,
+										failed_submissions: 0,
+										lifetime: ..=(latest_block_number+128),
+										allow_unknown_finalized_status_on_death: true,
+										call,
+										result_sender: todo!()
+									}
+								);
+								next_request_id += 1;
+							},
+							Ok(current_block_header) = signed_extrinsic_consumer_block_receiver.recv() => {
+								let current_block_hash = current_block_header.hash();
+								let current_block = base_rpc_client.block(current_block_hash).await?.unwrap().block;
+								let current_events = base_rpc_client.storage_value::<frame_system::Events::<state_chain_runtime::Runtime>>(current_block_hash).await?;
 
-														runtime_version = new_runtime_version;
-													},
-													err => break Err(err.into()),
+								let current_finalized_nonce = base_rpc_client
+									.storage_map_entry::<frame_system::Account<state_chain_runtime::Runtime>>(
+										current_block_hash,
+										&signed_extrinsic_submitter.signer.account_id,
+									)
+									.await?
+									.nonce;
+
+								if current_finalized_nonce < signed_extrinsic_submitter.finalized_nonce {
+									return Err(anyhow!("Extrinsic signer's account was reaped"))
+								} else {
+									signed_extrinsic_submitter.finalized_nonce = current_finalized_nonce;
+									signed_extrinsic_submitter.anticipated_nonce = state_chain_runtime::Index::max(
+										signed_extrinsic_submitter.anticipated_nonce,
+										current_finalized_nonce
+									);
+
+									for (extrinsic_index, extrinsic_events) in current_events.iter().filter_map(|event_record| {
+										match &**event_record {
+											frame_system::EventRecord { phase: frame_system::Phase::ApplyExtrinsic(extrinsic_index), event, .. } => Some((extrinsic_index, event)),
+											_ => None
+										}
+									}).sorted_by_key(|(extrinsic_index, _)| *extrinsic_index).group_by(|(extrinsic_index, _)| *extrinsic_index).into_iter() {
+										let extrinsic = &current_block.extrinsics[*extrinsic_index as usize];
+										if let Some((address, _, extra)) = &extrinsic.signature {
+											if *address == MultiAddress::Id(signed_extrinsic_submitter.signer.account_id.clone()) { // Assumption needs checking
+												if let Some(submissions) = signed_extrinsic_submitter.submissions_by_nonce.remove(&extra.5.0) {
+													let tx_hash = <state_chain_runtime::Runtime as frame_system::Config>::Hashing::hash_of(extrinsic);
+
+													// Send extrinsic request result if one of its submissions for this nonce was included in this block
+													if let Some((submission, extrinsic_request)) = submissions.iter().find_map(|submission| {
+														// Note: It is technically possible for a hash collision to occur, but it is so unlikely it is effectively impossible. If it where to occur this code would not notice the included extrinsic was not actually the requested one, but otherwise would continue to work.
+														if submission.tx_hash == tx_hash {
+															extrinsic_requests
+																.remove(&submission.request_id)
+																.map(|pending_extrinsic_request| (submission, pending_extrinsic_request))
+														} else {
+															None
+														}
+													}) {
+														assert!(submission.lifetime.contains(&current_block_header.number));
+
+														let extrinsic_events = extrinsic_events.map(|(_extrinsics_index, event)| event.clone()).collect::<Vec<_>>();
+														let _result = extrinsic_request.result_sender.send({
+															match extrinsic_events.iter().find_map(|event| match event {
+																state_chain_runtime::RuntimeEvent::System(frame_system::Event::ExtrinsicSuccess { dispatch_info }) => {
+																	Some(Ok(dispatch_info))
+																},
+																state_chain_runtime::RuntimeEvent::System(frame_system::Event::ExtrinsicFailed { dispatch_error, dispatch_info }) => {
+																	Some(Err((dispatch_info, dispatch_error)))
+																},
+																_ => None
+															}).unwrap() {
+																Ok(dispatch_info) => Ok((dispatch_info.clone(), extrinsic_events)),
+																Err((dispatch_info, dispatch_error)) => Err(ExtrinsicFailure::Finalized(dispatch_info.clone(), dispatch_error.clone(), extrinsic_events)),
+															}
+														});
+													}
+
+													for submission in submissions {
+														if let Some(extrinsic_request) = extrinsic_requests.get_mut(&submission.request_id) {
+															extrinsic_request.failed_submissions += 1;
+														}
+													}
 												}
 											}
 										}
 									}
-								});
-							},
-							Ok(block_header) = signed_extrinsic_consumer_block_receiver.recv() => {
-								latest_block_hash = block_header.hash();
-								latest_block_number = block_header.number;
+
+									signed_extrinsic_submitter.submissions_by_nonce.retain(|nonce, submissions| {
+										assert!(signed_extrinsic_submitter.finalized_nonce <= *nonce);
+
+										submissions.retain(|submission| {
+											let retain = submission.lifetime.contains(&(latest_block_number + 1));
+
+											if !retain {
+												if let Some(extrinsic_request) = extrinsic_requests.get_mut(&submission.request_id) {
+													extrinsic_request.failed_submissions += 1;
+												}
+											}
+
+											retain
+										});
+
+										!submissions.is_empty()
+									});
+
+									for (request_id, extrinsic_request) in extrinsic_requests.drain_filter(|request_id, extrinsic_request| {
+										!extrinsic_request.lifetime.contains(&(latest_block_number + 1)) && (
+											extrinsic_request.allow_unknown_finalized_status_on_death
+											|| extrinsic_request.submissions == extrinsic_request.failed_submissions
+										)
+									}) {
+										let _result = extrinsic_request.result_sender.send(Err(ExtrinsicFailure::TimedOut(
+											if extrinsic_request.submissions == extrinsic_request.failed_submissions {
+												NonFinalizedStatus::Guaranteed
+											} else {
+												NonFinalizedStatus::Unknown
+											}
+										)));
+									}
+
+									for (request_id, extrinsic_request) in &mut extrinsic_requests {
+										if extrinsic_request.submissions == extrinsic_request.failed_submissions {
+											signed_extrinsic_submitter.submit_extrinsic(extrinsic_request.call.clone(), genesis_hash, latest_block_hash, latest_block_number, *request_id).await?;
+											extrinsic_request.submissions += 1;
+										}
+									}
+
+									// Handle possibility of stuck nonce caused submissions being dropped from the mempool or broken submissions either submitted here or externally
+									{
+										let mut shuffled_extrinsic_requests = {
+											use rand::prelude::SliceRandom;
+											let mut extrinsic_requests = extrinsic_requests.iter_mut().collect::<Vec<_>>();
+											extrinsic_requests.shuffle(&mut rand::thread_rng());
+											extrinsic_requests.into_iter()
+										};
+
+										if let Some((request_id, extrinsic_request)) = shuffled_extrinsic_requests.next() {
+											// TODO: Consider using pending_extrinsics rpc call instead to do this
+											match signed_extrinsic_submitter.try_submit_extrinsic(extrinsic_request.call.clone(), signed_extrinsic_submitter.finalized_nonce, genesis_hash, latest_block_hash, latest_block_number, *request_id).await? {
+												Ok(()) => {
+													// log warning
+													signed_extrinsic_submitter.anticipated_nonce = signed_extrinsic_submitter.finalized_nonce;
+													for (request_id, extrinsic_request) in shuffled_extrinsic_requests {
+														match signed_extrinsic_submitter.try_submit_extrinsic(extrinsic_request.call.clone(), signed_extrinsic_submitter.anticipated_nonce, genesis_hash, latest_block_hash, latest_block_number, *request_id).await? {
+															Ok(()) => signed_extrinsic_submitter.anticipated_nonce += 1,
+															Err(SubmissionLogicError::NonceTooLow) => break
+														}
+													}
+												},
+												Err(SubmissionLogicError::NonceTooLow) => {} // expected, ignore
+											}
+										}
+									}
+								}
 							}
 							else => break Ok(())
 						}
