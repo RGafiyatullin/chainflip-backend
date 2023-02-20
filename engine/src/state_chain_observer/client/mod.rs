@@ -313,8 +313,15 @@ impl StateChainClient {
 					}
 
 					impl SignedExtrinsicSubmitter {
-						fn new(signer: signer::PairSigner<sp_core::sr25519::Pair>, finalized_nonce: state_chain_runtime::Index) -> Self {
-							todo!()
+						fn new(signer: signer::PairSigner<sp_core::sr25519::Pair>, finalized_nonce: state_chain_runtime::Index, runtime_version: sp_version::RuntimeVersion, base_rpc_client: Arc<base_rpc_api::BaseRpcClient<jsonrpsee::ws_client::WsClient>>) -> Self {
+							Self {
+								signer,
+								anticipated_nonce: finalized_nonce,
+								finalized_nonce,
+								runtime_version,
+								submissions_by_nonce: Default::default(),
+								base_rpc_client,
+							}
 						}
 
 						async fn try_submit_extrinsic(&mut self, call: state_chain_runtime::RuntimeCall, nonce: state_chain_runtime::Index, genesis_hash: H256, latest_block_hash: H256, latest_block_number: state_chain_runtime::BlockNumber, request_id: ExtrinsicRequestID) -> Result<Result<(), SubmissionLogicError>, anyhow::Error> {
@@ -396,7 +403,7 @@ impl StateChainClient {
 						}
 					}
 
-					let mut signed_extrinsic_submitter = SignedExtrinsicSubmitter::new(signer, finalized_nonce);
+					let mut signed_extrinsic_submitter = SignedExtrinsicSubmitter::new(signer, finalized_nonce, runtime_version, base_rpc_client.clone());
 					let mut next_request_id: ExtrinsicRequestID = 0;
 					let mut extrinsic_requests: BTreeMap<ExtrinsicRequestID, ExtrinsicRequest> = Default::default();
 
