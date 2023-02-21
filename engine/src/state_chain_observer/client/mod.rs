@@ -27,7 +27,7 @@ use crate::{
 	task_scope::{Scope, ScopedJoinHandle},
 };
 
-use extrinsic_api::{SignedExtrinsicResult, ExtrinsicFailure};
+use extrinsic_api::{ExtrinsicFailure, SignedExtrinsicResult};
 
 pub struct StateChainClient<
 	BaseRpcClient = base_rpc_api::BaseRpcClient<jsonrpsee::ws_client::WsClient>,
@@ -260,7 +260,6 @@ impl StateChainClient {
 			signed_extrinsic_request_sender,
 			unsigned_extrinsic_request_sender,
 			_signed_extrinsic_consumer: scope.spawn_with_handle({
-				let logger = logger.clone();
 				let base_rpc_client = base_rpc_client.clone();
 				let mut signed_extrinsic_consumer_block_receiver = block_receiver.clone();
 
@@ -477,10 +476,10 @@ impl StateChainClient {
 																},
 																_ => None
 															}).unwrap() {
-																Ok(dispatch_info) => Ok((tx_hash, dispatch_info.clone(), extrinsic_events)),
+																Ok(dispatch_info) => Ok((tx_hash, *dispatch_info, extrinsic_events)),
 																Err((dispatch_info, dispatch_error)) => {
-																	let dispatch_error = dispatch_error.clone();
-																	Err(ExtrinsicFailure::Finalized(tx_hash, dispatch_info.clone(), extrinsic_events, dispatch_error))
+																	let dispatch_error = *dispatch_error;
+																	Err(ExtrinsicFailure::Finalized(tx_hash, *dispatch_info, extrinsic_events, dispatch_error))
 																},
 															}
 														});
@@ -514,7 +513,7 @@ impl StateChainClient {
 										!submissions.is_empty()
 									});
 
-									for (_request_id, extrinsic_request) in extrinsic_requests.drain_filter(|request_id, extrinsic_request| {
+									for (_request_id, extrinsic_request) in extrinsic_requests.drain_filter(|_request_id, extrinsic_request| {
 										!extrinsic_request.lifetime.contains(&(latest_block_number + 1)) && (
 											extrinsic_request.allow_unknown_finalized_status_on_death
 											|| extrinsic_request.submissions == extrinsic_request.failed_submissions
@@ -649,12 +648,12 @@ impl StateChainClient {
 #[cfg(test)]
 pub mod mocks {
 	use crate::state_chain_observer::client::{
-		extrinsic_api::ExtrinsicApi, storage_api::StorageApi,
+		extrinsic_api::{ExtrinsicApi, SignedExtrinsicResult},
+		storage_api::StorageApi,
 	};
 	use anyhow::Result;
 	use async_trait::async_trait;
 	use frame_support::storage::types::QueryKindTrait;
-	use futures::Stream;
 	use jsonrpsee::core::RpcResult;
 	use mockall::mock;
 	use sp_core::{storage::StorageKey, H256};

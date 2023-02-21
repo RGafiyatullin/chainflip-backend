@@ -99,7 +99,8 @@ where
 			)
 			.await?;
 
-			let (_tx_hash, _dispatch_info, events) = state_chain_client.submit_signed_extrinsic(call, &logger).await?;
+			let (_tx_hash, _dispatch_info, events) =
+				state_chain_client.submit_signed_extrinsic(call, &logger).await?;
 
 			Ok(events)
 		}
@@ -130,12 +131,13 @@ pub async fn request_claim(
 				bail!("We are currently in an auction phase. Please wait until the auction phase is over.");
 			}
 
-			let (tx_hash, ..) = state_chain_client.submit_signed_extrinsic(
-				pallet_cf_staking::Call::claim { amount, address: eth_address },
-				&logger,
-			)
-			.await
-			.map_err(|_| anyhow!("invalid claim"))?;
+			let (tx_hash, ..) = state_chain_client
+				.submit_signed_extrinsic(
+					pallet_cf_staking::Call::claim { amount, address: eth_address },
+					&logger,
+				)
+				.await
+				.map_err(|_| anyhow!("invalid claim"))?;
 
 			Ok(tx_hash)
 		}

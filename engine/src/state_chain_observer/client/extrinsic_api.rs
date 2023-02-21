@@ -4,8 +4,8 @@ use frame_support::dispatch::DispatchInfo;
 use sp_core::H256;
 use sp_runtime::DispatchError;
 use state_chain_runtime::AccountId;
-use tokio::sync::{mpsc, oneshot};
 use thiserror::Error;
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Error, Debug)]
 pub enum EventParseError {
@@ -21,11 +21,14 @@ pub enum ExtrinsicFailure {
 	Finalized(H256, DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>, DispatchError),
 	#[error("The requested transaction was not and will not be included in a finalized block")]
 	Unfinalized,
-	#[error("The requested transaction was not (but maybe in the future) included in a finalized block")]
+	#[error(
+		"The requested transaction was not (but maybe in the future) included in a finalized block"
+	)]
 	Unknown,
 }
 
-pub type SignedExtrinsicResult = Result<(H256, DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>), ExtrinsicFailure>;
+pub type SignedExtrinsicResult =
+	Result<(H256, DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>), ExtrinsicFailure>;
 
 // Note 'static on the generics in this trait are only required for mockall to mock it
 #[async_trait]
@@ -68,7 +71,7 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 			oneshot::Sender<Result>,
 		)>,
 		call: Call,
-		logger: &slog::Logger,
+		_logger: &slog::Logger,
 	) -> Result
 	where
 		Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug,
@@ -79,7 +82,8 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 			let _result = request_sender.send((call.clone().into(), extrinsic_result_sender));
 		}
 
-		let extrinsic_result = extrinsic_result_receiver.await.expect("Backend failed"); // TODO: This type of error in the codebase is currently handled inconsistently
+		extrinsic_result_receiver.await.expect("Backend failed") // TODO: This type of error in the codebase
+		                                                 // is currently handled inconsistently
 
 		/* TODO match &extrinsic_result {
 			Ok(tx_hash) => {
@@ -94,8 +98,6 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 				slog::error!(logger, "{:?} submission failed with error: {}", &call, error);
 			},
 		}*/
-
-		extrinsic_result
 	}
 }
 
@@ -108,7 +110,11 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> Extrin
 	}
 
 	/// Sign, submit, and watch an extrinsic retrying if submissions fail be to finalized
-	async fn submit_signed_extrinsic<Call>(&self, call: Call, logger: &slog::Logger) -> SignedExtrinsicResult
+	async fn submit_signed_extrinsic<Call>(
+		&self,
+		call: Call,
+		logger: &slog::Logger,
+	) -> SignedExtrinsicResult
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
 			+ Clone
