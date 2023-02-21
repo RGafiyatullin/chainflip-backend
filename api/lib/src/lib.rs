@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use cf_chains::eth::H256;
 use cf_primitives::{AccountRole, Asset, ForeignChainAddress};
-use futures::{FutureExt, Stream};
+use futures::FutureExt;
 use pallet_cf_validator::MAX_LENGTH_FOR_VANITY_NAME;
 use rand_legacy::FromEntropy;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
@@ -80,32 +80,6 @@ pub async fn request_block(
 
 pub type ClaimCertificate = Vec<u8>;
 
-async fn submit_and_ensure_success<Call, BlockStream>(
-	client: &StateChainClient,
-	block_stream: &mut BlockStream,
-	call: Call,
-) -> Result<(H256, Vec<state_chain_runtime::RuntimeEvent>)>
-where
-	Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug + Send + Sync + 'static,
-	BlockStream: Stream<Item = state_chain_runtime::Header> + Unpin + Send + 'static,
-{
-	let logger = new_discard_logger();
-	let tx_hash = client.submit_signed_extrinsic(call, &logger).await?;
-
-	let events = client.watch_submitted_extrinsic(tx_hash, block_stream).await?;
-
-	if let Some(_failure) = events.iter().find(|event| {
-		matches!(
-			event,
-			state_chain_runtime::RuntimeEvent::System(frame_system::Event::ExtrinsicFailed { .. })
-		)
-	}) {
-		Err(anyhow!("extrinsic execution failed"))
-	} else {
-		Ok((tx_hash, events))
-	}
-}
-
 async fn connect_submit_and_get_events<Call>(
 	state_chain_settings: &settings::StateChain,
 	call: Call,
@@ -116,7 +90,7 @@ where
 	task_scope(|scope| {
 		async {
 			let logger = new_discard_logger();
-			let (_, block_stream, state_chain_client) = StateChainClient::new(
+			let (_latest_block_hash, _block_stream, state_chain_client) = StateChainClient::new(
 				scope,
 				state_chain_settings,
 				AccountRole::None,
@@ -125,10 +99,7 @@ where
 			)
 			.await?;
 
-			let mut block_stream = Box::new(block_stream);
-
-			let (_tx_hash, events) =
-				submit_and_ensure_success(&state_chain_client, block_stream.as_mut(), call).await?;
+			let (_tx_hash, _dispatch_info, events) = state_chain_client.submit_signed_extrinsic(call, &logger).await?;
 
 			Ok(events)
 		}
@@ -145,7 +116,7 @@ pub async fn request_claim(
 	task_scope(|scope| {
 		async {
 			let logger = new_discard_logger();
-			let (_, block_stream, state_chain_client) = StateChainClient::new(
+			let (_, _, state_chain_client) = StateChainClient::new(
 				scope,
 				state_chain_settings,
 				AccountRole::None,
@@ -159,13 +130,9 @@ pub async fn request_claim(
 				bail!("We are currently in an auction phase. Please wait until the auction phase is over.");
 			}
 
-			let mut block_stream = Box::new(block_stream);
-			let block_stream = block_stream.as_mut();
-
-			let (tx_hash, _) = submit_and_ensure_success(
-				&state_chain_client,
-				block_stream,
+			let (tx_hash, ..) = state_chain_client.submit_signed_extrinsic(
 				pallet_cf_staking::Call::claim { amount, address: eth_address },
+				&logger,
 			)
 			.await
 			.map_err(|_| anyhow!("invalid claim"))?;
@@ -193,7 +160,7 @@ pub async fn register_account_role(
 			)
 			.await?;
 
-			let tx_hash = state_chain_client
+			let (tx_hash, ..) = state_chain_client
 				.submit_signed_extrinsic(
 					pallet_cf_account_roles::Call::register_account_role { role },
 					&logger,
@@ -233,7 +200,7 @@ pub async fn rotate_keys(state_chain_settings: &settings::StateChain) -> Result<
 				grandpa: GrandpaId::from(EdPublic::from_raw(grandpa_key)),
 			};
 
-			let tx_hash = state_chain_client
+			let (tx_hash, ..) = state_chain_client
 				.submit_signed_extrinsic(
 					pallet_cf_validator::Call::set_keys {
 						keys: new_session_key,
@@ -297,7 +264,7 @@ pub async fn stop_bidding(state_chain_settings: &settings::StateChain) -> Result
 				&logger,
 			)
 			.await?;
-			let tx_hash = state_chain_client
+			let (tx_hash, ..) = state_chain_client
 				.submit_signed_extrinsic(pallet_cf_staking::Call::stop_bidding {}, &logger)
 				.await
 				.expect("Could not stop bidding");
@@ -325,7 +292,7 @@ pub async fn start_bidding(state_chain_settings: &settings::StateChain) -> Resul
 			.ok_or_else(|| anyhow!("Your account is not staked. You must first stake and then register your account role as Validator before activating your account."))?
 		{
 			AccountRole::Validator => {
-				let tx_hash = state_chain_client
+				let (tx_hash, ..) = state_chain_client
 					.submit_signed_extrinsic(pallet_cf_staking::Call::start_bidding {}, &logger)
 					.await
 					.expect("Could not start bidding");
@@ -363,7 +330,7 @@ pub async fn set_vanity_name(
 				&logger,
 			)
 			.await?;
-			let tx_hash = state_chain_client
+			let (tx_hash, ..) = state_chain_client
 				.submit_signed_extrinsic(
 					pallet_cf_validator::Call::set_vanity_name { name: name.as_bytes().to_vec() },
 					&logger,

@@ -7,13 +7,13 @@ use base_rpc_api::BaseRpcApi;
 
 use anyhow::{anyhow, bail, Context, Result};
 use cf_primitives::AccountRole;
-use frame_support::{dispatch::DispatchInfo, pallet_prelude::InvalidTransaction};
+use frame_support::pallet_prelude::InvalidTransaction;
 use futures::{Stream, StreamExt, TryStreamExt};
 
 use itertools::Itertools;
 use slog::o;
 use sp_core::{Pair, H256};
-use sp_runtime::{traits::Hash, DispatchError, MultiAddress};
+use sp_runtime::{traits::Hash, MultiAddress};
 use state_chain_runtime::AccountId;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
@@ -27,6 +27,8 @@ use crate::{
 	task_scope::{Scope, ScopedJoinHandle},
 };
 
+use extrinsic_api::{SignedExtrinsicResult, ExtrinsicFailure};
+
 pub struct StateChainClient<
 	BaseRpcClient = base_rpc_api::BaseRpcClient<jsonrpsee::ws_client::WsClient>,
 > {
@@ -34,7 +36,7 @@ pub struct StateChainClient<
 	account_id: AccountId,
 	signed_extrinsic_request_sender: mpsc::UnboundedSender<(
 		state_chain_runtime::RuntimeCall,
-		oneshot::Sender<Result<H256, anyhow::Error>>,
+		oneshot::Sender<SignedExtrinsicResult>,
 	)>,
 	unsigned_extrinsic_request_sender: mpsc::UnboundedSender<(
 		state_chain_runtime::RuntimeCall,
@@ -262,27 +264,11 @@ impl StateChainClient {
 				let base_rpc_client = base_rpc_client.clone();
 				let mut signed_extrinsic_consumer_block_receiver = block_receiver.clone();
 
-				let mut runtime_version = base_rpc_client.runtime_version().await?;
-
-				let mut finalized_nonce = account_nonce;
-				let mut anticipated_nonce = account_nonce;
-
 				let mut latest_block_number = latest_block_number;
 				let mut latest_block_hash = latest_block_hash;
 
 				async move {
 					type ExtrinsicRequestID = u64;
-
-					enum ExtrinsicFailure {
-						/// The requested transaction was included in a finalized block
-						Finalized(DispatchInfo, DispatchError, Vec<state_chain_runtime::RuntimeEvent>),
-						TimedOut(NonFinalizedStatus),
-					}
-
-					enum NonFinalizedStatus {
-						Guaranteed,
-						Unknown
-					}
 
 					struct ExtrinsicRequest {
 						submissions: usize,
@@ -290,7 +276,7 @@ impl StateChainClient {
 						allow_unknown_finalized_status_on_death: bool,
 						lifetime: std::ops::RangeToInclusive<cf_primitives::BlockNumber>,
 						call: state_chain_runtime::RuntimeCall,
-						result_sender: oneshot::Sender<Result<(DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>), ExtrinsicFailure>>,
+						result_sender: oneshot::Sender<SignedExtrinsicResult>,
 					}
 
 					struct SignedExtrinsicSubmission {
@@ -403,7 +389,7 @@ impl StateChainClient {
 						}
 					}
 
-					let mut signed_extrinsic_submitter = SignedExtrinsicSubmitter::new(signer, finalized_nonce, runtime_version, base_rpc_client.clone());
+					let mut signed_extrinsic_submitter = SignedExtrinsicSubmitter::new(signer, account_nonce, base_rpc_client.runtime_version().await?, base_rpc_client.clone());
 					let mut next_request_id: ExtrinsicRequestID = 0;
 					let mut extrinsic_requests: BTreeMap<ExtrinsicRequestID, ExtrinsicRequest> = Default::default();
 
@@ -425,7 +411,7 @@ impl StateChainClient {
 										lifetime: ..=(latest_block_number+128),
 										allow_unknown_finalized_status_on_death: true,
 										call,
-										result_sender: todo!()
+										result_sender,
 									}
 								);
 								next_request_id += 1;
@@ -442,6 +428,9 @@ impl StateChainClient {
 									)
 									.await?
 									.nonce;
+
+								latest_block_number = current_block_header.number;
+								latest_block_hash = current_block_hash;
 
 								if current_finalized_nonce < signed_extrinsic_submitter.finalized_nonce {
 									return Err(anyhow!("Extrinsic signer's account was reaped"))
@@ -488,8 +477,11 @@ impl StateChainClient {
 																},
 																_ => None
 															}).unwrap() {
-																Ok(dispatch_info) => Ok((dispatch_info.clone(), extrinsic_events)),
-																Err((dispatch_info, dispatch_error)) => Err(ExtrinsicFailure::Finalized(dispatch_info.clone(), dispatch_error.clone(), extrinsic_events)),
+																Ok(dispatch_info) => Ok((tx_hash, dispatch_info.clone(), extrinsic_events)),
+																Err((dispatch_info, dispatch_error)) => {
+																	let dispatch_error = dispatch_error.clone();
+																	Err(ExtrinsicFailure::Finalized(tx_hash, dispatch_info.clone(), extrinsic_events, dispatch_error))
+																},
 															}
 														});
 													}
@@ -522,19 +514,19 @@ impl StateChainClient {
 										!submissions.is_empty()
 									});
 
-									for (request_id, extrinsic_request) in extrinsic_requests.drain_filter(|request_id, extrinsic_request| {
+									for (_request_id, extrinsic_request) in extrinsic_requests.drain_filter(|request_id, extrinsic_request| {
 										!extrinsic_request.lifetime.contains(&(latest_block_number + 1)) && (
 											extrinsic_request.allow_unknown_finalized_status_on_death
 											|| extrinsic_request.submissions == extrinsic_request.failed_submissions
 										)
 									}) {
-										let _result = extrinsic_request.result_sender.send(Err(ExtrinsicFailure::TimedOut(
+										let _result = extrinsic_request.result_sender.send(Err(
 											if extrinsic_request.submissions == extrinsic_request.failed_submissions {
-												NonFinalizedStatus::Guaranteed
+												ExtrinsicFailure::Unfinalized
 											} else {
-												NonFinalizedStatus::Unknown
+												ExtrinsicFailure::Unknown
 											}
-										)));
+										));
 									}
 
 									for (request_id, extrinsic_request) in &mut extrinsic_requests {
@@ -682,7 +674,7 @@ pub mod mocks {
 				&self,
 				call: Call,
 				logger: &slog::Logger,
-			) -> Result<H256>
+			) -> SignedExtrinsicResult
 			where
 				Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug + Send + Sync + 'static;
 
@@ -693,15 +685,6 @@ pub mod mocks {
 			) -> Result<H256>
 			where
 				Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug + Send + Sync + 'static;
-
-			async fn watch_submitted_extrinsic<BlockStream>(
-				&self,
-				extrinsic_hash: state_chain_runtime::Hash,
-				block_stream: &mut BlockStream,
-			) -> Result<Vec<state_chain_runtime::RuntimeEvent>>
-			where
-				BlockStream:
-					Stream<Item = state_chain_runtime::Header> + Unpin + Send + 'static;
 		}
 		#[async_trait]
 		impl StorageApi for StateChainClient {

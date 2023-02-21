@@ -1,13 +1,31 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
-use frame_system::Phase;
-use futures::{Stream, StreamExt};
+use frame_support::dispatch::DispatchInfo;
 use sp_core::H256;
-use sp_runtime::traits::{BlakeTwo256, Hash};
+use sp_runtime::DispatchError;
 use state_chain_runtime::AccountId;
 use tokio::sync::{mpsc, oneshot};
+use thiserror::Error;
 
-use super::storage_api::StorageApi;
+#[derive(Error, Debug)]
+pub enum EventParseError {
+	#[error("Unexpected event signature in log subscription: {0:?}")]
+	UnexpectedEvent(H256),
+	#[error("Cannot decode missing parameter: '{0}'.")]
+	MissingParam(String),
+}
+
+#[derive(Error, Debug)]
+pub enum ExtrinsicFailure {
+	#[error("The requested transaction was included in a finalized block with tx_hash: {0:#?}")]
+	Finalized(H256, DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>, DispatchError),
+	#[error("The requested transaction was not and will not be included in a finalized block")]
+	Unfinalized,
+	#[error("The requested transaction was not (but maybe in the future) included in a finalized block")]
+	Unknown,
+}
+
+pub type SignedExtrinsicResult = Result<(H256, DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>), ExtrinsicFailure>;
 
 // Note 'static on the generics in this trait are only required for mockall to mock it
 #[async_trait]
@@ -18,7 +36,7 @@ pub trait ExtrinsicApi {
 		&self,
 		call: Call,
 		logger: &slog::Logger,
-	) -> Result<H256>
+	) -> SignedExtrinsicResult
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
 			+ Clone
@@ -39,27 +57,19 @@ pub trait ExtrinsicApi {
 			+ Send
 			+ Sync
 			+ 'static;
-
-	async fn watch_submitted_extrinsic<BlockStream>(
-		&self,
-		extrinsic_hash: state_chain_runtime::Hash,
-		block_stream: &mut BlockStream,
-	) -> Result<Vec<state_chain_runtime::RuntimeEvent>>
-	where
-		BlockStream: Stream<Item = state_chain_runtime::Header> + Unpin + Send + 'static;
 }
 
 impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 	super::StateChainClient<BaseRpcApi>
 {
-	async fn submit_extrinsic<Call>(
+	async fn submit_extrinsic<Call, Result: Send>(
 		request_sender: &mpsc::UnboundedSender<(
 			state_chain_runtime::RuntimeCall,
-			oneshot::Sender<Result<H256, anyhow::Error>>,
+			oneshot::Sender<Result>,
 		)>,
 		call: Call,
 		logger: &slog::Logger,
-	) -> Result<H256, anyhow::Error>
+	) -> Result
 	where
 		Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug,
 	{
@@ -71,7 +81,7 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 
 		let extrinsic_result = extrinsic_result_receiver.await.expect("Backend failed"); // TODO: This type of error in the codebase is currently handled inconsistently
 
-		match &extrinsic_result {
+		/* TODO match &extrinsic_result {
 			Ok(tx_hash) => {
 				slog::info!(
 					logger,
@@ -83,7 +93,7 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 			Err(error) => {
 				slog::error!(logger, "{:?} submission failed with error: {}", &call, error);
 			},
-		}
+		}*/
 
 		extrinsic_result
 	}
@@ -97,9 +107,8 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> Extrin
 		self.account_id.clone()
 	}
 
-	/// Sign and submit an extrinsic, retrying up to [MAX_EXTRINSIC_RETRY_ATTEMPTS] times if it
-	/// fails on an invalid nonce.
-	async fn submit_signed_extrinsic<Call>(&self, call: Call, logger: &slog::Logger) -> Result<H256>
+	/// Sign, submit, and watch an extrinsic retrying if submissions fail be to finalized
+	async fn submit_signed_extrinsic<Call>(&self, call: Call, logger: &slog::Logger) -> SignedExtrinsicResult
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
 			+ Clone
@@ -126,49 +135,5 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> Extrin
 			+ 'static,
 	{
 		Self::submit_extrinsic(&self.unsigned_extrinsic_request_sender, call, logger).await
-	}
-
-	/// Watches *only* submitted extrinsics. I.e. Cannot watch for chain called extrinsics.
-	async fn watch_submitted_extrinsic<BlockStream>(
-		&self,
-		extrinsic_hash: state_chain_runtime::Hash,
-		block_stream: &mut BlockStream,
-	) -> Result<Vec<state_chain_runtime::RuntimeEvent>>
-	where
-		BlockStream: Stream<Item = state_chain_runtime::Header> + Unpin + Send + 'static,
-	{
-		while let Some(header) = block_stream.next().await {
-			let block_hash = header.hash();
-			if let Some(signed_block) = self.base_rpc_client.block(block_hash).await? {
-				match signed_block.block.extrinsics.iter().position(|ext| {
-					let hash = BlakeTwo256::hash_of(ext);
-					hash == extrinsic_hash
-				}) {
-					Some(extrinsic_index_found) => {
-						let events_for_block = self
-							.storage_value::<frame_system::Events<state_chain_runtime::Runtime>>(
-								block_hash,
-							)
-							.await?;
-						return Ok(events_for_block
-							.into_iter()
-							.filter_map(|event_record| {
-								if let Phase::ApplyExtrinsic(i) = event_record.phase {
-									if i as usize != extrinsic_index_found {
-										None
-									} else {
-										Some(event_record.event)
-									}
-								} else {
-									None
-								}
-							})
-							.collect::<Vec<_>>())
-					},
-					None => continue,
-				}
-			};
-		}
-		Err(anyhow!("Block stream loop exited, no event found",))
 	}
 }
