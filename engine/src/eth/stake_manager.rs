@@ -1,4 +1,4 @@
-use crate::state_chain_observer::client::extrinsic_api::ExtrinsicApi;
+use crate::state_chain_observer::client::extrinsic_api::SignedExtrinsicApi;
 use std::sync::Arc;
 
 use crate::eth::{utils, EthRpcApi, SignatureAndEvent};
@@ -97,14 +97,14 @@ impl EthContractWitnesser for StakeManager {
 	) -> anyhow::Result<()>
 	where
 		EthRpcClient: EthRpcApi + Sync + Send,
-		StateChainClient: ExtrinsicApi + Send + Sync,
+		StateChainClient: SignedExtrinsicApi + Send + Sync,
 	{
 		for event in block.block_items {
 			slog::info!(logger, "Handling event: {}", event);
 			match event.event_parameters {
 				StakeManagerEvent::Staked { account_id, amount, staker: _, return_addr } => {
 					let _result = state_chain_client
-						.submit_signed_extrinsic(
+						.finalize_signed_extrinsic(
 							pallet_cf_witnesser::Call::witness_at_epoch {
 								call: Box::new(
 									pallet_cf_staking::Call::staked {
@@ -123,7 +123,7 @@ impl EthContractWitnesser for StakeManager {
 				},
 				StakeManagerEvent::ClaimExecuted { account_id, amount } => {
 					let _result = state_chain_client
-						.submit_signed_extrinsic(
+						.finalize_signed_extrinsic(
 							pallet_cf_witnesser::Call::witness_at_epoch {
 								call: Box::new(
 									pallet_cf_staking::Call::claimed {

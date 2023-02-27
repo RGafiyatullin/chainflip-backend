@@ -24,7 +24,7 @@ use chainflip_engine::{
 	logging::utils::new_discard_logger,
 	state_chain_observer::client::{
 		base_rpc_api::{BaseRpcApi, BaseRpcClient, RawRpcApi},
-		extrinsic_api::ExtrinsicApi,
+		extrinsic_api::SignedExtrinsicApi,
 		storage_api::StorageApi,
 		StateChainClient,
 	},
@@ -100,7 +100,7 @@ where
 			.await?;
 
 			let (_tx_hash, _dispatch_info, events) =
-				state_chain_client.submit_signed_extrinsic(call, &logger).await?;
+				state_chain_client.finalize_signed_extrinsic(call, &logger).await?;
 
 			Ok(events)
 		}
@@ -132,7 +132,7 @@ pub async fn request_claim(
 			}
 
 			let (tx_hash, ..) = state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_staking::Call::claim { amount, address: eth_address },
 					&logger,
 				)
@@ -163,7 +163,7 @@ pub async fn register_account_role(
 			.await?;
 
 			let (tx_hash, ..) = state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_account_roles::Call::register_account_role { role },
 					&logger,
 				)
@@ -203,7 +203,7 @@ pub async fn rotate_keys(state_chain_settings: &settings::StateChain) -> Result<
 			};
 
 			let (tx_hash, ..) = state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_validator::Call::set_keys {
 						keys: new_session_key,
 						proof: [0; 1].to_vec(),
@@ -236,7 +236,7 @@ pub async fn force_rotation(state_chain_settings: &settings::StateChain) -> Resu
 
 			println!("Submitting governance proposal for rotation.");
 			state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_governance::Call::propose_governance_extrinsic {
 						call: Box::new(pallet_cf_validator::Call::force_rotation {}.into()),
 					},
@@ -267,7 +267,7 @@ pub async fn stop_bidding(state_chain_settings: &settings::StateChain) -> Result
 			)
 			.await?;
 			let (tx_hash, ..) = state_chain_client
-				.submit_signed_extrinsic(pallet_cf_staking::Call::stop_bidding {}, &logger)
+				.finalize_signed_extrinsic(pallet_cf_staking::Call::stop_bidding {}, &logger)
 				.await
 				.expect("Could not stop bidding");
 			println!("Account stopped bidding, in tx {tx_hash:#x}.");
@@ -295,7 +295,7 @@ pub async fn start_bidding(state_chain_settings: &settings::StateChain) -> Resul
 		{
 			AccountRole::Validator => {
 				let (tx_hash, ..) = state_chain_client
-					.submit_signed_extrinsic(pallet_cf_staking::Call::start_bidding {}, &logger)
+					.finalize_signed_extrinsic(pallet_cf_staking::Call::start_bidding {}, &logger)
 					.await
 					.expect("Could not start bidding");
 				println!("Account started bidding at tx {tx_hash:#x}.");
@@ -333,7 +333,7 @@ pub async fn set_vanity_name(
 			)
 			.await?;
 			let (tx_hash, ..) = state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_validator::Call::set_vanity_name { name: name.as_bytes().to_vec() },
 					&logger,
 				)

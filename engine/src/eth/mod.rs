@@ -33,7 +33,7 @@ use crate::{
 	},
 	logging::COMPONENT_KEY,
 	settings,
-	state_chain_observer::client::extrinsic_api::ExtrinsicApi,
+	state_chain_observer::client::extrinsic_api::SignedExtrinsicApi,
 	witnesser::{block_head_stream_from::block_head_stream_from, BlockNumberable},
 };
 
@@ -384,7 +384,7 @@ pub trait EthContractWitnesser {
 	) -> anyhow::Result<()>
 	where
 		EthRpcClient: EthRpcApi + Sync + Send,
-		StateChainClient: ExtrinsicApi + Send + Sync;
+		StateChainClient: SignedExtrinsicApi + Send + Sync;
 
 	fn contract_address(&self) -> H160;
 }

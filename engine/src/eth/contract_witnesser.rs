@@ -5,7 +5,7 @@ use cf_chains::eth::Ethereum;
 use sp_core::H160;
 
 use crate::{
-	eth::web3_h160, state_chain_observer::client::extrinsic_api::ExtrinsicApi,
+	eth::web3_h160, state_chain_observer::client::extrinsic_api::SignedExtrinsicApi,
 	witnesser::EpochStart,
 };
 
@@ -31,7 +31,7 @@ impl<StateChainClient> ContractWitnesser<Erc20Witnesser, StateChainClient> {
 impl<Contract, StateChainClient> ContractWitnesser<Contract, StateChainClient>
 where
 	Contract: EthContractWitnesser,
-	StateChainClient: ExtrinsicApi + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + Send + Sync,
 {
 	pub fn new(
 		contract: Contract,
@@ -54,7 +54,7 @@ where
 impl<Contract, StateChainClient> BlockProcessor for ContractWitnesser<Contract, StateChainClient>
 where
 	Contract: EthContractWitnesser + Send + Sync,
-	StateChainClient: ExtrinsicApi + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + Send + Sync,
 {
 	async fn process_block(
 		&mut self,

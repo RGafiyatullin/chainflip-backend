@@ -25,7 +25,7 @@ use subxt::{
 
 use crate::{
 	multisig::{ChainTag, PersistentKeyDB},
-	state_chain_observer::client::extrinsic_api::ExtrinsicApi,
+	state_chain_observer::client::extrinsic_api::SignedExtrinsicApi,
 	witnesser::{
 		block_head_stream_from::block_head_stream_from,
 		checkpointing::{
@@ -276,7 +276,7 @@ pub async fn start<StateChainClient, DotRpc>(
 	logger: slog::Logger,
 ) -> std::result::Result<(), (async_broadcast::Receiver<EpochStart<Polkadot>>, anyhow::Error)>
 where
-	StateChainClient: ExtrinsicApi + 'static + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + 'static + Send + Sync,
 	DotRpc: DotRpcApi + 'static + Send + Sync + Clone,
 {
 	epoch_witnesser::start(
@@ -417,7 +417,7 @@ where
 
 					for call in vault_key_rotated_calls {
 						let _result = state_chain_client
-								.submit_signed_extrinsic(
+								.finalize_signed_extrinsic(
 									pallet_cf_witnesser::Call::witness_at_epoch {
 										call,
 										epoch_index: epoch_start.epoch_index,
@@ -457,7 +457,7 @@ where
 										);
 
 										let _result = state_chain_client
-											.submit_signed_extrinsic(
+											.finalize_signed_extrinsic(
 												pallet_cf_witnesser::Call::witness_at_epoch {
 													call: Box::new(
 														pallet_cf_broadcast::Call::<_, PolkadotInstance>::signature_accepted {
@@ -487,7 +487,7 @@ where
 					if !ingress_witnesses.is_empty() {
 						let _result =
 							state_chain_client
-								.submit_signed_extrinsic(
+								.finalize_signed_extrinsic(
 									pallet_cf_witnesser::Call::witness_at_epoch {
 										call:
 											Box::new(

@@ -8,7 +8,7 @@ use web3::{
 	types::H160,
 };
 
-use crate::state_chain_observer::client::extrinsic_api::ExtrinsicApi;
+use crate::state_chain_observer::client::extrinsic_api::SignedExtrinsicApi;
 
 use super::{
 	core_h160, core_h256, event::Event, rpc::EthRpcApi, utils, BlockWithItems, DecodeLogClosure,
@@ -77,7 +77,7 @@ impl EthContractWitnesser for Erc20Witnesser {
 	) -> Result<()>
 	where
 		EthRpcClient: EthRpcApi + Sync + Send,
-		StateChainClient: ExtrinsicApi + Send + Sync,
+		StateChainClient: SignedExtrinsicApi + Send + Sync,
 	{
 		while let Ok(address) = self.monitored_address_receiver.try_recv() {
 			self.monitored_addresses.insert(address);
@@ -101,7 +101,7 @@ impl EthContractWitnesser for Erc20Witnesser {
 
 		if !ingress_witnesses.is_empty() {
 			let _result = state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_witnesser::Call::witness_at_epoch {
 						call: Box::new(
 							pallet_cf_ingress_egress::Call::<_, EthereumInstance>::do_ingress {

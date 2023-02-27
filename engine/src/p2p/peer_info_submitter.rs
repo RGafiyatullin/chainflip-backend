@@ -15,7 +15,7 @@ use utilities::{make_periodic_tick, Port};
 use crate::{
 	logging::COMPONENT_KEY,
 	p2p::PeerInfo,
-	state_chain_observer::client::{extrinsic_api::ExtrinsicApi, storage_api::StorageApi},
+	state_chain_observer::client::{extrinsic_api::SignedExtrinsicApi, storage_api::StorageApi},
 };
 
 async fn update_registered_peer_id<StateChainClient>(
@@ -27,7 +27,7 @@ async fn update_registered_peer_id<StateChainClient>(
 	logger: &slog::Logger,
 ) -> Result<()>
 where
-	StateChainClient: ExtrinsicApi,
+	StateChainClient: SignedExtrinsicApi,
 {
 	let extra_info = match previous_registered_peer_info.as_ref() {
 		Some(peer_info) => {
@@ -56,7 +56,7 @@ where
 	};
 
 	state_chain_client
-		.submit_signed_extrinsic(
+		.finalize_signed_extrinsic(
 			pallet_cf_validator::Call::register_peer_id {
 				peer_id,
 				port: cfe_port,
@@ -81,7 +81,7 @@ pub async fn start<StateChainClient>(
 	logger: slog::Logger,
 ) -> Result<()>
 where
-	StateChainClient: StorageApi + ExtrinsicApi + Send + Sync,
+	StateChainClient: StorageApi + SignedExtrinsicApi + Send + Sync,
 {
 	let logger = logger.new(o!(COMPONENT_KEY => "P2PClient"));
 

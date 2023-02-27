@@ -7,7 +7,7 @@ use state_chain_runtime::EthereumInstance;
 
 use crate::{
 	eth::{core_h160, core_h256},
-	state_chain_observer::client::extrinsic_api::ExtrinsicApi,
+	state_chain_observer::client::extrinsic_api::SignedExtrinsicApi,
 	witnesser::EpochStart,
 };
 
@@ -23,7 +23,7 @@ pub struct IngressWitnesser<StateChainClient> {
 
 impl<StateChainClient> IngressWitnesser<StateChainClient>
 where
-	StateChainClient: ExtrinsicApi + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + Send + Sync,
 {
 	pub fn new(
 		state_chain_client: Arc<StateChainClient>,
@@ -49,7 +49,7 @@ where
 #[async_trait]
 impl<StateChainClient> BlockProcessor for IngressWitnesser<StateChainClient>
 where
-	StateChainClient: ExtrinsicApi + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + Send + Sync,
 {
 	async fn process_block(
 		&mut self,
@@ -92,7 +92,7 @@ where
 		if !ingress_witnesses.is_empty() {
 			let _result = self
 				.state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_witnesser::Call::witness_at_epoch {
 						call: Box::new(
 							pallet_cf_ingress_egress::Call::<_, EthereumInstance>::do_ingress {

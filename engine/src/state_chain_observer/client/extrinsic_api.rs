@@ -8,38 +8,30 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Error, Debug)]
-pub enum EventParseError {
-	#[error("Unexpected event signature in log subscription: {0:?}")]
-	UnexpectedEvent(H256),
-	#[error("Cannot decode missing parameter: '{0}'.")]
-	MissingParam(String),
-}
-
-#[derive(Error, Debug)]
-pub enum ExtrinsicFailure {
+pub enum ExtrinsicFinalizationError {
 	#[error("The requested transaction was included in a finalized block with tx_hash: {0:#?}")]
 	Finalized(H256, DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>, DispatchError),
 	#[error("The requested transaction was not and will not be included in a finalized block")]
-	Unfinalized,
+	NotFinalized,
 	#[error(
 		"The requested transaction was not (but maybe in the future) included in a finalized block"
 	)]
 	Unknown,
 }
 
-pub type SignedExtrinsicResult =
-	Result<(H256, DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>), ExtrinsicFailure>;
+pub type ExtrinsicFinalizationResult =
+	Result<(H256, DispatchInfo, Vec<state_chain_runtime::RuntimeEvent>), ExtrinsicFinalizationError>;
 
 // Note 'static on the generics in this trait are only required for mockall to mock it
 #[async_trait]
-pub trait ExtrinsicApi {
+pub trait SignedExtrinsicApi {
 	fn account_id(&self) -> AccountId;
 
-	async fn submit_signed_extrinsic<Call>(
+	async fn request_signed_extrinsic<Call>(
 		&self,
 		call: Call,
 		logger: &slog::Logger,
-	) -> SignedExtrinsicResult
+	) -> ExtrinsicFinalizationResult
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
 			+ Clone
@@ -47,7 +39,11 @@ pub trait ExtrinsicApi {
 			+ Send
 			+ Sync
 			+ 'static;
+}
 
+// Note 'static on the generics in this trait are only required for mockall to mock it
+#[async_trait]
+pub trait UnsignedExtrinsicApi {
 	async fn submit_unsigned_extrinsic<Call>(
 		&self,
 		call: Call,
@@ -65,13 +61,12 @@ pub trait ExtrinsicApi {
 impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 	super::StateChainClient<BaseRpcApi>
 {
-	async fn submit_extrinsic<Call, Result: Send>(
+	async fn send_request_and_receive_result<Call, Result: Send>(
 		request_sender: &mpsc::UnboundedSender<(
 			state_chain_runtime::RuntimeCall,
 			oneshot::Sender<Result>,
 		)>,
 		call: Call,
-		_logger: &slog::Logger,
 	) -> Result
 	where
 		Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug,
@@ -82,27 +77,12 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 			let _result = request_sender.send((call.clone().into(), extrinsic_result_sender));
 		}
 
-		extrinsic_result_receiver.await.expect("Backend failed") // TODO: This type of error in the codebase
-		                                                 // is currently handled inconsistently
-
-		/* TODO match &extrinsic_result {
-			Ok(tx_hash) => {
-				slog::info!(
-					logger,
-					"{:?} submission succeeded with tx_hash: {:#x}",
-					&call,
-					tx_hash
-				);
-			},
-			Err(error) => {
-				slog::error!(logger, "{:?} submission failed with error: {}", &call, error);
-			},
-		}*/
+		extrinsic_result_receiver.await.expect("Backend failed") // TODO: This type of error in the codebase is currently handled inconsistently
 	}
 }
 
 #[async_trait]
-impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> ExtrinsicApi
+impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> SignedExtrinsicApi
 	for super::StateChainClient<BaseRpcApi>
 {
 	fn account_id(&self) -> AccountId {
@@ -110,11 +90,11 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> Extrin
 	}
 
 	/// Sign, submit, and watch an extrinsic retrying if submissions fail be to finalized
-	async fn submit_signed_extrinsic<Call>(
+	async fn finalize_signed_extrinsic<Call>(
 		&self,
 		call: Call,
-		logger: &slog::Logger,
-	) -> SignedExtrinsicResult
+		_logger: &slog::Logger,
+	) -> ExtrinsicFinalizationResult
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
 			+ Clone
@@ -123,14 +103,19 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> Extrin
 			+ Sync
 			+ 'static,
 	{
-		Self::submit_extrinsic(&self.signed_extrinsic_request_sender, call, logger).await
+		Self::send_request_and_receive_result(&self.signed_extrinsic_request_sender, call).await
 	}
+}
 
+#[async_trait]
+impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> UnsignedExtrinsicApi
+	for super::StateChainClient<BaseRpcApi>
+{
 	/// Submit an unsigned extrinsic.
 	async fn submit_unsigned_extrinsic<Call>(
 		&self,
 		call: Call,
-		logger: &slog::Logger,
+		_logger: &slog::Logger,
 	) -> Result<H256>
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
@@ -140,6 +125,6 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> Extrin
 			+ Sync
 			+ 'static,
 	{
-		Self::submit_extrinsic(&self.unsigned_extrinsic_request_sender, call, logger).await
+		Self::send_request_and_receive_result(&self.unsigned_extrinsic_request_sender, call).await
 	}
 }

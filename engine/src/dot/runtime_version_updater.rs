@@ -5,7 +5,7 @@ use futures::StreamExt;
 use sp_core::H256;
 
 use crate::{
-	state_chain_observer::client::{extrinsic_api::ExtrinsicApi, storage_api::StorageApi},
+	state_chain_observer::client::{extrinsic_api::SignedExtrinsicApi, storage_api::StorageApi},
 	witnesser::{epoch_witnesser, EpochStart},
 };
 
@@ -18,7 +18,7 @@ pub async fn start<StateChainClient, DotRpc>(
 	logger: slog::Logger,
 ) -> Result<(), (async_broadcast::Receiver<EpochStart<Polkadot>>, anyhow::Error)>
 where
-	StateChainClient: ExtrinsicApi + StorageApi + 'static + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + StorageApi + 'static + Send + Sync,
 	DotRpc: DotRpcApi + 'static + Send + Sync + Clone,
 {
 	// When this witnesser starts up, we should check that the runtime version is up to
@@ -63,7 +63,7 @@ where
 
 					if new_runtime_version.spec_version > last_version_witnessed.spec_version {
 						let _result = state_chain_client
-									.submit_signed_extrinsic(
+									.finalize_signed_extrinsic(
 										pallet_cf_witnesser::Call::witness_at_epoch {
 											call: Box::new(
 												pallet_cf_environment::Call::update_polkadot_runtime_version {

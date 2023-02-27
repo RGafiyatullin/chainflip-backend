@@ -1283,9 +1283,9 @@ where
 		.expect_account_id()
 		.times(2)
 		.return_const(our_account_id.clone());
-	state_chain_client.
-expect_submit_signed_extrinsic::<pallet_cf_threshold_signature::Call<state_chain_runtime::Runtime,
-I>>() 		.once()
+	state_chain_client
+		.expect_finalize_signed_extrinsic::<pallet_cf_threshold_signature::Call<state_chain_runtime::Runtime, I>>()
+		.once()
 		.return_once(|_, _| Ok(Default::default()));
 	let state_chain_client = Arc::new(state_chain_client);
 
@@ -1390,7 +1390,7 @@ where
 		.times(2)
 		.return_const(our_account_id.clone());
 	state_chain_client
-		.expect_submit_signed_extrinsic::<pallet_cf_vaults::Call<state_chain_runtime::Runtime, I>>()
+		.expect_finalize_signed_extrinsic::<pallet_cf_vaults::Call<state_chain_runtime::Runtime, I>>()
 		.once()
 		.return_once(|_, _| Ok(Default::default()));
 	let state_chain_client = Arc::new(state_chain_client);

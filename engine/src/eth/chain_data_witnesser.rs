@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use crate::{
-	state_chain_observer::client::extrinsic_api::ExtrinsicApi,
+	state_chain_observer::client::extrinsic_api::SignedExtrinsicApi,
 	witnesser::{epoch_witnesser, EpochStart},
 };
 
@@ -25,7 +25,7 @@ pub async fn start<StateChainClient, EthRpcClient>(
 ) -> anyhow::Result<(), (async_broadcast::Receiver<EpochStart<Ethereum>>, ())>
 where
 	EthRpcClient: 'static + EthRpcApi + Clone + Send + Sync,
-	StateChainClient: ExtrinsicApi + 'static + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + 'static + Send + Sync,
 {
 	epoch_witnesser::start(
         "ETH-Chain-Data".to_string(),
@@ -62,7 +62,7 @@ where
 
                     if latest_data.block_height > last_witnessed_data.block_height || latest_data.base_fee != last_witnessed_data.base_fee {
                         let _result = state_chain_client
-                            .submit_signed_extrinsic(
+                            .finalize_signed_extrinsic(
                                 state_chain_runtime::RuntimeCall::Witnesser(pallet_cf_witnesser::Call::witness_at_epoch {
                                     call: Box::new(state_chain_runtime::RuntimeCall::EthereumChainTracking(
                                         pallet_cf_chain_tracking::Call::update_chain_state {

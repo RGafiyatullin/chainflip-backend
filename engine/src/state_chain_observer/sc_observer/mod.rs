@@ -27,7 +27,7 @@ use crate::{
 		client::MultisigClientApi, eth::EthSigning, polkadot::PolkadotSigning, CryptoScheme, KeyId,
 	},
 	p2p::{PeerInfo, PeerUpdate},
-	state_chain_observer::client::{extrinsic_api::ExtrinsicApi, storage_api::StorageApi},
+	state_chain_observer::client::{extrinsic_api::{UnsignedExtrinsicApi, SignedExtrinsicApi}, storage_api::StorageApi},
 	task_scope::{task_scope, Scope},
 	witnesser::EpochStart,
 };
@@ -48,7 +48,7 @@ async fn handle_keygen_request<'a, StateChainClient, MultisigClient, C, I>(
 	logger: slog::Logger,
 ) where
 	MultisigClient: MultisigClientApi<C>,
-	StateChainClient: ExtrinsicApi + 'static + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + 'static + Send + Sync,
     state_chain_runtime::Runtime: pallet_cf_vaults::Config<I>,
 	C: CryptoScheme<AggKey = <<state_chain_runtime::Runtime as pallet_cf_vaults::Config<I>>::Chain as ChainCrypto>::AggKey>,
 	I: 'static + Sync + Send,
@@ -60,7 +60,7 @@ async fn handle_keygen_request<'a, StateChainClient, MultisigClient, C, I>(
 			multisig_client.initiate_keygen(ceremony_id, keygen_participants);
 		scope.spawn(async move {
 			let _result = state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_vaults::Call::<state_chain_runtime::Runtime, I>::report_keygen_outcome {
 						ceremony_id,
 						reported_outcome: keygen_result_future
@@ -92,7 +92,7 @@ async fn handle_signing_request<'a, StateChainClient, MultisigClient, C, I>(
 	logger: slog::Logger,
 ) where
 	MultisigClient: MultisigClientApi<C>,
-	StateChainClient: ExtrinsicApi + 'static + Send + Sync,
+	StateChainClient: SignedExtrinsicApi + UnsignedExtrinsicApi + 'static + Send + Sync,
 	C: CryptoScheme,
 	I: 'static + Sync + Send,
     state_chain_runtime::Runtime: pallet_cf_threshold_signature::Config<I>,
@@ -123,7 +123,7 @@ async fn handle_signing_request<'a, StateChainClient, MultisigClient, C, I>(
 				Err((bad_account_ids, _reason)) => {
 					let _result =
 						state_chain_client
-							.submit_signed_extrinsic(
+							.finalize_signed_extrinsic(
 								pallet_cf_threshold_signature::Call::<
 									state_chain_runtime::Runtime,
 									I,
@@ -205,7 +205,7 @@ where
 	EthRpc: EthRpcApi + Send + Sync + 'static,
 	EthMultisigClient: MultisigClientApi<EthSigning> + Send + Sync + 'static,
 	PolkadotMultisigClient: MultisigClientApi<PolkadotSigning> + Send + Sync + 'static,
-	StateChainClient: StorageApi + ExtrinsicApi + 'static + Send + Sync,
+	StateChainClient: StorageApi + UnsignedExtrinsicApi + SignedExtrinsicApi + 'static + Send + Sync,
 {
 	task_scope(|scope| async {
         let logger = logger.new(o!(COMPONENT_KEY => "SCObserver"));
@@ -295,7 +295,7 @@ where
             async move {
                 tokio::time::sleep(Duration::from_secs(60)).await;
                     state_chain_client
-                    .submit_signed_extrinsic(
+                    .finalize_signed_extrinsic(
                         pallet_cf_reputation::Call::heartbeat {},
                         &logger,
                     )
@@ -510,7 +510,7 @@ where
                                                     e
                                                 );
 
-                                                let _result = state_chain_client.submit_signed_extrinsic(
+                                                let _result = state_chain_client.finalize_signed_extrinsic(
                                                     state_chain_runtime::RuntimeCall::EthereumBroadcaster(
                                                         pallet_cf_broadcast::Call::transaction_signing_failure {
                                                             broadcast_attempt_id,
@@ -605,7 +605,7 @@ where
                             current_block_header.number
                         );
                         let _result = state_chain_client
-                            .submit_signed_extrinsic(
+                            .finalize_signed_extrinsic(
                                 pallet_cf_reputation::Call::heartbeat {},
                                 &logger,
                             )

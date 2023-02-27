@@ -19,7 +19,7 @@ use chainflip_engine::{
 	settings::{CommandLineOptions, Settings},
 	state_chain_observer::{
 		self,
-		client::{extrinsic_api::ExtrinsicApi, storage_api::StorageApi},
+		client::{extrinsic_api::SignedExtrinsicApi, storage_api::StorageApi},
 		EthAddressToMonitorSender,
 	},
 	task_scope::task_scope,
@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
 				.context("Failed to create Polkadot Client")?;
 
 			state_chain_client
-				.submit_signed_extrinsic(
+				.finalize_signed_extrinsic(
 					pallet_cf_validator::Call::cfe_version {
 						new_version: SemVer {
 							major: env!("CARGO_PKG_VERSION_MAJOR").parse::<u8>().unwrap(),
