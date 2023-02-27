@@ -658,6 +658,7 @@ pub mod mocks {
 	use mockall::mock;
 	use sp_core::{storage::StorageKey, H256};
 	use state_chain_runtime::AccountId;
+	use futures::future::BoxFuture;
 
 	use super::storage_api::{
 		StorageDoubleMapAssociatedTypes, StorageMapAssociatedTypes, StorageValueAssociatedTypes,
@@ -669,11 +670,11 @@ pub mod mocks {
 		impl SignedExtrinsicApi for StateChainClient {
 			fn account_id(&self) -> AccountId;
 
-			async fn finalize_signed_extrinsic<Call>(
+			fn finalize_signed_extrinsic<Call>(
 				&self,
 				call: Call,
 				logger: &slog::Logger,
-			) -> ExtrinsicFinalizationResult
+			) -> BoxFuture<'_, ExtrinsicFinalizationResult>
 			where
 				Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug + Send + Sync + 'static;
 		}

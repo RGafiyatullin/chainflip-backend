@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use frame_support::dispatch::DispatchInfo;
+use futures::{Future, future::BoxFuture, FutureExt};
 use sp_core::H256;
 use sp_runtime::DispatchError;
 use state_chain_runtime::AccountId;
@@ -27,11 +28,11 @@ pub type ExtrinsicFinalizationResult =
 pub trait SignedExtrinsicApi {
 	fn account_id(&self) -> AccountId;
 
-	async fn request_signed_extrinsic<Call>(
+	fn finalize_signed_extrinsic<Call>(
 		&self,
 		call: Call,
 		logger: &slog::Logger,
-	) -> ExtrinsicFinalizationResult
+	) -> BoxFuture<'_, ExtrinsicFinalizationResult>
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
 			+ Clone
@@ -39,6 +40,12 @@ pub trait SignedExtrinsicApi {
 			+ Send
 			+ Sync
 			+ 'static;
+
+	async fn submit_signed_extrinsic<Call>(
+		&self,
+		call: Call,
+		logger: &slog::Logger,
+	) -> Result<H256>;
 }
 
 // Note 'static on the generics in this trait are only required for mockall to mock it
@@ -61,23 +68,23 @@ pub trait UnsignedExtrinsicApi {
 impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static>
 	super::StateChainClient<BaseRpcApi>
 {
-	async fn send_request_and_receive_result<Call, Result: Send>(
+	fn send_request_and_receive_result<Request: Debug, Result: Send>(
 		request_sender: &mpsc::UnboundedSender<(
-			state_chain_runtime::RuntimeCall,
+			Request,
 			oneshot::Sender<Result>,
 		)>,
-		call: Call,
-	) -> Result
+		request: Request,
+	) -> impl Future<Output=Result>
 	where
 		Call: Into<state_chain_runtime::RuntimeCall> + Clone + std::fmt::Debug,
 	{
-		let (extrinsic_result_sender, extrinsic_result_receiver) = oneshot::channel();
+		let (result_sender, result_receiver) = oneshot::channel();
 
 		{
-			let _result = request_sender.send((call.clone().into(), extrinsic_result_sender));
+			let _result = request_sender.send((request, result_sender));
 		}
 
-		extrinsic_result_receiver.await.expect("Backend failed") // TODO: This type of error in the codebase is currently handled inconsistently
+		result_receiver.map(|result| result.expect("Backend failed")) // TODO: This type of error in the codebase is currently handled inconsistently
 	}
 }
 
@@ -90,15 +97,32 @@ impl<BaseRpcApi: super::base_rpc_api::BaseRpcApi + Send + Sync + 'static> Signed
 	}
 
 	/// Sign, submit, and watch an extrinsic retrying if submissions fail be to finalized
-	async fn finalize_signed_extrinsic<Call>(
+	fn finalize_signed_extrinsic<Call>(
 		&self,
 		call: Call,
 		_logger: &slog::Logger,
-	) -> ExtrinsicFinalizationResult
+	) -> BoxFuture<'_, ExtrinsicFinalizationResult>
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
 			+ Clone
 			+ std::fmt::Debug
+			+ Send
+			+ Sync
+			+ 'static,
+	{
+		Self::send_request_and_receive_result(&self.signed_extrinsic_request_sender, call).boxed()
+	}
+
+	/// Submit an unsigned extrinsic.
+	async fn submit_signed_extrinsic<Call>(
+		&self,
+		call: Call,
+		_logger: &slog::Logger,
+	) -> Result<H256>
+	where
+		Call: Into<state_chain_runtime::RuntimeCall>
+			+ std::fmt::Debug
+			+ Clone
 			+ Send
 			+ Sync
 			+ 'static,
