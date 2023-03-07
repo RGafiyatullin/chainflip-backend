@@ -24,6 +24,7 @@ use subxt::{
 use tokio::select;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 
+
 use crate::{
 	multisig::{ChainTag, PersistentKeyDB},
 	state_chain_observer::client::extrinsic_api::ExtrinsicApi,
@@ -35,6 +36,7 @@ use crate::{
 		epoch_witnesser::{self},
 		BlockNumberable, EpochStart,
 	},
+	try_with_logging,
 };
 
 use anyhow::{Context, Result};
@@ -219,6 +221,18 @@ fn check_for_interesting_events_in_block(
 	)
 }
 
+pub struct WitnesserReceiverPairs {
+	ingress: (
+		tokio::sync::mpsc::UnboundedReceiver<PolkadotAccountId>,
+		BTreeSet<PolkadotAccountId>,
+	),
+	// TODO: Alias signature
+	signature: (
+		tokio::sync::mpsc::UnboundedReceiver<[u8; 64]>,
+		BTreeSet<[u8; 64]>,
+	),
+}
+
 /// Polkadot witnesser
 ///
 /// This component does all witnessing activities for Polkadot. This includes rotation witnessing,
@@ -229,13 +243,13 @@ fn check_for_interesting_events_in_block(
 pub async fn start<StateChainClient, DotRpc>(
 	epoch_starts_receiver: async_broadcast::Receiver<EpochStart<Polkadot>>,
 	dot_client: DotRpc,
-	ingress_address_receiver: tokio::sync::mpsc::UnboundedReceiver<PolkadotAccountId>,
-	monitored_ingress_addresses: BTreeSet<PolkadotAccountId>,
-	signature_receiver: tokio::sync::mpsc::UnboundedReceiver<[u8; 64]>,
-	monitored_signatures: BTreeSet<[u8; 64]>,
+	witnesser_receiver_pairs: WitnesserReceiverPairs,
 	state_chain_client: Arc<StateChainClient>,
 	db: Arc<PersistentKeyDB>,
-) -> std::result::Result<(), (async_broadcast::Receiver<EpochStart<Polkadot>>, anyhow::Error)>
+) -> std::result::Result<
+	(),
+	(async_broadcast::Receiver<EpochStart<Polkadot>>, WitnesserReceiverPairs),
+>
 where
 	StateChainClient: ExtrinsicApi + 'static + Send + Sync,
 	DotRpc: DotRpcApi + 'static + Send + Sync + Clone,
@@ -243,21 +257,22 @@ where
 	epoch_witnesser::start(
 		epoch_starts_receiver,
 		|_epoch_start| true,
-		(monitored_ingress_addresses, ingress_address_receiver, monitored_signatures, signature_receiver),
+		witnesser_receiver_pairs,
 		move |
 		mut end_witnessing_receiver,
 			epoch_start,
-			(
-				mut monitored_ingress_addresses,
-				mut ingress_address_receiver,
-				mut monitored_signatures,
-				mut signature_receiver
-			),
+			witnesser_receiver_pairs,
 		| {
 			let dot_client = dot_client.clone();
 			let state_chain_client = state_chain_client.clone();
 			let db = db.clone();
 			async move {
+
+				let WitnesserReceiverPairs { 
+					ingress: (ingress_address_receiver, ingress_addresses_monitored), 
+					signature: (signature_receiver, signatures_monitored) 
+				};
+
 				let (from_block, witnessed_until_sender) = match get_witnesser_start_block_with_checkpointing::<Polkadot>(
 					ChainTag::Polkadot,
 					epoch_start.epoch_index,
@@ -269,23 +284,33 @@ where
 					StartCheckpointing::Started((from_block, witnessed_until_sender)) =>
 						(from_block, witnessed_until_sender),
 					StartCheckpointing::AlreadyWitnessedEpoch =>
-						return Ok((
-							monitored_ingress_addresses,
-							ingress_address_receiver,
-							monitored_signatures,
-							signature_receiver
-						)),
+						return Ok(
+							witnesser_receiver_pairs
+						),
 				};
+				
+				#[rustfmt::skip]
+				macro_rules! try_with_logging_receivers {
+					($exp:expr) => {
+						try_with_logging!(
+							$exp,
+							WitnesserReceiverPairs {
+								ingress: (ingress_address_receiver, ingress_addresses_monitored),
+								signature: (signature_receiver, signatures_monitored),
+							}
+						)
+					};
+				}
 
 				let safe_head_stream =
-					take_while_ok(dot_client.subscribe_finalized_heads().await?)
+					take_while_ok(try_with_logging_receivers!(dot_client.subscribe_finalized_heads().await))
 						.map(|header| MiniHeader {
 							block_number: header.number,
 							block_hash: header.hash(),
 						});
 
 				let dot_client_c = dot_client.clone();
-				let block_head_stream_from = block_head_stream_from(from_block, safe_head_stream, move |block_number| {
+				let block_head_stream_from = try_with_logging_receivers!(block_head_stream_from(from_block, safe_head_stream, move |block_number| {
 					let dot_client = dot_client_c.clone();
 					Box::pin(async move {
 						let block_hash = dot_client
@@ -295,7 +320,7 @@ where
 						Ok(MiniHeader { block_number, block_hash })
 					})
 				})
-				.await?;
+				.await);
 
 				let our_vault = epoch_start.data.vault_account;
 
@@ -350,6 +375,7 @@ where
 					}),
 				);
 
+
 				let mut end_at_block = None;
 				let mut current_block = from_block;
 
@@ -383,7 +409,7 @@ where
 									block_number,
 									&our_vault,
 									&mut ingress_address_receiver,
-									&mut monitored_ingress_addresses,
+									&mut ingress_addresses_monitored,
 									);
 
 							for call in vault_key_rotated_calls {
@@ -400,17 +426,17 @@ where
 							if !interesting_indices.is_empty() {
 								info!("We got an interesting block at block: {block_number}, hash: {block_hash:?}");
 
-								let block = dot_client
+								let block = try_with_logging_receivers!(dot_client
 								.block(block_hash)
 								.await
 								.context("Failed fetching block from DOT RPC")?
 								.context(format!(
 									"Polkadot block does not exist for block hash: {block_hash:?}",
-								))?;
+								)));
 
 								while let Ok(sig) = signature_receiver.try_recv()
 								{
-									monitored_signatures.insert(sig);
+									signatures_monitored.insert(sig);
 								}
 								for (extrinsic_index, tx_fee) in interesting_indices {
 									let xt = block.extrinsics.get(extrinsic_index as usize).expect("We know this exists since we got this index from the event, from the block we are querying.");
@@ -420,7 +446,7 @@ where
 									if let Ok(unchecked) = unchecked {
 										let signature = unchecked.signature.unwrap().1;
 										if let MultiSignature::Sr25519(sig) = signature {
-											if monitored_signatures.contains(&sig.0) {
+											if signatures_monitored.contains(&sig.0) {
 												info!("Witnessing signature_accepted. signature: {sig:?}");
 
 												let _result = state_chain_client
@@ -439,7 +465,7 @@ where
 													)
 													.await;
 
-											monitored_signatures.remove(&sig.0);
+											signatures_monitored.remove(&sig.0);
 											}
 										}
 									} else {
@@ -481,7 +507,7 @@ where
 							.unwrap();
 					}
 				}
-				Ok((monitored_ingress_addresses, ingress_address_receiver, monitored_signatures, signature_receiver))
+				Ok(WitnesserReceiverPairs { ingress: (ingress_address_receiver, ingress_addresses_monitored), signature: (signature_receiver, signatures_monitored) })
 			}
 		},
 	).instrument(info_span!("Dot-Witnesser"))
@@ -767,10 +793,10 @@ mod tests {
 		start(
 			epoch_starts_receiver,
 			dot_rpc_client,
-			ingress_address_receiver,
-			BTreeSet::default(),
-			signature_receiver,
-			BTreeSet::default(),
+			WitnesserReceiverPairs {
+				ingress: (ingress_address_receiver, BTreeSet::default()),
+				signature: (signature_receiver, BTreeSet::default())
+			},
 			state_chain_client,
 			Arc::new(db),
 		)
