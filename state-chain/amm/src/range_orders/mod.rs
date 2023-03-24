@@ -98,7 +98,7 @@ impl Position {
 }
 
 #[derive(Clone, Debug)]
-struct TickDelta {
+pub struct TickDelta {
 	liquidity_delta: i128,
 	liquidity_gross: u128,
 	fee_growth_outside: enum_map::EnumMap<Side, FeeGrowthQ128F128>,
@@ -116,12 +116,15 @@ pub struct PoolState {
 	positions: BTreeMap<(LiquidityProvider, Tick, Tick), Position>,
 }
 
-trait SwapDirection: crate::common::SwapDirection {
+pub trait SwapDirection: crate::common::SwapDirection {
+	/// Given the current_tick determines if the current price can increase further i.e. that there is possibly liquidity past the current price 
+	fn further_liquidity(current_tick: Tick) -> bool;
+
 	/// The xy=k maths only works while the liquidity is constant, so this function returns the
 	/// closest (to the current) next tick/price where liquidity possibly changes. Note the
 	/// direction of `next` is implied by the swapping direction.
 	fn next_liquidity_delta(
-		tick: Tick,
+		current_tick: Tick,
 		liquidity_map: &mut BTreeMap<Tick, TickDelta>,
 	) -> Option<(&Tick, &mut TickDelta)>;
 
@@ -156,12 +159,16 @@ trait SwapDirection: crate::common::SwapDirection {
 }
 
 impl SwapDirection for ZeroToOne {
+	fn further_liquidity(current_tick: Tick) -> bool {
+		current_tick >= MIN_TICK
+	}
+
 	fn next_liquidity_delta(
 		current_tick: Tick,
 		liquidity_map: &mut BTreeMap<Tick, TickDelta>,
 	) -> Option<(&Tick, &mut TickDelta)> {
 		assert!(liquidity_map.contains_key(&MIN_TICK));
-		if current_tick >= MIN_TICK {
+		if Self::further_liquidity(current_tick) {
 			Some(liquidity_map.range_mut(..=current_tick).next_back().unwrap())
 		} else {
 			assert_eq!(current_tick, Self::current_tick_after_crossing_tick(MIN_TICK));
@@ -203,12 +210,16 @@ impl SwapDirection for ZeroToOne {
 }
 
 impl SwapDirection for OneToZero {
+	fn further_liquidity(current_tick: Tick) -> bool {
+		current_tick < MAX_TICK
+	}
+
 	fn next_liquidity_delta(
 		current_tick: Tick,
 		liquidity_map: &mut BTreeMap<Tick, TickDelta>,
 	) -> Option<(&Tick, &mut TickDelta)> {
 		assert!(liquidity_map.contains_key(&MAX_TICK));
-		if current_tick < MAX_TICK {
+		if Self::further_liquidity(current_tick) {
 			Some(liquidity_map.range_mut(current_tick + 1..).next().unwrap())
 		} else {
 			assert_eq!(current_tick, Self::current_tick_after_crossing_tick(MAX_TICK));
@@ -329,6 +340,10 @@ impl PoolState {
 			.into(),
 			positions: Default::default(),
 		})
+	}
+
+	pub fn current_sqrt_price<SD: SwapDirection>(&self) -> Option<SqrtPriceQ64F96> {
+		SD::further_liquidity(self.current_tick).then_some(self.current_sqrt_price)
 	}
 
 	/// Calculates the fees owed to the specified position, resets the fees owed for that position
@@ -541,37 +556,13 @@ impl PoolState {
 		}
 	}
 
-	/// Swaps the specified Amount of Zero into One until sqrt_price_limit is reached (If Some), and
-	/// returns the One Amount and the Remaining input Zero Amount.
-	///
-	/// This function never panics
-	pub fn swap_from_zero_to_one(
-		&mut self,
-		amount: Amount,
-		sqrt_price_limit: Option<U256>,
-	) -> (Amount, Amount) {
-		self.swap::<ZeroToOne>(amount, sqrt_price_limit)
-	}
-
-	/// Swaps the specified Amount of One into Zero until sqrt_price_limit is reached (If Some), and
-	/// returns the Zero Amount and the Remaining input One Amount.
-	///
-	/// This function never panics
-	pub fn swap_from_one_to_zero(
-		&mut self,
-		amount: Amount,
-		sqrt_price_limit: Option<U256>,
-	) -> (Amount, Amount) {
-		self.swap::<OneToZero>(amount, sqrt_price_limit)
-	}
-
 	/// Swaps the specified Amount into the other currency until sqrt_price_limit is reached (If
 	/// Some), and returns the resulting Amount and the remaining input Amount. The direction of the
 	/// swap is controlled by the generic type parameter `SD`, by setting it to `ZeroToOne` or
 	/// `OneToZero`.
 	///
 	/// This function never panics
-	fn swap<SD: SwapDirection>(
+	pub fn swap<SD: SwapDirection>(
 		&mut self,
 		mut amount: Amount,
 		sqrt_price_limit: Option<U256>,
