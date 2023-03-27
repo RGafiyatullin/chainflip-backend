@@ -173,10 +173,10 @@ pub enum BurnError {
 #[derive(Debug)]
 pub enum CollectError {}
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct CollectedAmounts {
-	fees: Amount,
-	swapped_liquidity: Amount,
+	pub fees: Amount,
+	pub swapped_liquidity: Amount,
 }
 
 #[derive(Clone, Debug)]
