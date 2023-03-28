@@ -104,8 +104,12 @@ pub fn is_sqrt_price_valid(sqrt_price: SqrtPriceQ64F96) -> bool {
 	(MIN_SQRT_PRICE..MAX_SQRT_PRICE).contains(&sqrt_price)
 }
 
+pub fn is_tick_valid(tick: Tick) -> bool {
+	(MIN_TICK..=MAX_TICK).contains(&tick)
+}
+
 pub fn sqrt_price_at_tick(tick: Tick) -> SqrtPriceQ64F96 {
-	assert!((MIN_TICK..=MAX_TICK).contains(&tick));
+	assert!(is_tick_valid(tick));
 
 	let abs_tick = tick.unsigned_abs();
 

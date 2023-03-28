@@ -7,7 +7,7 @@ use primitive_types::{U256, U512};
 
 use crate::common::{
 	mul_div, mul_div_ceil, mul_div_floor, Amount, LiquidityProvider, OneToZero, Side, ZeroToOne,
-	ONE_IN_PIPS, SqrtPriceQ64F96, is_sqrt_price_valid, MIN_SQRT_PRICE, MAX_SQRT_PRICE,
+	ONE_IN_PIPS, SqrtPriceQ64F96, MIN_SQRT_PRICE, MAX_SQRT_PRICE, Tick, MIN_TICK, MAX_TICK, sqrt_price_at_tick, is_tick_valid,
 };
 
 const MAX_FIXED_POOL_LIQUIDITY: Amount = U256([u64::MAX, u64::MAX, 0, 0]);
@@ -303,13 +303,14 @@ impl PoolState {
 	pub fn collect_and_mint<SD: SwapDirection>(
 		&mut self,
 		lp: LiquidityProvider,
-		sqrt_price: SqrtPriceQ64F96,
+		tick: Tick,
 		amount: Amount,
 	) -> Result<CollectedAmounts, PositionError<MintError>> {
 		if amount == Amount::zero() {
-			self.inner_collect::<SD, _>(lp, sqrt_price)
+			self.inner_collect::<SD, _>(lp, tick)
 		} else {
-			Self::validate_sqrt_price(sqrt_price)?;
+			let sqrt_price = Self::validate_tick(tick)?;
+			
 			let liquidity: Side = !SD::INPUT_SIDE;
 
 			let mut next_pool_instance = self.next_pool_instance;
@@ -383,11 +384,11 @@ impl PoolState {
 		}
 	}
 
-	fn validate_sqrt_price<T>(
-		sqrt_price: SqrtPriceQ64F96,
-	) -> Result<(), PositionError<T>> {
-		is_sqrt_price_valid(sqrt_price)
-			.then_some(())
+	fn validate_tick<T>(
+		tick: Tick,
+	) -> Result<SqrtPriceQ64F96, PositionError<T>> {
+		is_tick_valid(tick)
+			.then(|| sqrt_price_at_tick(tick))
 			.ok_or(PositionError::InvalidPrice)
 	}
 
@@ -410,10 +411,10 @@ impl PoolState {
 	pub fn collect_and_burn<SD: SwapDirection>(
 		&mut self,
 		lp: LiquidityProvider,
-		sqrt_price: SqrtPriceQ64F96,
+		tick: Tick,
 		amount: Amount,
 	) -> Result<(Amount, CollectedAmounts), PositionError<BurnError>> {
-		Self::validate_sqrt_price(sqrt_price)?;
+		let sqrt_price = Self::validate_tick(tick)?;
 		let mut position_entry = match self.positions[!SD::INPUT_SIDE].entry((sqrt_price, lp)) {
 			btree_map::Entry::Occupied(entry) => Some(entry),
 			_ => None,
@@ -471,17 +472,17 @@ impl PoolState {
 	pub fn collect<SD: SwapDirection>(
 		&mut self,
 		lp: LiquidityProvider,
-		sqrt_price: SqrtPriceQ64F96,
+		tick: Tick,
 	) -> Result<CollectedAmounts, PositionError<CollectError>> {
-		self.inner_collect::<SD, _>(lp, sqrt_price)
+		self.inner_collect::<SD, _>(lp, tick)
 	}
 
 	fn inner_collect<SD: SwapDirection, E>(
 		&mut self,
 		lp: LiquidityProvider,
-		sqrt_price: SqrtPriceQ64F96,
+		tick: Tick,
 	) -> Result<CollectedAmounts, PositionError<E>> {
-		Self::validate_sqrt_price(sqrt_price)?;
+		let sqrt_price = Self::validate_tick(tick)?;
 		let mut position_entry = match self.positions[!SD::INPUT_SIDE].entry((sqrt_price, lp)) {
 			btree_map::Entry::Occupied(entry) => Some(entry),
 			_ => None,
