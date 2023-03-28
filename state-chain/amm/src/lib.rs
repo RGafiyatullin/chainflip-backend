@@ -5,11 +5,11 @@ mod limit_orders;
 mod range_orders;
 
 pub struct PoolState {
-	limit_orders: limit_orders::PoolState,
-	range_orders: range_orders::PoolState,
+	pub limit_orders: limit_orders::PoolState,
+	pub range_orders: range_orders::PoolState,
 }
 impl PoolState {
-	fn swap<SD: common::SwapDirection + limit_orders::SwapDirection + range_orders::SwapDirection>(&mut self, mut amount: Amount) -> (Amount, Amount) {
+	pub fn swap<SD: common::SwapDirection + limit_orders::SwapDirection + range_orders::SwapDirection>(&mut self, mut amount: Amount) -> (Amount, Amount) {
 		let mut total_output_amount = Amount::zero();
 
 		while amount != Amount::zero() {
