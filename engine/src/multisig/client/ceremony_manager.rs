@@ -2,7 +2,9 @@
 mod tests;
 
 use anyhow::{anyhow, bail, Context, Result};
+use cf_chains::ChainCrypto;
 use futures::FutureExt;
+use rand_legacy::SeedableRng;
 use std::{
 	collections::{hash_map, BTreeSet, HashMap},
 	fmt::{Debug, Display},
@@ -21,13 +23,13 @@ use crate::{
 			keygen::generate_key_data,
 			CeremonyRequestDetails,
 		},
-		crypto::{generate_single_party_signature, CryptoScheme, Rng},
+		crypto::{generate_single_party_signature, CryptoScheme, Rng}, bitcoin::BtcSigning,
 	},
 	p2p::{OutgoingMultisigStageMessages, VersionedCeremonyMessage},
 	task_scope::{task_scope, Scope, ScopedJoinHandle},
 };
 use cf_primitives::{AuthorityCount, CeremonyId};
-use state_chain_runtime::AccountId;
+use state_chain_runtime::{AccountId, BitcoinInstance};
 
 use client::{ceremony_runner::CeremonyRunner, utils::PartyIdxMapping};
 
@@ -261,6 +263,15 @@ pub fn deserialize_for_version<C: CryptoScheme>(
 		}),
 		_ => Err(anyhow!("Unsupported message version: {}", message.version)),
 	}
+}
+
+#[test]
+fn test() {
+	let mut rng = crate::multisig::crypto::Rng::from_seed([0u8; 32]);
+
+	let kgr = CeremonyManager::<BtcSigning>::new([4u8; 32].into(), tokio::sync::mpsc::unbounded_channel().0, 0).single_party_keygen(rng);
+
+	assert!(cf_chains::Bitcoin::agg_key_to_key_id(BtcSigning::agg_key(&kgr.key.get_public_key()).into(), 9).public_key_bytes == kgr.key.get_public_key_bytes());
 }
 
 impl<C: CryptoScheme> CeremonyManager<C> {
@@ -504,7 +515,7 @@ impl<C: CryptoScheme> CeremonyManager<C> {
 		self.latest_ceremony_id = ceremony_id;
 	}
 
-	fn single_party_keygen(&self, mut rng: Rng) -> KeygenResultInfo<C> {
+	pub fn single_party_keygen(&self, mut rng: Rng) -> KeygenResultInfo<C> {
 		info!("Performing solo keygen");
 
 		let (_key_id, key_data) =
