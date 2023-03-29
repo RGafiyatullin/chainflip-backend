@@ -10,18 +10,18 @@ use crate::common::{
 	ONE_IN_PIPS, SqrtPriceQ64F96, MIN_SQRT_PRICE, MAX_SQRT_PRICE, Tick, MIN_TICK, MAX_TICK, sqrt_price_at_tick, is_tick_valid,
 };
 
-const MAX_FIXED_POOL_LIQUIDITY: Amount = U256([u64::MAX, u64::MAX, 0, 0]);
+pub const MAX_FIXED_POOL_LIQUIDITY: Amount = U256([u64::MAX, u64::MAX, 0, 0]);
 const PRICE_FRACTIONAL_BITS: u32 = 128;
 
 type Price = U256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct FloatBetweenZeroAndOne {
+pub struct FloatBetweenZeroAndOne {
 	normalised_mantissa: U256,
 	negative_exponent: U256,
 }
 impl FloatBetweenZeroAndOne {
-	fn max() -> Self {
+	pub fn max() -> Self {
 		Self { normalised_mantissa: U256::max_value(), negative_exponent: U256::from(0) }
 	}
 
@@ -149,13 +149,13 @@ pub enum NewError {
 	InvalidFeeAmount,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum MintError {
 	/// One of the start/end ticks of the range reached its maximum gross liquidity
 	MaximumLiquidity,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum PositionError<T> {
 	/// Invalid Price
 	InvalidPrice,
@@ -164,7 +164,7 @@ pub enum PositionError<T> {
 	Other(T),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BurnError {
 	/// Position referenced does not contain the requested liquidity
 	PositionLacksLiquidity,
@@ -180,25 +180,25 @@ pub struct CollectedAmounts {
 }
 
 #[derive(Clone, Debug)]
-struct Position {
+pub struct Position {
 	pool_instance: u128,
-	amount: Amount,
-	percent_remaining: FloatBetweenZeroAndOne,
+	pub amount: Amount,
+	pub percent_remaining: FloatBetweenZeroAndOne,
 }
 
 #[derive(Clone, Debug)]
 pub struct FixedPool {
-	pool_instance: u128,
-	available: Amount,
-	percent_remaining: FloatBetweenZeroAndOne,
+	pub pool_instance: u128,
+	pub available: Amount,
+	pub percent_remaining: FloatBetweenZeroAndOne,
 }
 
 #[derive(Clone, Debug)]
 pub struct PoolState {
 	fee_pips: u32,
-	next_pool_instance: u128,
-	fixed_pools: enum_map::EnumMap<Side, BTreeMap<SqrtPriceQ64F96, FixedPool>>,
-	positions: enum_map::EnumMap<Side, BTreeMap<(SqrtPriceQ64F96, LiquidityProvider), Position>>,
+	pub next_pool_instance: u128,
+	pub fixed_pools: enum_map::EnumMap<Side, BTreeMap<SqrtPriceQ64F96, FixedPool>>,
+	pub positions: enum_map::EnumMap<Side, BTreeMap<(SqrtPriceQ64F96, LiquidityProvider), Position>>,
 }
 
 impl PoolState {
