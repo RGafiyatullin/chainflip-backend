@@ -63,7 +63,7 @@ impl FloatBetweenZeroAndOne {
 		}
 	}
 
-	fn integer_mul_div(x: U256, numerator: &Self, denominator: &Self) -> (U256, U256) {
+	pub fn integer_mul_div(x: U256, numerator: &Self, denominator: &Self) -> (U256, U256) {
 		let (shifted_y_floor, shifted_y_ceil) =
 			mul_div(x, numerator.normalised_mantissa, denominator.normalised_mantissa);
 
@@ -181,7 +181,7 @@ pub struct CollectedAmounts {
 
 #[derive(Clone, Debug)]
 pub struct Position {
-	pool_instance: u128,
+	pub pool_instance: u128,
 	pub amount: Amount,
 	pub percent_remaining: FloatBetweenZeroAndOne,
 }
@@ -443,6 +443,7 @@ impl PoolState {
 				self.fee_pips,
 			);
 			position.percent_remaining = fixed_pool.percent_remaining.clone();
+			println!("remaining_amount_floor: {}", remaining_amount_floor);
 			position.amount = remaining_amount_floor
 				.checked_sub(amount)
 				.ok_or(PositionError::Other(BurnError::PositionLacksLiquidity))?;

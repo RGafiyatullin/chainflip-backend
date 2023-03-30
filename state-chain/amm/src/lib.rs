@@ -799,21 +799,27 @@ pub const MAX_TICK_UNISWAP_LOW: Tick = -MIN_TICK_UNISWAP_LOW;
 // // Low Fee, tickSpacing = 10, 1:1 price
 fn lowpool_initialized_zerotick_lo() -> (PoolState, Tick, Tick)
 {	
-	// encode_price_1_1
-	let mut ro_pool = range_orders::PoolState::new(500, U256::from_dec_str("79228162514264337593543950336").unwrap()).unwrap();
-	let mut lo_pool = limit_orders::PoolState::new(500).unwrap();
-	let mut pool = PoolState {
-		limit_orders: lo_pool,
-		range_orders: ro_pool,
-	};
-
-	let initick_rdown = pool.range_orders.current_tick;
-	let initick_rup = pool.range_orders.current_tick + TICKSPACING_UNISWAP_LOW;
+	let (mut pool, initick_rdown, initick_rup) = lowpool_initialized_zerotick();
 
 	assert_eq!(pool.limit_orders.collect_and_mint::<OneToZero>(Default::default(), initick_rdown, INITIALIZE_LIQUIDITY_AMOUNT.into()).unwrap(), CollectedAmounts::default());
 	assert_eq!(pool.limit_orders.collect_and_mint::<ZeroToOne>(Default::default(), initick_rup, INITIALIZE_LIQUIDITY_AMOUNT.into()).unwrap(), CollectedAmounts::default());
 
 	(pool, initick_rdown, initick_rup)
+}
+
+fn lowpool_initialized_zerotick() -> (PoolState, Tick, Tick) {
+		// encode_price_1_1
+		let mut ro_pool = range_orders::PoolState::new(500, U256::from_dec_str("79228162514264337593543950336").unwrap()).unwrap();
+		let mut lo_pool = limit_orders::PoolState::new(500).unwrap();
+		let mut pool = PoolState {
+			limit_orders: lo_pool,
+			range_orders: ro_pool,
+		};
+	
+		let initick_rdown = pool.range_orders.current_tick;
+		let initick_rup = pool.range_orders.current_tick + TICKSPACING_UNISWAP_LOW;
+	
+		(pool, initick_rdown, initick_rup)
 }
 
 #[test]
@@ -922,297 +928,100 @@ fn test_initial_liquidity_lo() {
 	assert_eq!(get_fixed_pool(&pool, Side::Zero, initick_rdown).unwrap().available + get_fixed_pool(&pool, Side::One, initick_rup).unwrap().available, (INITIALIZE_LIQUIDITY_AMOUNT * 2).into());
 }
 
-// #[test]
-// fn test_returns_insupply_inrange_lo() {
-// 	let (mut pool, _, _, _) = mediumpool_initialized_zerotick_lo();
-// 	pool.mint_limit_order(
-// 		id.clone(),
-// 		-TICKSPACING_UNISWAP_MEDIUM,
-// 		expandto18decimals(3).as_u128(),
-// 		Side::Zero,
-// 		|_| Ok::<(), ()>(()),
-// 	)
-// 	.unwrap();
-// 	pool.mint_limit_order(
-// 		id,
-// 		TICKSPACING_UNISWAP_MEDIUM,
-// 		expandto18decimals(2).as_u128(),
-// 		Side::One,
-// 		|_| Ok::<(), ()>(()),
-// 	)
-// 	.unwrap();
-// 	assert_eq!(
-// 		get_tickinfo_limit_orders(&pool, Side::Zero, &-TICKSPACING_UNISWAP_MEDIUM)
-// 			.unwrap()
-// 			.liquidity_gross +
-// 			get_tickinfo_limit_orders(&pool, Side::One, &TICKSPACING_UNISWAP_MEDIUM)
-// 				.unwrap()
-// 				.liquidity_gross,
-// 		expandto18decimals(5).as_u128(),
-// 	);
-// }
+#[test]
+fn test_returns_insupply_inrange_lo() {
+	let (mut pool, initick_rdown, initick_rup) = mediumpool_initialized_zerotick_lo();
 
-// // Uniswap "limit orders"
+	assert_eq!(pool.limit_orders.collect_and_mint::<OneToZero>(Default::default(), -TICKSPACING_UNISWAP_MEDIUM, expandto18decimals(3)).unwrap(), CollectedAmounts::default());
+	assert_eq!(pool.limit_orders.collect_and_mint::<ZeroToOne>(Default::default(), TICKSPACING_UNISWAP_MEDIUM, expandto18decimals(3)).unwrap(), CollectedAmounts::default());
 
-// #[test]
-// fn test_limitselling_basetopair_tick0thru1_lo() {
-// 	let (mut pool, _, _, _) = mediumpool_initialized_zerotick_lo();
+	assert_eq!(get_fixed_pool(&pool, Side::Zero, -TICKSPACING_UNISWAP_MEDIUM).unwrap().available + get_fixed_pool(&pool, Side::One, TICKSPACING_UNISWAP_MEDIUM).unwrap().available, expandto18decimals(3+3+2));
 
-// 	// Value to emulate minted liquidity in Uniswap
-// 	let liquiditytomint: u128 = 5981737760509663;
 
-// 	let (minted_capital, _) = pool
-// 		.mint_limit_order(
-// 			id.clone(),
-// 			-TICKSPACING_UNISWAP_MEDIUM,
-// 			liquiditytomint,
-// 			Side::Zero,
-// 			|_| Ok::<(), ()>(()),
-// 		)
-// 		.unwrap();
+}
 
-// 	assert_eq!(minted_capital[Side::Zero], U256::from_dec_str("5981737760509663").unwrap());
-// 	assert_eq!(minted_capital[!Side::Zero], U256::from_dec_str("0").unwrap());
+// Uniswap "limit orders"
 
-// 	// somebody takes the limit order
-// 	assert!(pool
-// 		.swap::<Asset1ToAsset0>(U256::from_dec_str("2000000000000000000").unwrap())
-// 		.is_ok());
+// TO CHECK: Different flow than Uniswap but same result
+#[test]
+fn test_limitselling_basetopair_tick0thru1_lo() {
+	let (mut pool, initick_rdown, _) = mediumpool_initialized_zerotick_lo();
 
-// 	let (burnt, fees_owed) = pool
-// 		.burn_limit_order(
-// 			id.clone(),
-// 			-TICKSPACING_UNISWAP_MEDIUM,
-// 			liquiditytomint,
-// 			Side::Zero,
-// 		)
-// 		.unwrap();
-// 	assert_eq!(burnt[Side::Zero], U256::from_dec_str("0").unwrap());
-// 	// For now just squaring the sqrt_price_at_tick
-// 	let position_burnt = mul_div_floor(
-// 		U256::from(liquiditytomint),
-// 		PoolState::sqrt_price_at_tick(-TICKSPACING_UNISWAP_MEDIUM)
-// 			.pow(U256::from_dec_str("2").unwrap()),
-// 		U256::from(2).pow(U256::from_dec_str("96").unwrap()),
-// 	);
-// 	assert_eq!(burnt[!Side::Zero], position_burnt);
+	// Replace position with a worse one as a backstop
+	pool.limit_orders.collect_and_burn::<OneToZero>(Default::default(), initick_rdown,  INITIALIZE_LIQUIDITY_AMOUNT.into()).unwrap();
+	assert_eq!(pool.limit_orders.collect_and_mint::<OneToZero>(Default::default(), TICKSPACING_UNISWAP_MEDIUM*2, expandto18decimals(2)).unwrap(), CollectedAmounts::default());
 
-// 	// Original value: 18107525382602. Slightly different because the amount swapped in the
-// 	// position/tick will be slightly different (tick will be crossed with slightly
-// 	// different amounts)
-// 	assert_eq!(fees_owed, 17891544354686);
+	let liquiditytomint: U256 = U256::from_dec_str("5981737760509663").unwrap();
 
-// 	match pool.burn_limit_order(id, -TICKSPACING_UNISWAP_MEDIUM, 0, Side::Zero) {
-// 		Err(PositionError::NonExistent) => {},
-// 		_ => panic!("Expected NonExistent"),
-// 	}
-// }
+	assert_eq!(pool.limit_orders.collect_and_mint::<OneToZero>(Default::default(), TICKSPACING_UNISWAP_MEDIUM, liquiditytomint).unwrap(), CollectedAmounts::default());
 
-// #[test]
-// fn test_limitselling_basetopair_tick0thru1_poke_lo() {
-// 	let (mut pool, _, _, _) = mediumpool_initialized_zerotick_lo();
+	// somebody takes the limit order
+	let (amount_out_one, amount) = pool.swap::<OneToZero>(expandto18decimals(2));
+	assert_eq!(amount, U256::zero());
 
-// 	// Value to emulate minted liquidity in Uniswap
-// 	let liquiditytomint: u128 = 5981737760509663;
 
-// 	let (minted_capital, _) = pool
-// 		.mint_limit_order(
-// 			id.clone(),
-// 			-TICKSPACING_UNISWAP_MEDIUM,
-// 			liquiditytomint,
-// 			Side::Zero,
-// 			|_| Ok::<(), ()>(()),
-// 		)
-// 		.unwrap();
+	// DIFF: In this impl. we burn remaining liquidity
+	assert_eq!(pool.limit_orders.collect_and_burn::<OneToZero>(Default::default(), TICKSPACING_UNISWAP_MEDIUM, U256::from(1)), Err(PositionError::Other(BurnError::PositionLacksLiquidity)));
+	let (_, collected_amounts) = pool.limit_orders.collect_and_burn::<OneToZero>(Default::default(), TICKSPACING_UNISWAP_MEDIUM, U256::from(0)).unwrap();
+	assert_eq!(collected_amounts.fees, U256::from_dec_str("18107525382602").unwrap());
+	assert_eq!(collected_amounts.swapped_liquidity, U256::from_dec_str("6017734268818165").unwrap());
+}
 
-// 	assert_eq!(minted_capital[Side::Zero], U256::from_dec_str("5981737760509663").unwrap());
-// 	assert_eq!(minted_capital[!Side::Zero], U256::from_dec_str("0").unwrap());
+// TO CHECK: Different flow than Uniswap but same result
+#[test]
+fn test_limitselling_basetopair_tick1thru0_lo() {
+	let (mut pool, _, initick_rup) = mediumpool_initialized_zerotick_lo();
 
-// 	// somebody takes the limit order
-// 	assert!(pool
-// 		.swap::<Asset1ToAsset0>(U256::from_dec_str("2000000000000000000").unwrap())
-// 		.is_ok());
+	// Replace position with a worse one as a backstop
+	pool.limit_orders.collect_and_burn::<ZeroToOne>(Default::default(), initick_rup,  INITIALIZE_LIQUIDITY_AMOUNT.into()).unwrap();
+	assert_eq!(pool.limit_orders.collect_and_mint::<ZeroToOne>(Default::default(), -TICKSPACING_UNISWAP_MEDIUM*2, expandto18decimals(2)).unwrap(), CollectedAmounts::default());
 
-// 	// Poke
-// 	let (burnt, fees_owed) = pool
-// 		.burn_limit_order(id.clone(), -TICKSPACING_UNISWAP_MEDIUM, 0, Side::Zero)
-// 		.unwrap();
+	let liquiditytomint: U256 = U256::from_dec_str("5981737760509663").unwrap();
 
-// 	assert_eq!(burnt[Side::Zero], U256::from_dec_str("0").unwrap());
-// 	assert_eq!(burnt[!Side::Zero], U256::from_dec_str("0").unwrap());
-// 	assert_eq!(fees_owed, 17891544354686);
+	assert_eq!(pool.limit_orders.collect_and_mint::<ZeroToOne>(Default::default(), -TICKSPACING_UNISWAP_MEDIUM, liquiditytomint).unwrap(), CollectedAmounts::default());
 
-// 	let (burnt, fees_owed) = pool
-// 		.burn_limit_order(id, -TICKSPACING_UNISWAP_MEDIUM, liquiditytomint, Side::Zero)
-// 		.unwrap();
-// 	assert_eq!(burnt[Side::Zero], U256::from_dec_str("0").unwrap());
-// 	// For now just squaring the sqrt_price_at_tick
-// 	let position_burnt = mul_div_floor(
-// 		U256::from(liquiditytomint),
-// 		PoolState::sqrt_price_at_tick(-TICKSPACING_UNISWAP_MEDIUM)
-// 			.pow(U256::from_dec_str("2").unwrap()),
-// 		U256::from(2).pow(U256::from_dec_str("96").unwrap()),
-// 	);
-// 	assert_eq!(burnt[!Side::Zero], position_burnt);
-// 	assert_eq!(fees_owed, 0);
-// }
+	// somebody takes the limit order
+	let (amount_out_one, amount) = pool.swap::<ZeroToOne>(expandto18decimals(2));
+	assert_eq!(amount, U256::zero());
 
-// #[test]
-// fn test_limitselling_pairtobase_tick1thru0_lo() {
-// 	let (mut pool, _, _, _) = mediumpool_initialized_zerotick_lo();
 
-// 	let liquiditytomint: u128 = 5981737760509663;
+	// DIFF: In this impl. we burn remaining liquidity
+	assert_eq!(pool.limit_orders.collect_and_burn::<ZeroToOne>(Default::default(), -TICKSPACING_UNISWAP_MEDIUM, U256::from(1)), Err(PositionError::Other(BurnError::PositionLacksLiquidity)));
+	let (_, collected_amounts) = pool.limit_orders.collect_and_burn::<ZeroToOne>(Default::default(), -TICKSPACING_UNISWAP_MEDIUM, U256::from(0)).unwrap();
+	assert_eq!(collected_amounts.fees, U256::from_dec_str("18107525382602").unwrap());
+	assert_eq!(collected_amounts.swapped_liquidity, U256::from_dec_str("6017734268818165").unwrap());
+}
 
-// 	let (minted_capital, _) = pool
-// 		.mint_limit_order(
-// 			id.clone(),
-// 			TICKSPACING_UNISWAP_MEDIUM,
-// 			liquiditytomint,
-// 			Side::One,
-// 			|_| Ok::<(), ()>(()),
-// 		)
-// 		.unwrap();
+// #Collect
 
-// 	assert_eq!(minted_capital[!Side::Zero], U256::from_dec_str("5981737760509663").unwrap());
-// 	assert_eq!(minted_capital[Side::Zero], U256::from_dec_str("0").unwrap());
+#[test]
+fn test_multiplelps_lo() {
+	let (mut pool, _, id) = lowpool_initialized_zerotick();
+	let id2: LiquidityProvider = LiquidityProvider::from([0xce; 32]);
 
-// 	// somebody takes the limit order
-// 	assert!(pool
-// 		.swap::<Asset0ToAsset1>(U256::from_dec_str("2000000000000000000").unwrap())
-// 		.is_ok());
+	assert_eq!(pool.limit_orders.collect_and_mint::<ZeroToOne>(id2, TICKSPACING_UNISWAP_LOW, expandto18decimals(1)).unwrap(), CollectedAmounts::default());
+	assert_eq!(pool.limit_orders.collect_and_mint::<ZeroToOne>(id2, TICKSPACING_UNISWAP_LOW, expandto18decimals(2)).unwrap(), CollectedAmounts::default());
 
-// 	let (burnt, fees_owed) = pool
-// 		.burn_limit_order(
-// 			id.clone(),
-// 			TICKSPACING_UNISWAP_MEDIUM,
-// 			expandto18decimals(1).as_u128(),
-// 			Side::One,
-// 		)
-// 		.unwrap();
-// 	assert_eq!(burnt[!Side::Zero], U256::from_dec_str("0").unwrap());
-// 	// For now just squaring the sqrt_price_at_tick
-// 	let position_burnt = mul_div_floor(
-// 		U256::from(liquiditytomint),
-// 		U256::from(2).pow(U256::from_dec_str("96").unwrap()),
-// 		PoolState::sqrt_price_at_tick(-TICKSPACING_UNISWAP_MEDIUM)
-// 			.pow(U256::from_dec_str("2").unwrap()),
-// 	);
-// 	assert_eq!(burnt[Side::Zero], position_burnt);
+	let (amount_out_one, amount) = pool.swap::<ZeroToOne>(expandto18decimals(1));
 
-// 	// DIFF: position fully burnt
-// 	assert_eq!(fees_owed, 18107525382602);
+    // poke positions
+	let (_, collected_amounts) = pool.limit_orders.collect_and_burn::<ZeroToOne>(id2, TICKSPACING_UNISWAP_LOW, U256::from(0)).unwrap();
+	// TO CHECK: As in range orders, this values are one unit off (allegedly due to Bitmap or that the two range orders are different
+	// (minTick, maxTick) & (minTick+1, maxTick-1)) => original values are (166666666666667, 333333333333333)
+	assert_eq!(collected_amounts.fees, U256::from_dec_str("166666666666666").unwrap()+ U256::from_dec_str("333333333333333").unwrap());
+}
 
-// 	match pool.burn_limit_order(id, TICKSPACING_UNISWAP_MEDIUM, 0, Side::One) {
-// 		Err(PositionError::NonExistent) => {},
-// 		_ => panic!("Expected NonExistent"),
-// 	}
-// }
+// TO CHECK: Skipping the tests enforcing a fee_growth_inside as it doesn't make sense in our pool
 
-// #[test]
-// fn test_limitselling_pairtobase_tick1thru0_poke_lo() {
-// 	let (mut pool, _, _, _) = mediumpool_initialized_zerotick_lo();
-
-// 	let liquiditytomint: u128 = 5981737760509663;
-
-// 	let (minted_capital, _) = pool
-// 		.mint_limit_order(
-// 			id.clone(),
-// 			TICKSPACING_UNISWAP_MEDIUM,
-// 			liquiditytomint,
-// 			Side::One,
-// 			|_| Ok::<(), ()>(()),
-// 		)
-// 		.unwrap();
-
-// 	assert_eq!(minted_capital[!Side::Zero], U256::from_dec_str("5981737760509663").unwrap());
-// 	assert_eq!(minted_capital[Side::Zero], U256::from_dec_str("0").unwrap());
-
-// 	// somebody takes the limit order
-// 	assert!(pool
-// 		.swap::<Asset0ToAsset1>(U256::from_dec_str("2000000000000000000").unwrap())
-// 		.is_ok());
-
-// 	let (burnt, fees_owed) = pool
-// 		.burn_limit_order(id.clone(), TICKSPACING_UNISWAP_MEDIUM, 0, Side::One)
-// 		.unwrap();
-
-// 	assert_eq!(burnt[!Side::Zero], U256::from_dec_str("0").unwrap());
-// 	assert_eq!(burnt[Side::Zero], U256::from_dec_str("0").unwrap());
-// 	assert_eq!(fees_owed, 18107525382602);
-
-// 	let (burnt, fees_owed) = pool
-// 		.burn_limit_order(
-// 			id,
-// 			TICKSPACING_UNISWAP_MEDIUM,
-// 			expandto18decimals(1).as_u128(),
-// 			Side::One,
-// 		)
-// 		.unwrap();
-// 	assert_eq!(burnt[!Side::Zero], U256::from_dec_str("0").unwrap());
-// 	// For now just squaring the sqrt_price_at_tick
-// 	let position_burnt = mul_div_floor(
-// 		U256::from(liquiditytomint),
-// 		U256::from(2).pow(U256::from_dec_str("96").unwrap()),
-// 		PoolState::sqrt_price_at_tick(-TICKSPACING_UNISWAP_MEDIUM)
-// 			.pow(U256::from_dec_str("2").unwrap()),
-// 	);
-// 	assert_eq!(burnt[Side::Zero], position_burnt);
-
-// 	// DIFF: position fully burnt
-// 	assert_eq!(fees_owed, 0);
-// }
-
-// // #Collect
-
-// #[test]
-// fn test_multiplelps_lo() {
-// 	let (mut pool, _, id) = lowpool_initialized_one();
-// 	let id2: LiquidityProvider = LiquidityProvider::from([0xce; 32]);
-
-// 	pool.mint_limit_order(
-// 		id.clone(),
-// 		TICKSPACING_UNISWAP_LOW,
-// 		expandto18decimals(1).as_u128(),
-// 		Side::One,
-// 		|_| Ok::<(), ()>(()),
-// 	)
-// 	.unwrap();
-// 	pool.mint_limit_order(
-// 		id2.clone(),
-// 		TICKSPACING_UNISWAP_LOW,
-// 		expandto18decimals(2).as_u128(),
-// 		Side::One,
-// 		|_| Ok::<(), ()>(()),
-// 	)
-// 	.unwrap();
-
-// 	assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
-
-// 	// poke positions
-// 	let (_, fees_owed) =
-// 		pool.burn_limit_order(id, TICKSPACING_UNISWAP_LOW, 0, Side::One).unwrap();
-
-// 	// NOTE: Fee_owed value 1 unit different than Uniswap because uniswap requires 4
-// 	// loops to do the swap instead of 1 causing the rounding to be different
-// 	assert_eq!(fees_owed, 166666666666666_u128);
-
-// 	let (_, fees_owed) = pool
-// 		.burn_limit_order(id2, TICKSPACING_UNISWAP_LOW, 0, Side::One)
-// 		.unwrap();
-// 	// NOTE: Fee_owed value 1 unit different than Uniswap because uniswap requires 4
-// 	// loops to do the swap instead of 1 causing the rounding to be different
-// 	assert_eq!(fees_owed, 333333333333333_u128);
-// }
-
-// // type(uint128).max * 2**128 / 1e18
-// // https://www.wolframalpha.com/input/?i=%282**128+-+1%29+*+2**128+%2F+1e18
-// // U256::from_dec_str("115792089237316195423570985008687907852929702298719625575994"
-// // ). unwr ap();
+// type(uint128).max * 2**128 / 1e18
+// https://www.wolframalpha.com/input/?i=%282**128+-+1%29+*+2**128+%2F+1e18
+// U256::from_dec_str("115792089237316195423570985008687907852929702298719625575994"
+// ). unwr ap();
 
 // // Works across large increases
 // #[test]
 // fn test_before_capbidn_lo() {
-// 	let (mut pool, _, id) = lowpool_initialized_one();
+// 	let (mut pool, _, id) = lowpool_initialized_zerotick();
 
 // 	let initick = pool.current_tick;
 
@@ -1243,7 +1052,7 @@ fn test_initial_liquidity_lo() {
 
 // #[test]
 // fn test_after_capbidn_lo() {
-// 	let (mut pool, _, id) = lowpool_initialized_one();
+// 	let (mut pool, _, id) = lowpool_initialized_zerotick();
 
 // 	let initick = pool.current_tick;
 
@@ -1274,7 +1083,7 @@ fn test_initial_liquidity_lo() {
 
 // #[test]
 // fn test_wellafter_capbidn_lo() {
-// 	let (mut pool, _, id) = lowpool_initialized_one();
+// 	let (mut pool, _, id) = lowpool_initialized_zerotick();
 
 // 	let initick = pool.current_tick;
 
@@ -1304,7 +1113,7 @@ fn test_initial_liquidity_lo() {
 // // DIFF: pool.global_fee_growth won't overflow. We make it saturate.
 
 // fn lowpool_initialized_setfees_lo() -> (PoolState, PoolAssetMap<AmountU256>, LiquidityProvider) {
-// 	let (mut pool, mut minted_amounts_accum, id) = lowpool_initialized_one();
+// 	let (mut pool, mut minted_amounts_accum, id) = lowpool_initialized_zerotick();
 // 	let id2: LiquidityProvider = LiquidityProvider::from([0xce; 32]);
 
 // 	let initick = pool.current_tick;
@@ -1382,135 +1191,104 @@ fn test_initial_liquidity_lo() {
 // 	assert_eq!(fees_owed, 0);
 // }
 
-// // Skipped more fee protocol tests
+// Skipped more fee protocol tests
 
-// // Medium Fee, tickSpacing = 12, 1:1 price
-// fn mediumpool_initialized_nomint() -> (PoolState, PoolAssetMap<AmountU256>, LiquidityProvider) {
-// 	// fee_pips shall be one order of magnitude smaller than in the Uniswap pool (because
-// 	// ONE_IN_HUNDREDTH_BIPS is /10)
-// 	let pool = PoolState::new(3000, encodedprice1_1()).unwrap();
-// 	let id: LiquidityProvider = LiquidityProvider::from([0xcf; 32]);
-// 	let minted_amounts: PoolAssetMap<AmountU256> = Default::default();
-// 	(pool, minted_amounts, id)
-// }
-// // DIFF: We have a tickspacing of 1, which means we will never have issues with it.
-// #[test]
-// fn test_tickspacing_lo() {
-// 	let (mut pool, _, id) = mediumpool_initialized_nomint();
+// Medium Fee, tickSpacing = 12, 1:1 price
+fn mediumpool_initialized_nomint() -> PoolState {
+	// encode_price_1_1
+	let mut ro_pool = range_orders::PoolState::new(3000, U256::from_dec_str("79228162514264337593543950336").unwrap()).unwrap();
+	let mut lo_pool = limit_orders::PoolState::new(3000).unwrap();
+	let mut pool = PoolState {
+		limit_orders: lo_pool,
+		range_orders: ro_pool,
+	};
+	pool
+}
+//DIFF: We have a tickspacing of 1, which means we will never have issues with it.
+#[test]
+fn test_tickspacing_lo() {
 
-// 	for asset in &[Side::Zero, Side::One] {
-// 		pool.mint_limit_order(id.clone(), -6, 1, *asset, |_| Ok::<(), ()>(())).unwrap();
-// 		pool.mint_limit_order(id.clone(), 6, 1, *asset, |_| Ok::<(), ()>(())).unwrap();
-// 		pool.mint_limit_order(id.clone(), -12, 1, *asset, |_| Ok::<(), ()>(())).unwrap();
-// 		pool.mint_limit_order(id.clone(), 12, 1, *asset, |_| Ok::<(), ()>(())).unwrap();
-// 		pool.mint_limit_order(id.clone(), -120, 1, *asset, |_| Ok::<(), ()>(()))
-// 			.unwrap();
-// 		pool.mint_limit_order(id.clone(), 120, 1, *asset, |_| Ok::<(), ()>(())).unwrap();
-// 		pool.mint_limit_order(id.clone(), -144, 1, *asset, |_| Ok::<(), ()>(()))
-// 			.unwrap();
-// 		pool.mint_limit_order(id.clone(), 144, 1, *asset, |_| Ok::<(), ()>(())).unwrap();
-// 	}
-// }
+	fn inner<SD: SwapDirection + limit_orders::SwapDirection + range_orders::SwapDirection>(pool: &mut PoolState) {
+		for i in [-144,144,-120,120,-12,12,-6,6, 0, 3, 7 , 9] {
+		assert_eq!(pool.limit_orders.collect_and_mint::<SD>(Default::default(), i, U256::from(1)).unwrap(), CollectedAmounts::default());
+		}
+	}
 
-// #[test]
-// fn test_swapping_gaps_pairtobase_lo() {
-// 	let (mut pool, _, id) = mediumpool_initialized_nomint();
-// 	// Change pool current tick so it uses the correct LO orders
-// 	pool.current_tick = 150000;
-// 	let liquidity_amount = 36096898321357_u128;
+	let mut pool = mediumpool_initialized_nomint();
+	inner::<ZeroToOne>(&mut pool);
+	inner::<OneToZero>(&mut pool);
+}
 
-// 	// Mint two orders and check that it uses the correct one.
-// 	// 120192 being the closest tick to the price that is swapped at Uniswap test
-// 	pool.mint_limit_order(id.clone(), 120192, liquidity_amount, Side::Zero, |_| {
-// 		Ok::<(), ()>(())
-// 	})
-// 	.unwrap();
-// 	pool.mint_limit_order(id.clone(), 121200, liquidity_amount, Side::Zero, |_| {
-// 		Ok::<(), ()>(())
-// 	})
-// 	.unwrap();
+#[test]
+fn test_swapping_gaps_pairtobase_lo() {
+	let mut pool = mediumpool_initialized_nomint();
 
-// 	assert!(pool.swap::<Asset1ToAsset0>(expandto18decimals(1)).is_ok());
+	let initial_tick = pool.range_orders.current_tick;
 
-// 	// This order should not have been used
+	let liquidity_amount = U256::from_dec_str("36096898321357").unwrap();
 
-// 	let (returned_capital, fees_owed) = pool
-// 		.burn_limit_order(id.clone(), 121200, liquidity_amount, Side::Zero)
-// 		.unwrap();
+	// Middle tick between 120000 and 121200 is . Mint another one and check it takes the correct one.
+	// Final tick in uniswap is 120196, we just take a tick in between and roughly compare the outputs.
+	assert_eq!(pool.limit_orders.collect_and_mint::<OneToZero>(Default::default(), 120098, liquidity_amount).unwrap(), CollectedAmounts::default());
+	assert_eq!(pool.limit_orders.collect_and_mint::<OneToZero>(Default::default(), 121200, liquidity_amount).unwrap(), CollectedAmounts::default());
 
-// 	assert_eq!(returned_capital[Side::Zero].as_u128(), liquidity_amount);
-// 	assert_eq!(returned_capital[!Side::Zero].as_u128(), 0);
-// 	assert_eq!(fees_owed, 0);
+	let (amount_out_one, amount) = pool.swap::<OneToZero>(expandto18decimals(1));
+	assert_eq!(amount, U256::zero());
 
-// 	// Poke to get the fees
-// 	let (returned_capital, fees_owed) =
-// 		pool.burn_limit_order(id, 120192, 0, Side::Zero).unwrap();
+	// This order should not have been used
+	let fixed_pool = get_fixed_pool(&pool, Side::Zero, 121200).unwrap();
+	assert_eq!(fixed_pool.available, liquidity_amount);
+	assert_eq!(fixed_pool.percent_remaining, FloatBetweenZeroAndOne::max());
 
-// 	assert!(fees_owed > 0);
+	// Poke collecting the fees - the test doesn't check them
+	let (amount, collected_amounts) = pool.limit_orders.collect_and_burn::<OneToZero>(Default::default(), 120098,U256::zero()).unwrap();
+	assert!(U256::from_dec_str("996999999999999999").unwrap() - collected_amounts.swapped_liquidity < collected_amounts.swapped_liquidity/1000);
+	// Calculated amount remaining to burn the entire position
+	let amount_remaining = U256::from_dec_str("30027214597491").unwrap() - amount;
+	let (amount, collected_amounts) = pool.limit_orders.collect_and_burn::<OneToZero>(Default::default(), 120098,amount_remaining).unwrap();
+	assert!(amount_remaining - amount < (amount / 1000));
 
-// 	// Slightly different amounts because of price difference
-// 	// Orig value: 30027458295511
-// 	assert_eq!(returned_capital[Side::Zero], U256::from_dec_str("30083999478255").unwrap());
-// 	// Substracting fees
-// 	// Orig value: 996999999999848369
-// 	assert_eq!(
-// 		returned_capital[!Side::Zero],
-// 		U256::from_dec_str("996999999999682559").unwrap()
-// 	);
+	// Check that the range order tick has moved before taking the limit orders
+	assert_ne!(pool.range_orders.current_tick, initial_tick);
+	assert_eq!(pool.range_orders.current_tick, 120098);
 
-// 	// Tick should not have changed
-// 	assert_eq!(pool.current_tick, 150000)
-// }
+}
 
-// #[test]
-// fn test_swapping_gaps_basetopair_lo() {
-// 	let (mut pool, _, id) = mediumpool_initialized_nomint();
-// 	// Change pool current tick so it uses the correct LO orders
-// 	pool.current_tick = 150000;
-// 	let liquidity_amount = 36096898321357_u128;
+#[test]
+fn test_swapping_gaps_basetopair_lo() {
+	let mut pool = mediumpool_initialized_nomint();
 
-// 	// Mint two orders and check that it uses the correct one.
-// 	// 120192 being the closest tick to the price that is swapped at Uniswap test
-// 	pool.mint_limit_order(id.clone(), 120192, liquidity_amount, Side::One, |_| {
-// 		Ok::<(), ()>(())
-// 	})
-// 	.unwrap();
-// 	pool.mint_limit_order(id.clone(), 121200, liquidity_amount, Side::One, |_| {
-// 		Ok::<(), ()>(())
-// 	})
-// 	.unwrap();
+	let initial_tick = pool.range_orders.current_tick;
 
-// 	assert!(pool.swap::<Asset0ToAsset1>(expandto18decimals(1)).is_ok());
+	let liquidity_amount = U256::from_dec_str("36096898321357").unwrap();
 
-// 	// This order should not have been used
+	// Middle tick between -120000 and -121200 is . Mint another one and check it takes the correct one.
+	// Final tick in uniswap is -120196, we just take a tick in between and roughly compare the outputs.
+	assert_eq!(pool.limit_orders.collect_and_mint::<ZeroToOne>(Default::default(), -120098, liquidity_amount).unwrap(), CollectedAmounts::default());
+	assert_eq!(pool.limit_orders.collect_and_mint::<ZeroToOne>(Default::default(), -121200, liquidity_amount).unwrap(), CollectedAmounts::default());
 
-// 	let (returned_capital, fees_owed) = pool
-// 		.burn_limit_order(id.clone(), 121200, liquidity_amount, Side::One)
-// 		.unwrap();
+	let (amount_out_one, amount) = pool.swap::<ZeroToOne>(expandto18decimals(1));
+	assert_eq!(amount, U256::zero());
 
-// 	assert_eq!(returned_capital[!Side::Zero].as_u128(), liquidity_amount);
-// 	assert_eq!(returned_capital[Side::Zero].as_u128(), 0);
-// 	assert_eq!(fees_owed, 0);
+	// This order should not have been used
+	let fixed_pool = get_fixed_pool(&pool, Side::One, -121200).unwrap();
+	assert_eq!(fixed_pool.available, liquidity_amount);
+	assert_eq!(fixed_pool.percent_remaining, FloatBetweenZeroAndOne::max());
 
-// 	// Poke to get the fees
-// 	let (returned_capital, fees_owed) =
-// 		pool.burn_limit_order(id, 120192, 0, Side::One).unwrap();
+	// Poke collecting the fees - the test doesn't check them
+	let (amount, collected_amounts) = pool.limit_orders.collect_and_burn::<ZeroToOne>(Default::default(), -120098,U256::zero()).unwrap();
+	assert!(U256::from_dec_str("996999999999999999").unwrap() - collected_amounts.swapped_liquidity < collected_amounts.swapped_liquidity/1000);
+	// Calculated amount remaining to burn the entire position
+	let amount_remaining = U256::from_dec_str("30027214597491").unwrap() - amount;
+	let (amount, collected_amounts) = pool.limit_orders.collect_and_burn::<ZeroToOne>(Default::default(), -120098,amount_remaining).unwrap();
+	assert!(amount_remaining - amount < (amount / 1000));
 
-// 	assert!(fees_owed > 0);
+	// Check that the range order tick has moved all the way to the lo tick
+	assert_ne!(pool.range_orders.current_tick, initial_tick);
+	assert_eq!(pool.range_orders.current_tick, -120098);
 
-// 	// Slightly different amounts because of price difference
-// 	// Orig value: 30027458295511
-// 	assert_eq!(returned_capital[!Side::Zero], U256::from_dec_str("30083999478255").unwrap());
-// 	// Substracting fees
-// 	// Orig value: 996999999999848369
-// 	assert_eq!(
-// 		returned_capital[Side::Zero],
-// 		U256::from_dec_str("996999999999682559").unwrap()
-// 	);
+}
 
-// 	// Tick should not have changed
-// 	assert_eq!(pool.current_tick, 150000)
-// }
 
 // ///////////////////////////////////////////////////////////
 // ///             Extra limit order tests                ////
@@ -2300,3 +2078,8 @@ fn test_initial_liquidity_lo() {
 // 	);
 // 	assert_eq!(fees_owed_0, fees_owed_1);
 // }
+
+
+
+// TODO: Add tests for new features => next_pool_instance, percent_remaining, checking that burn,collect_and_burn 
+// and collect_and_mint collect the same amounts. Check that no overflows happens when swapping big amounts.
