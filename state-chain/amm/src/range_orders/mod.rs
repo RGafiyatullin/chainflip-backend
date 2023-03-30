@@ -110,7 +110,7 @@ pub struct PoolState {
 	// Note the current_sqrt_price can reach MAX_SQRT_PRICE, but only if the tick is MAX_TICK
 	current_sqrt_price: SqrtPriceQ64F96,
 	pub current_tick: Tick,
-	current_liquidity: Liquidity,
+	pub current_liquidity: Liquidity,
 	global_fee_growth: enum_map::EnumMap<Side, FeeGrowthQ128F128>,
 	liquidity_map: BTreeMap<Tick, TickDelta>,
 	positions: BTreeMap<(LiquidityProvider, Tick, Tick), Position>,

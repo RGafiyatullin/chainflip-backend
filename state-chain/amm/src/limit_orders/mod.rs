@@ -83,7 +83,7 @@ impl FloatBetweenZeroAndOne {
 	}
 }
 
-fn sqrt_price_to_price(sqrt_price: SqrtPriceQ64F96) -> Price {
+pub fn sqrt_price_to_price(sqrt_price: SqrtPriceQ64F96) -> Price {
 	assert!((MIN_SQRT_PRICE..=MAX_SQRT_PRICE).contains(&sqrt_price));
 
 	mul_div_floor(sqrt_price, sqrt_price, SqrtPriceQ64F96::one() << (2*96 - PRICE_FRACTIONAL_BITS))
@@ -186,7 +186,7 @@ pub struct Position {
 	pub percent_remaining: FloatBetweenZeroAndOne,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FixedPool {
 	pub pool_instance: u128,
 	pub available: Amount,
@@ -195,7 +195,7 @@ pub struct FixedPool {
 
 #[derive(Clone, Debug)]
 pub struct PoolState {
-	fee_pips: u32,
+	pub fee_pips: u32,
 	pub next_pool_instance: u128,
 	pub fixed_pools: enum_map::EnumMap<Side, BTreeMap<SqrtPriceQ64F96, FixedPool>>,
 	pub positions: enum_map::EnumMap<Side, BTreeMap<(SqrtPriceQ64F96, LiquidityProvider), Position>>,
