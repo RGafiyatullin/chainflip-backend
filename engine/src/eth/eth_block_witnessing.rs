@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use cf_chains::Ethereum;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use tracing::{info_span, Instrument};
 
 use super::{
@@ -15,9 +15,7 @@ use crate::{
 	stream_utils::EngineStreamExt,
 	witnesser::{
 		block_witnesser::{BlockWitnesser, BlockWitnesserProcessor, HasBlockNumber2},
-		checkpointing::{
-			get_witnesser_start_block_with_checkpointing, StartCheckpointing, WitnessedUntil,
-		},
+		checkpointing::{get_witnesser_start_block_with_checkpointing, StartCheckpointing},
 		epoch_witnesser::{start_epoch_witnesser, EpochWitnesserGenerator, WitnesserAndStream},
 		ChainBlockNumber, EpochStart,
 	},
@@ -33,7 +31,6 @@ pub trait BlockProcessor: Send {
 }
 
 struct EthBlockWitnesser {
-	witnessed_until_sender: mpsc::Sender<WitnessedUntil>,
 	epoch: EpochStart<Ethereum>,
 }
 
@@ -76,7 +73,9 @@ impl EpochWitnesserGenerator for EthBlockWitnesserGenerator {
 
 		Ok(Some((
 			BlockWitnesser {
-				witnesser: EthBlockWitnesser { witnessed_until_sender, epoch },
+				epoch_index: epoch.epoch_index,
+				witnesser: EthBlockWitnesser { epoch },
+				witnessed_until_sender,
 				last_processed_block: from_block - 1,
 			},
 			Box::pin(block_stream),
@@ -140,14 +139,6 @@ impl BlockWitnesserProcessor for EthBlockWitnesser {
 			tracing::error!("Eth witnesser failed to process block: {err}");
 			err
 		})?;
-
-		self.witnessed_until_sender
-			.send(WitnessedUntil {
-				epoch_index: self.epoch.epoch_index,
-				block_number: block.block_number.as_u64(),
-			})
-			.await
-			.unwrap();
 
 		Ok(())
 	}

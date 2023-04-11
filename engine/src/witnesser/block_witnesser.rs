@@ -1,6 +1,7 @@
 use async_trait::async_trait;
+use cf_primitives::EpochIndex;
 
-use super::{epoch_witnesser::EpochWitnesser, ChainBlockNumber};
+use super::{checkpointing::WitnessedUntil, epoch_witnesser::EpochWitnesser, ChainBlockNumber};
 
 type BlockNumber<Witnesser> = ChainBlockNumber<<Witnesser as EpochWitnesser>::Chain>;
 
@@ -29,6 +30,8 @@ where
 	W: BlockWitnesserProcessor,
 {
 	pub witnesser: W,
+	pub epoch_index: EpochIndex,
+	pub witnessed_until_sender: tokio::sync::mpsc::Sender<WitnessedUntil>,
 	pub last_processed_block: ChainBlockNumber<W::Chain>,
 }
 
@@ -51,6 +54,14 @@ where
 		self.witnesser.process_block(block, state).await?;
 
 		self.last_processed_block = block_number;
+
+		self.witnessed_until_sender
+			.send(WitnessedUntil {
+				epoch_index: self.epoch_index,
+				block_number: block_number.into(),
+			})
+			.await
+			.unwrap();
 
 		Ok(())
 	}
