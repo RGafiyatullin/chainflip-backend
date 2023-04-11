@@ -14,12 +14,11 @@ use crate::{
 	multisig::{ChainTag, PersistentKeyDB},
 	stream_utils::EngineStreamExt,
 	witnesser::{
+		block_witnesser::{BlockWitnesser, BlockWitnesserProcessor, HasBlockNumber2},
 		checkpointing::{
 			get_witnesser_start_block_with_checkpointing, StartCheckpointing, WitnessedUntil,
 		},
-		epoch_witnesser::{
-			start_epoch_witnesser, EpochWitnesser, EpochWitnesserGenerator, WitnesserAndStream,
-		},
+		epoch_witnesser::{start_epoch_witnesser, EpochWitnesserGenerator, WitnesserAndStream},
 		ChainBlockNumber, EpochStart,
 	},
 };
@@ -36,53 +35,6 @@ pub trait BlockProcessor: Send {
 struct EthBlockWitnesser {
 	witnessed_until_sender: mpsc::Sender<WitnessedUntil>,
 	epoch: EpochStart<Ethereum>,
-	last_block_processed: ChainBlockNumber<Ethereum>,
-}
-
-#[async_trait]
-impl EpochWitnesser for EthBlockWitnesser {
-	type Chain = Ethereum;
-	type Data = EthNumberBloom;
-	type StaticState = AllWitnessers;
-
-	async fn do_witness(
-		&mut self,
-		block: EthNumberBloom,
-		witnessers: &mut AllWitnessers,
-	) -> anyhow::Result<()> {
-		tracing::trace!("Eth block witnessers are processing block {}", block.block_number);
-
-		futures::future::join_all([
-			witnessers.key_manager.process_block(&self.epoch, &block),
-			witnessers.stake_manager.process_block(&self.epoch, &block),
-			witnessers.eth_ingress.process_block(&self.epoch, &block),
-			witnessers.flip_ingress.process_block(&self.epoch, &block),
-			witnessers.usdc_ingress.process_block(&self.epoch, &block),
-		])
-		.await
-		.into_iter()
-		.collect::<anyhow::Result<Vec<()>>>()
-		.map_err(|err| {
-			tracing::error!("Eth witnesser failed to process block: {err}");
-			err
-		})?;
-
-		self.last_block_processed = block.block_number.as_u64();
-
-		self.witnessed_until_sender
-			.send(WitnessedUntil {
-				epoch_index: self.epoch.epoch_index,
-				block_number: block.block_number.as_u64(),
-			})
-			.await
-			.unwrap();
-
-		Ok(())
-	}
-
-	fn should_finish(&self, last_block_number_for_epoch: ChainBlockNumber<Self::Chain>) -> bool {
-		self.last_block_processed >= last_block_number_for_epoch
-	}
 }
 
 struct EthBlockWitnesserGenerator {
@@ -92,11 +44,11 @@ struct EthBlockWitnesserGenerator {
 
 #[async_trait]
 impl EpochWitnesserGenerator for EthBlockWitnesserGenerator {
-	type Witnesser = EthBlockWitnesser;
+	type Witnesser = BlockWitnesser<EthBlockWitnesser>;
 	async fn init(
 		&mut self,
 		epoch: EpochStart<Ethereum>,
-	) -> anyhow::Result<Option<WitnesserAndStream<EthBlockWitnesser>>> {
+	) -> anyhow::Result<Option<WitnesserAndStream<BlockWitnesser<EthBlockWitnesser>>>> {
 		let (from_block, witnessed_until_sender) =
 			match get_witnesser_start_block_with_checkpointing::<cf_chains::Ethereum>(
 				ChainTag::Ethereum,
@@ -123,10 +75,9 @@ impl EpochWitnesserGenerator for EthBlockWitnesserGenerator {
 			));
 
 		Ok(Some((
-			EthBlockWitnesser {
-				witnessed_until_sender,
-				epoch,
-				last_block_processed: from_block - 1,
+			BlockWitnesser {
+				witnesser: EthBlockWitnesser { witnessed_until_sender, epoch },
+				last_processed_block: from_block - 1,
 			},
 			Box::pin(block_stream),
 		)))
@@ -150,4 +101,54 @@ pub async fn start(
 	)
 	.instrument(info_span!("Eth-Block-Head-Witnesser"))
 	.await
+}
+
+// -------------------------------------------------------------
+
+impl HasBlockNumber2 for EthNumberBloom {
+	type BlockNumber = ChainBlockNumber<Ethereum>;
+
+	fn block_number(&self) -> Self::BlockNumber {
+		self.block_number.as_u64()
+	}
+}
+
+#[async_trait]
+impl BlockWitnesserProcessor for EthBlockWitnesser {
+	type Chain = Ethereum;
+	type Block = EthNumberBloom;
+	type StaticState = AllWitnessers;
+
+	async fn process_block(
+		&mut self,
+		block: Self::Block,
+		witnessers: &mut AllWitnessers,
+	) -> anyhow::Result<()> {
+		tracing::trace!("Eth block witnessers are processing block {}", block.block_number);
+
+		futures::future::join_all([
+			witnessers.key_manager.process_block(&self.epoch, &block),
+			witnessers.stake_manager.process_block(&self.epoch, &block),
+			witnessers.eth_ingress.process_block(&self.epoch, &block),
+			witnessers.flip_ingress.process_block(&self.epoch, &block),
+			witnessers.usdc_ingress.process_block(&self.epoch, &block),
+		])
+		.await
+		.into_iter()
+		.collect::<anyhow::Result<Vec<()>>>()
+		.map_err(|err| {
+			tracing::error!("Eth witnesser failed to process block: {err}");
+			err
+		})?;
+
+		self.witnessed_until_sender
+			.send(WitnessedUntil {
+				epoch_index: self.epoch.epoch_index,
+				block_number: block.block_number.as_u64(),
+			})
+			.await
+			.unwrap();
+
+		Ok(())
+	}
 }
