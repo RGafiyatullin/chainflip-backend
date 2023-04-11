@@ -25,7 +25,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{info_span, trace, Instrument};
 
 use crate::{
-	multisig::{ChainTag, PersistentKeyDB},
+	multisig::PersistentKeyDB,
 	witnesser::{
 		block_head_stream_from::block_head_stream_from,
 		checkpointing::{
@@ -203,7 +203,6 @@ where
 		// TODO: Look at deduplicating this
 		let (from_block, witnessed_until_sender) =
 			match get_witnesser_start_block_with_checkpointing::<cf_chains::Bitcoin>(
-				ChainTag::Bitcoin,
 				epoch.epoch_index,
 				epoch.block_number,
 				self.db.clone(),

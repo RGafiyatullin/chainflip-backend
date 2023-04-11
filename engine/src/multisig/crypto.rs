@@ -23,11 +23,35 @@ use serde::{Deserialize, Serialize};
 
 use super::client::signing::generate_schnorr_response;
 
+// TODO: implement this directly on cf_chains::Chain?
+pub trait HasChainTag {
+	fn chain_tag() -> ChainTag;
+}
+
+impl HasChainTag for cf_chains::Ethereum {
+	fn chain_tag() -> ChainTag {
+		ChainTag::Ethereum
+	}
+}
+
+impl HasChainTag for cf_chains::Bitcoin {
+	fn chain_tag() -> ChainTag {
+		ChainTag::Bitcoin
+	}
+}
+
+impl HasChainTag for cf_chains::Polkadot {
+	fn chain_tag() -> ChainTag {
+		ChainTag::Polkadot
+	}
+}
+
 /// The db uses a static length prefix, that must include the keygen data prefix and the chain tag
 pub const CHAIN_TAG_SIZE: usize = std::mem::size_of::<ChainTag>();
 
 /// Used as a unique identifier when serializing/deserializing chain specific data.
 /// The values are explicitly given and should never be changed.
+/// MAXIM: tie this to cf_chains::Chain somehow?
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, FromPrimitive)]
 pub enum ChainTag {
