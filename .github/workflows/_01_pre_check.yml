@@ -37,6 +37,3 @@ jobs:
         run: ./ci/scripts/install_sccache.sh $SCCACHE_VERSION
       - name: Check Linting
         run: cargo cf-clippy-ci
-      - name: cancelling
-        if: failure()
-        uses: andymckay/cancel-action@0.3

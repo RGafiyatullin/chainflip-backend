@@ -56,6 +56,7 @@ get-workflow() {
   done
 }
 build-localnet() {
+  sudo mkdir -p /var/log/chainflip
   cp -R $LOCALNET_INIT_DIR/keyshare /tmp/chainflip/
   echo
   echo "💻 Please provide the location to the binaries you would like to use."
@@ -154,29 +155,7 @@ yeet() {
 }
 
 logs() {
-  echo "🤖 Which service would you like to tail?"
-  select SERVICE in node engine relayer polkadot geth all; do
-    if [ $SERVICE == "all" ]; then
-      docker compose -f localnet/docker-compose.yml logs --follow &
-      tail -f /tmp/chainflip/chainflip-*.log
-    fi
-    if [ $SERVICE == "polkadot" ]; then
-      docker compose -f localnet/docker-compose.yml logs --follow polkadot
-    fi
-    if [ $SERVICE == "geth" ]; then
-      docker compose -f localnet/docker-compose.yml logs --follow geth
-    fi
-    if [ $SERVICE == "node" ]; then
-      tail -f /tmp/chainflip/chainflip-node.log
-    fi
-    if [ $SERVICE == "engine" ]; then
-      tail -f /tmp/chainflip/chainflip-engine.log
-    fi
-    if [ $SERVICE == "relayer" ]; then
-      tail -f /tmp/chainflip/chainflip-relayer.log
-    fi
-    break
-  done
+  open http://localhost:3000/explore
 }
 
 bouncer() {

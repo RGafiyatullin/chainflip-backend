@@ -91,3 +91,48 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  loki:
+    image: grafana/loki:2.8.0
+    volumes:
+      - ./init/logs/loki-config.yaml:/etc/loki/loki-config.yaml
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/loki-config.yaml
+
+  promtail:
+    image: grafana/promtail:2.8.0
+    volumes:
+      - ./init/logs/promtail-config.yaml:/etc/promtail/promtail-config.yml
+      - /var/log/chainflip:/var/log/chainflip
+      - /var/lib/docker/containers:/var/lib/docker/containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail-config.yml -config.expand-env=true
+
+  grafana:
+    environment:
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
+        apiVersion: 1
+        datasources:
+        - name: Loki
+          type: loki
+          access: proxy 
+          orgId: 1
+          url: http://loki:3100
+          basicAuth: false
+          isDefault: true
+          version: 1
+          editable: false
+        EOF
+        /run.sh
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
