@@ -32,7 +32,7 @@ jobs:
 
       - name: cargo cf-build-ci
         run: |
-          cargo cf-build-ci --locked
+          cargo ci-build --locked
           sccache --show-stats
 
       - name: Upload binary artifacts
