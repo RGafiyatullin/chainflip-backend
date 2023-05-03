@@ -55,7 +55,6 @@ jobs:
           - chainflip-node
           - chainflip-engine
           - chainflip-cli
-          - chainflip-relayer
           - generate-genesis-keys
     permissions:
       contents: read
