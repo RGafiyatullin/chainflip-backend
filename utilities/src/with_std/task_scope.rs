@@ -102,6 +102,58 @@ use tokio::sync::oneshot;
 /// and so we must fail too
 pub const OR_CANCEL: &str = "An error has occurred in another task";
 
+static IDENTIFIER_SOURCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[pin_project::pin_project(PinnedDrop)]
+struct TaskLogger<Fut> {
+	#[pin]
+	future: Fut,
+	identifier: u64,
+	ended: bool,
+}
+impl<Fut> TaskLogger<Fut> {
+	#[track_caller]
+	fn new(future: Fut) -> Self {
+		let identifier = IDENTIFIER_SOURCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+		tracing::info!(
+			task_identifier = identifier,
+			location = std::panic::Location::caller().to_string(),
+			"Task started"
+		);
+		Self { future, identifier, ended: false }
+	}
+}
+impl<Fut: Future> Future for TaskLogger<Fut>
+where
+	Fut::Output: std::fmt::Debug,
+{
+	type Output = Fut::Output;
+
+	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+		let this = self.project();
+		let poll = this.future.poll(cx);
+
+		if let Poll::Ready(result) = &poll {
+			tracing::info!(
+				task_identifier = this.identifier,
+				task_result = format!("{result:?}"),
+				"Task ended"
+			);
+			*this.ended = true;
+		}
+
+		poll
+	}
+}
+#[pin_project::pinned_drop]
+impl<Fut> PinnedDrop for TaskLogger<Fut> {
+	fn drop(self: Pin<&mut Self>) {
+		if !self.ended {
+			tracing::info!(task_identifier = self.identifier, "Task cancelled");
+		}
+	}
+}
+
 /// This function allows a top level task to spawn tasks such that if any tasks panic or error,
 /// all other tasks will be cancelled, and the panic or error will be propagated by this function.
 /// It guarantees all tasks spawned using its scope object will finish before this function exits.
@@ -110,7 +162,7 @@ pub const OR_CANCEL: &str = "An error has occurred in another task";
 pub async fn task_scope<
 	'a,
 	T,
-	Error: Send + 'static,
+	Error: std::fmt::Debug + Send + 'static,
 	C: for<'b> FnOnce(&'b Scope<'a, Error>) -> futures::future::BoxFuture<'b, Result<T, Error>>,
 >(
 	top_level_task: C,
@@ -187,7 +239,7 @@ pub struct Scope<'env, Error: Send + 'static> {
 	/// ```
 	_phantom: std::marker::PhantomData<&'env mut &'env ()>,
 }
-impl<'env, Error: Send + 'static> Scope<'env, Error> {
+impl<'env, Error: std::fmt::Debug + Send + 'static> Scope<'env, Error> {
 	fn new() -> (Self, ScopeResultStream<Error>) {
 		// Must be unbounded so that `try_send` in `spawn` will only fail if the receiver is
 		// dropped, meaning the scope is exiting/aborting, and not when it is full
@@ -215,6 +267,7 @@ impl<'env, Error: Send + 'static> Scope<'env, Error> {
 		)
 	}
 
+	#[track_caller]
 	fn inner_spawn<F: 'env + Future<Output = Result<(), Error>> + Send>(
 		&self,
 		properties: TaskProperties,
@@ -222,24 +275,27 @@ impl<'env, Error: Send + 'static> Scope<'env, Error> {
 	) {
 		let _result = self.sender.try_send({
 			let future: Pin<Box<dyn 'env + Future<Output = Result<(), Error>> + Send>> =
-				Box::pin(f);
+				Box::pin(TaskLogger::new(f));
 			let future: TaskFuture<Error> = unsafe { std::mem::transmute(future) };
 			(properties, future)
 		});
 	}
 
 	/// Spawns a task that the scope will wait for before exiting.
+	#[track_caller]
 	pub fn spawn<F: 'env + Future<Output = Result<(), Error>> + Send>(&self, f: F) {
 		self.inner_spawn(TaskProperties { weak: false }, f)
 	}
 
 	/// Spawns a task that the scope will not wait for before exiting, instead it will be cancelled.
+	#[track_caller]
 	pub fn spawn_weak<F: 'env + Future<Output = Result<(), Error>> + Send>(&self, f: F) {
 		self.inner_spawn(TaskProperties { weak: true }, f)
 	}
 
 	/// Spawns a task that the scope will wait for before exiting, and returns a handle that you can
 	/// receive the output of the task.
+	#[track_caller]
 	pub fn spawn_with_handle<
 		T: Send + 'static,
 		F: 'env + Future<Output = Result<T, Error>> + Send,
