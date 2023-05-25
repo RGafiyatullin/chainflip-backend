@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cf_chains::eth::Ethereum;
+use ethers::abi::ethereum_types::BloomInput;
 use sp_core::H160;
 
 use crate::{
@@ -86,13 +87,19 @@ where
 	EventParameters: core::fmt::Debug + Send + Sync + 'static,
 {
 	use crate::eth::rpc::EthRpcApi;
-	use ethbloom::{Bloom, Input};
+	// use ethbloom::{Bloom, Input};
 	use web3::types::{BlockNumber, FilterBuilder};
 
-	let mut contract_bloom = Bloom::default();
-	contract_bloom.accrue(Input::Raw(&contract_address.0));
+	// let mut contract_bloom = Bloom::default();
+	// contract_bloom.accrue(Input::Raw(&contract_address.0));
 
-	let block_number = header.block_number;
+	let contract_bloom = {
+		let mut bloom = ethers::types::Bloom::zero();
+		bloom.accrue(BloomInput::Raw(&contract_address.0));
+		bloom
+	};
+
+	let block_number = header.block_number.as_u64();
 
 	// if we have logs for this block, fetch them.
 	if header.logs_bloom.contains_bloom(&contract_bloom) {
@@ -100,8 +107,8 @@ where
 			.get_logs(
 				FilterBuilder::default()
 					// from_block *and* to_block are *inclusive*
-					.from_block(BlockNumber::Number(block_number))
-					.to_block(BlockNumber::Number(block_number))
+					.from_block(BlockNumber::Number(block_number.into()))
+					.to_block(BlockNumber::Number(block_number.into()))
 					.address(vec![web3_h160(contract_address)])
 					.build(),
 			)

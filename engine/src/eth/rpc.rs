@@ -1,12 +1,17 @@
+use ethers::{
+	providers::{Middleware, Provider, SubscriptionStream, Ws},
+	types::Block,
+};
+
+use sp_core::H256;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 use utilities::{context, format_iterator, make_periodic_tick};
 use web3::{
-	api::SubscriptionStream,
 	signing::SecretKeyRef,
 	types::{
-		Block, BlockHeader, BlockNumber, Bytes, CallRequest, FeeHistory, Filter, Log,
-		SignedTransaction, SyncState, Transaction, TransactionParameters, TransactionReceipt, H256,
-		U256, U64,
+		Block as Web3Block, BlockNumber, Bytes, CallRequest, FeeHistory, Filter, Log,
+		SignedTransaction, SyncState, Transaction, TransactionParameters, TransactionReceipt,
+		H256 as Web3H256, U256, U64,
 	},
 	Web3,
 };
@@ -37,6 +42,7 @@ pub type EthWsRpcClient = EthRpcClient<web3::transports::WebSocket>;
 #[derive(Clone)]
 pub struct EthRpcClient<T: EthTransport> {
 	web3: Web3<T>,
+	ethers_provider: ethers::providers::Provider<ethers::providers::Ws>,
 }
 
 impl<T: EthTransport> EthRpcClient<T> {
@@ -59,7 +65,11 @@ impl<T: EthTransport> EthRpcClient<T> {
 			}
 		);
 
-		Ok(Self { web3: Web3::new(f.await?) })
+		let ethers_provider = Provider::<Ws>::connect(node_endpoint)
+			.await
+			.context("could not connect to WS endpoint")?;
+
+		Ok(Self { web3: Web3::new(f.await?), ethers_provider })
 	}
 }
 
@@ -91,22 +101,28 @@ pub trait EthRpcApi: Send + Sync {
 		key: &SecretKey,
 	) -> Result<SignedTransaction>;
 
-	async fn send_raw_transaction(&self, rlp: Bytes) -> Result<H256>;
+	async fn send_raw_transaction(&self, rlp: Bytes) -> Result<Web3H256>;
 
 	async fn get_logs(&self, filter: Filter) -> Result<Vec<Log>>;
 
 	async fn chain_id(&self) -> Result<U256>;
 
-	async fn transaction_receipt(&self, tx_hash: H256) -> Result<TransactionReceipt>;
+	async fn transaction_receipt(&self, tx_hash: Web3H256) -> Result<TransactionReceipt>;
 
 	/// Gets block, returning error when either:
 	/// - Request fails
 	/// - Request succeeds, but doesn't return a block
-	async fn block(&self, block_number: U64) -> Result<Block<H256>>;
+	async fn block(
+		&self,
+		block_number: ethers::types::U64,
+	) -> Result<ethers::types::Block<ethers::types::TxHash>>;
 
 	/// Gets only the successful transactions of a block. It filters failed transactions by
 	/// checking the receipt.
-	async fn successful_transactions(&self, block_number: U64) -> Result<Vec<Transaction>>;
+	async fn successful_transactions(
+		&self,
+		block_number: ethers::types::U64,
+	) -> Result<Vec<Transaction>>;
 
 	async fn fee_history(
 		&self,
@@ -142,7 +158,7 @@ where
 			.context(format!("{} client: Failed to sign transaction", T::transport_protocol()))
 	}
 
-	async fn send_raw_transaction(&self, rlp: Bytes) -> Result<H256> {
+	async fn send_raw_transaction(&self, rlp: Bytes) -> Result<Web3H256> {
 		self.web3
 			.eth()
 			.send_raw_transaction(rlp)
@@ -170,7 +186,7 @@ where
 			.context(format!("{} client: Failed to fetch ETH ChainId", T::transport_protocol()))
 	}
 
-	async fn transaction_receipt(&self, tx_hash: H256) -> Result<TransactionReceipt> {
+	async fn transaction_receipt(&self, tx_hash: Web3H256) -> Result<TransactionReceipt> {
 		self.web3
 			.eth()
 			.transaction_receipt(tx_hash)
@@ -187,10 +203,12 @@ where
 			})
 	}
 
-	async fn block(&self, block_number: U64) -> Result<Block<H256>> {
-		self.web3
-			.eth()
-			.block(block_number.into())
+	async fn block(
+		&self,
+		block_number: ethers::types::U64,
+	) -> Result<ethers::types::Block<ethers::types::TxHash>> {
+		self.ethers_provider
+			.get_block(block_number)
 			.await
 			.context(format!("{} client: Failed to fetch block", T::transport_protocol()))
 			.and_then(|opt_block| {
@@ -204,7 +222,12 @@ where
 			})
 	}
 
-	async fn successful_transactions(&self, block_number: U64) -> Result<Vec<Transaction>> {
+	async fn successful_transactions(
+		&self,
+		block_number: ethers::types::U64,
+	) -> Result<Vec<Transaction>> {
+		let block_number = block_number.as_u64();
+		let block_number: U64 = block_number.into();
 		let block_with_txs = self
 			.web3
 			.eth()
@@ -316,19 +339,14 @@ where
 
 #[async_trait]
 pub trait EthWsRpcApi {
-	async fn subscribe_new_heads(
-		&self,
-	) -> Result<SubscriptionStream<web3::transports::WebSocket, BlockHeader>>;
+	async fn subscribe_new_heads(&self) -> Result<SubscriptionStream<Ws, Block<H256>>>;
 }
 
 #[async_trait]
 impl EthWsRpcApi for EthWsRpcClient {
-	async fn subscribe_new_heads(
-		&self,
-	) -> Result<SubscriptionStream<web3::transports::WebSocket, BlockHeader>> {
-		self.web3
-			.eth_subscribe()
-			.subscribe_new_heads()
+	async fn subscribe_new_heads(&self) -> Result<SubscriptionStream<Ws, Block<H256>>> {
+		self.ethers_provider
+			.subscribe_blocks()
 			.await
 			.context("Failed to subscribe to new heads with WS Client")
 	}
@@ -484,7 +502,7 @@ impl EthRpcApi for EthDualRpcClient {
 		dual_call_rpc!(self, sign_transaction, tx, &key)
 	}
 
-	async fn send_raw_transaction(&self, rlp: Bytes) -> Result<H256> {
+	async fn send_raw_transaction(&self, rlp: Bytes) -> Result<Web3H256> {
 		dual_call_rpc!(self, send_raw_transaction, rlp)
 	}
 
@@ -496,15 +514,21 @@ impl EthRpcApi for EthDualRpcClient {
 		dual_call_rpc!(self, chain_id,)
 	}
 
-	async fn transaction_receipt(&self, tx_hash: H256) -> Result<TransactionReceipt> {
+	async fn transaction_receipt(&self, tx_hash: Web3H256) -> Result<TransactionReceipt> {
 		dual_call_rpc!(self, transaction_receipt, tx_hash)
 	}
 
-	async fn block(&self, block_number: U64) -> Result<Block<H256>> {
+	async fn block(
+		&self,
+		block_number: ethers::types::U64,
+	) -> Result<ethers::types::Block<ethers::types::TxHash>> {
 		dual_call_rpc!(self, block, block_number)
 	}
 
-	async fn successful_transactions(&self, block_number: U64) -> Result<Vec<Transaction>> {
+	async fn successful_transactions(
+		&self,
+		block_number: ethers::types::U64,
+	) -> Result<Vec<Transaction>> {
 		dual_call_rpc!(self, successful_transactions, block_number)
 	}
 
@@ -538,17 +562,17 @@ pub mod mocks {
 				key: &SecretKey,
 			) -> Result<SignedTransaction>;
 
-			async fn send_raw_transaction(&self, rlp: Bytes) -> Result<H256>;
+			async fn send_raw_transaction(&self, rlp: Bytes) -> Result<Web3H256>;
 
 			async fn get_logs(&self, filter: Filter) -> Result<Vec<Log>>;
 
 			async fn chain_id(&self) -> Result<U256>;
 
-			async fn transaction_receipt(&self, tx_hash: H256) -> Result<TransactionReceipt>;
+			async fn transaction_receipt(&self, tx_hash: Web3H256) -> Result<TransactionReceipt>;
 
-			async fn block(&self, block_number: U64) -> Result<Block<H256>>;
+			async fn block(&self, block_number: ethers::types::U64) -> Result<ethers::types::Block<ethers::types::TxHash>>;
 
-			async fn successful_transactions(&self, block_number: U64) -> Result<Vec<Transaction>>;
+			async fn successful_transactions(&self, block_number: ethers::types::U64) -> Result<Vec<Transaction>>;
 
 			async fn fee_history(
 				&self,

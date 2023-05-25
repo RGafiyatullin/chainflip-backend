@@ -51,7 +51,7 @@ use thiserror::Error;
 use web3::{
 	ethabi::{self, Address, Contract},
 	signing::{Key, SecretKeyRef},
-	types::{Block, Bytes, CallRequest, TransactionParameters, H160, H2048, H256, U256, U64},
+	types::{Block, Bytes, CallRequest, TransactionParameters, H160, H256, U256, U64},
 };
 use web3_secp256k1::SecretKey;
 
@@ -65,9 +65,9 @@ use self::vault::EthAssetApi;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EthNumberBloom {
-	pub block_number: U64,
-	pub logs_bloom: H2048,
-	pub base_fee_per_gas: U256,
+	pub block_number: ethers::types::U64,
+	pub logs_bloom: ethers::types::Bloom,
+	pub base_fee_per_gas: ethers::types::U256,
 }
 
 impl HasBlockNumber for EthNumberBloom {
@@ -125,15 +125,16 @@ pub fn build_broadcast_channel<T: Clone, const S: usize>(
 	(sender, [0; S].map(|_| receiver.clone()))
 }
 
-impl TryFrom<Block<H256>> for EthNumberBloom {
+impl TryFrom<ethers::types::Block<ethers::types::TxHash>> for EthNumberBloom {
 	type Error = anyhow::Error;
 
-	fn try_from(block: Block<H256>) -> Result<Self, Self::Error> {
+	fn try_from(block: ethers::types::Block<ethers::types::TxHash>) -> Result<Self, Self::Error> {
 		if block.number.is_none() || block.logs_bloom.is_none() || block.base_fee_per_gas.is_none()
 		{
 			Err(anyhow!(
-                "Block<H256> did not contain necessary block number and/or logs bloom and/or base fee per gas",
-            ))
+				"Block<H256> did not contain necessary block number and/or logs bloom and/or base
+fee per gas",
+			))
 		} else {
 			Ok(EthNumberBloom {
 				block_number: block.number.unwrap(),
@@ -286,7 +287,7 @@ pub struct BlockWithItems<BlockItem: Debug> {
 	pub block_items: Vec<BlockItem>,
 }
 
-pub async fn eth_block_head_stream_from<HeaderStream>(
+async fn eth_block_head_stream_from<HeaderStream>(
 	from_block: u64,
 	safe_head_stream: HeaderStream,
 	eth_dual_rpc: EthDualRpcClient,
@@ -297,7 +298,7 @@ where
 	block_head_stream_from(from_block, safe_head_stream, move |block_number| {
 		let eth_rpc = eth_dual_rpc.clone();
 		Box::pin(async move {
-			eth_rpc.block(U64::from(block_number)).await.and_then(|block| {
+			eth_rpc.block(ethers::types::U64::from(block_number)).await.and_then(|block| {
 				let number_bloom: Result<EthNumberBloom> =
 					block.try_into().context("Failed to convert Block to EthNumberBloom");
 				number_bloom
@@ -331,12 +332,10 @@ pub async fn safe_dual_block_subscription_from(
 ) -> Result<Pin<Box<dyn Stream<Item = EthNumberBloom> + Send + 'static>>>
 where
 {
+	let block_header_stream = eth_dual_rpc.ws_client.subscribe_new_heads().await?;
 	let safe_ws_head_stream = eth_block_head_stream_from(
 		from_block,
-		safe_ws_head_stream(
-			eth_dual_rpc.ws_client.subscribe_new_heads().await?,
-			ETH_BLOCK_SAFETY_MARGIN,
-		),
+		safe_ws_head_stream(block_header_stream, ETH_BLOCK_SAFETY_MARGIN),
 		eth_dual_rpc.clone(),
 	)
 	.await?;

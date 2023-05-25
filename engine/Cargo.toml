@@ -40,6 +40,7 @@ futures-util = "0.3.14"
 hex = "0.4.3"
 httparse = "1.4.1"
 itertools = "0.10"
+ethers = {version = "2.0", features = ["ws"]}
 
 # Same version of jsonrpsee as substrate
 jsonrpsee = {version = "0.15.1", features = ["full"]}
