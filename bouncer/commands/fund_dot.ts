@@ -29,23 +29,30 @@ async function main() {
   const alice = keyring.createFromUri('//Alice');
   const polkadot = await ApiPromise.create({ provider: new WsProvider(polkadot_endpoint), noInitWarn: true });
 
-  await polkadot.tx.balances
-    .transfer(polkadotAddress, parseInt(planckAmount))
-    .signAndSend(alice, { nonce: -1 }, ({ status, dispatchError }) => {
-      if (dispatchError !== undefined) {
-        if (dispatchError.isModule) {
-          const decoded = polkadot.registry.findMetaError(dispatchError.asModule);
-          const { docs, name, section } = decoded;
-          console.log(`${section}.${name}: ${docs.join(' ')}`);
-        } else {
-          console.log('Error: ' + dispatchError.toString());
-        }
+  let response = await polkadot.query.system.account(alice.address);
+  let nonce = JSON.parse(JSON.stringify(response)).nonce;
+  console.log(`Current nonce: ${nonce}`);
+  let retries = 0;
+  const maxRetries = 20;
+  while (retries < maxRetries) {
+    try {
+      const transfer = polkadot.tx.balances.transfer(polkadotAddress, parseInt(planckAmount));
+      console.log(`Transaction hash: ${txHash}`);
+      process.exit(0);
+    } catch (error) {
+      console.error(error);
+      if (error.message.includes('1010: Invalid Transaction:')) {
+        nonce++;
+        retries++;
+        console.log(`Retrying with nonce ${nonce} in 5 seconds...`);
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      } else {
         process.exit(-1);
       }
-      if (status.isInBlock || status.isFinalized) {
-        process.exit(0)
-      }
-    });
+    }
+  }
+  console.error(`Maximum retries (${maxRetries}) reached.`);
+  process.exit(-1);
 }
 
 runWithTimeout(main(), 20000).catch((error) => {
