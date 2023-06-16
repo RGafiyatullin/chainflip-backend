@@ -169,7 +169,6 @@ impl<Task: Future + Unpin + 'static> Future for TaskWrapper<Task> {
 }
 
 /// An object used to spawn tasks into the associated scope
-#[derive(Clone)]
 pub struct Scope<'env, Error: Send + 'static> {
 	sender: async_channel::Sender<(TaskProperties, TaskFuture<Error>)>,
 	/// Invariance over 'env, to make sure 'env cannot shrink,
@@ -189,6 +188,11 @@ pub struct Scope<'env, Error: Send + 'static> {
 	/// });
 	/// ```
 	_phantom: std::marker::PhantomData<&'env mut &'env ()>,
+}
+impl<'env, Error: Send + 'static> Clone for Scope<'env, Error> {
+	fn clone(&self) -> Self {
+		Self { sender: self.sender.clone(), _phantom: self._phantom }
+	}
 }
 impl<'env, Error: Send + 'static> Scope<'env, Error> {
 	fn new() -> (Self, ScopeResultStream<Error>) {
