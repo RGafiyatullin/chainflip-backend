@@ -1,3 +1,4 @@
+pub mod chain_data;
 pub mod lag_safety;
 
 use futures_core::Stream;
@@ -31,10 +32,34 @@ pub trait DataChainSource: Send + Sync {
 	type Hash: aliases::Hash;
 	type Data: aliases::Data;
 
+	type Stream: DataChainStream<Index = Self::Index, Hash = Self::Hash, Data = Self::Data>;
+
+	async fn stream(&self) -> Self::Stream;
+}
+
+#[async_trait::async_trait]
+pub trait DataChainSourceWithClient: Send + Sync {
+	type Index: aliases::Index;
+	type Hash: aliases::Hash;
+	type Data: aliases::Data;
+
 	type Client: DataChainClient<Index = Self::Index, Hash = Self::Hash, Data = Self::Data>;
 	type Stream: DataChainStream<Index = Self::Index, Hash = Self::Hash, Data = Self::Data>;
 
-	async fn client_and_stream(&self) -> (Self::Client, Self::Stream);
+	async fn stream_and_client(&self) -> (Self::Client, Self::Stream);
+}
+
+#[async_trait::async_trait]
+impl<T: DataChainSourceWithClient> DataChainSource for T {
+	type Index = T::Index;
+	type Hash = T::Hash;
+	type Data = T::Data;
+
+	type Stream = T::Stream;
+
+	async fn stream(&self) -> Self::Stream {
+		self.stream_and_client().await.1
+	}
 }
 
 #[async_trait::async_trait]
