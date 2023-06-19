@@ -15,9 +15,10 @@ pub trait GetChainTrackingData<C: cf_chains::Chain> {
 	fn get_chain_tracking_data(&self) -> C::TrackedData;
 }
 
-pub struct ChainDataDataChain<'env, C, ChainClient, SCC, DCS>
+pub struct ChainDataDataChain<'env, C, I, ChainClient, SCC, DCS>
 where
 	C: cf_chains::Chain,
+	I: 'static + Sync + Send,
 	ChainClient: GetChainTrackingData<C>,
 	SCC: SignedExtrinsicApi,
 	DCS: DataChainSource,
@@ -28,9 +29,10 @@ where
 	source: DCS,
 }
 
-impl<'env, C, ChainClient, SCC, DCS> ChainDataDataChain<'env, C, ChainClient, SCC, DCS>
+impl<'env, C, I, ChainClient, SCC, DCS> ChainDataDataChain<'env, C, I, ChainClient, SCC, DCS>
 where
 	C: cf_chains::Chain,
+	I: 'static + Sync + Send,
 	ChainClient: GetChainTrackingData<C>,
 	SCC: SignedExtrinsicApi + Send + Sync,
 	DCS: DataChainSource,
@@ -45,16 +47,15 @@ where
 	}
 }
 
-// The adapters should define the kind of client they need, and not the trait.
-
 #[async_trait::async_trait]
 impl<
 		'env,
 		C: cf_chains::Chain,
+		I: 'static + Sync + Send,
 		ChainClient: GetChainTrackingData<C>,
 		SCC: SignedExtrinsicApi + Send + Sync,
 		DCS: DataChainSource,
-	> DataChainSource for ChainDataDataChain<'env, C, ChainClient, SCC, DCS>
+	> DataChainSource for ChainDataDataChain<'env, C, I, ChainClient, SCC, DCS>
 {
 	type Index = DCS::Index;
 	type Hash = DCS::Hash;
@@ -81,16 +82,12 @@ impl<
 
 					tracing::info!("Submitting chain data of {chain_data:?} for block {}", header.index);
 
-
-					// Make this generic.
 					self.state_chain_client
 					.submit_signed_extrinsic(state_chain_runtime::RuntimeCall::Witnesser(
 						pallet_cf_witnesser::Call::witness_at_epoch {
-							call: Box::new(state_chain_runtime::RuntimeCall::EthereumChainTracking(
-								pallet_cf_chain_tracking::Call::update_chain_state {
-									state: latest_data,
-								},
-							)),
+							call: Box::new(pallet_cf_chain_tracking::Call::<state_chain_runtime::Runtime, I>::update_chain_state {
+                                state: chain_data,
+                            }),
 							epoch_index: self.current_epoch.epoch_index,
 						},
 					))
