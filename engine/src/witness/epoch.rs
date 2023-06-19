@@ -8,6 +8,7 @@ use cf_primitives::EpochIndex;
 use futures::StreamExt;
 use futures_core::Stream;
 use futures_util::FutureExt;
+use sp_core::H256;
 use utilities::{
 	task_scope::{Scope, OR_CANCEL},
 	UnendingStream,
@@ -15,17 +16,18 @@ use utilities::{
 
 const STATE_CHAIN_CONNECTION: &str = "State Chain client connection failed"; // TODO Replace with infallible SCC requests
 
-pub struct Epoch {
+pub struct Epoch<Data> {
 	index: cf_primitives::EpochIndex,
-	expired_signal: Signal<()>,
-	not_current_signal: Signal<()>,
+	expired_signal: Signal<H256>,
+	not_current_signal: Signal<H256>,
+	data: Data,
 }
 
 pub struct Client {
 	request_sender: async_channel::Sender<
 		tokio::sync::oneshot::Sender<(
-			Vec<Epoch>,
-			tokio_stream::wrappers::UnboundedReceiverStream<Epoch>,
+			Vec<Epoch<()>>,
+			tokio_stream::wrappers::UnboundedReceiverStream<Epoch<()>>,
 		)>,
 	>,
 }
@@ -41,8 +43,8 @@ impl Client {
 		state_chain_client: StateChainClient,
 	) -> Self {
 		struct SignallerAndSignal {
-			signaller: Signaller<()>,
-			signal: Signal<()>,
+			signaller: Signaller<H256>,
+			signal: Signal<H256>,
 		}
 		impl SignallerAndSignal {
 			fn new() -> Self {
@@ -68,15 +70,17 @@ impl Client {
 
 		let (request_sender, mut request_receiver) = async_channel::unbounded::<
 			tokio::sync::oneshot::Sender<(
-				Vec<Epoch>,
-				tokio_stream::wrappers::UnboundedReceiverStream<Epoch>,
+				Vec<Epoch<()>>,
+				tokio_stream::wrappers::UnboundedReceiverStream<Epoch<()>>,
 			)>,
 		>();
+
+		let initial_block_hash = state_chain_stream.cache().block_hash;
 
 		let mut historical_active_epochs = BTreeMap::from_iter(
 			state_chain_client
 				.storage_map::<pallet_cf_validator::EpochExpiries<state_chain_runtime::Runtime>>(
-					state_chain_stream.cache().block_hash,
+					initial_block_hash,
 				)
 				.await
 				.expect(STATE_CHAIN_CONNECTION)
@@ -87,7 +91,7 @@ impl Client {
 		let mut current_epoch = CurrentEpoch::new(
 			state_chain_client
 				.storage_value::<pallet_cf_validator::CurrentEpoch<state_chain_runtime::Runtime>>(
-					state_chain_stream.cache().block_hash,
+					initial_block_hash,
 				)
 				.await
 				.expect(STATE_CHAIN_CONNECTION),
@@ -95,7 +99,7 @@ impl Client {
 
 		assert!(historical_active_epochs.contains_key(&current_epoch.index));
 
-		let mut epoch_senders = Vec::<tokio::sync::mpsc::UnboundedSender<Epoch>>::new();
+		let mut epoch_senders = Vec::<tokio::sync::mpsc::UnboundedSender<Epoch<()>>>::new();
 
 		scope.spawn(async move {
 			utilities::loop_select! {
@@ -113,13 +117,15 @@ impl Client {
 							Epoch {
 								index: *index,
 								expired_signal: expired.signal.clone(),
-								not_current_signal: Signal::signalled(())
+								not_current_signal: Signal::signalled(initial_block_hash),
+								data: (),
 							}
 						}).chain(std::iter::once({
 							Epoch {
 								index: current_epoch.index,
 								expired_signal: current_epoch.expired.signal.clone(),
 								not_current_signal: current_epoch.not_current.signal.clone(),
+								data: (),
 							}
 						}))).collect(),
 						tokio_stream::wrappers::UnboundedReceiverStream::new(epoch_receiver)
@@ -136,7 +142,7 @@ impl Client {
 					if new_current_epoch != current_epoch.index {
 						assert!(historical_active_epochs.contains_key(&new_current_epoch));
 
-						current_epoch.not_current.signaller.signal(());
+						current_epoch.not_current.signaller.signal(block_hash);
 						historical_active_epochs.insert(current_epoch.index, current_epoch.expired);
 
 						current_epoch = CurrentEpoch::new(new_current_epoch);
@@ -145,7 +151,8 @@ impl Client {
 							let _result = epoch_sender.send(Epoch {
 								index: current_epoch.index,
 								expired_signal: current_epoch.expired.signal.clone(),
-								not_current_signal: current_epoch.not_current.signal.clone()
+								not_current_signal: current_epoch.not_current.signal.clone(),
+								data: (),
 							});
 						}
 					}
@@ -163,7 +170,8 @@ impl Client {
 									let _result = epoch_sender.send(Epoch {
 										index,
 										expired_signal: expired.signal.clone(),
-										not_current_signal: Signal::signalled(()),
+										not_current_signal: Signal::signalled(block_hash),
+										data: (),
 									});
 								}
 
@@ -173,7 +181,7 @@ impl Client {
 					);
 
 					for (_, expired) in historical_active_epochs {
-						expired.signaller.signal(());
+						expired.signaller.signal(block_hash);
 					}
 
 					historical_active_epochs = new_historical_active_epochs;
@@ -186,7 +194,11 @@ impl Client {
 		Self { request_sender }
 	}
 
-	pub async fn active_epochs(&self) -> (Vec<Epoch>, impl Stream<Item = Epoch>) {
+	// Structure instead of tuple
+	// apply filter to get participants
+
+	// trait to map to get epoch start data / vault, for each chain.
+	pub async fn active_epochs(&self) -> (Vec<Epoch<()>>, impl Stream<Item = Epoch<()>>) {
 		let (response_sender, response_receiver) = tokio::sync::oneshot::channel();
 		drop(self.request_sender.send(response_sender));
 		response_receiver.await.expect(OR_CANCEL)
