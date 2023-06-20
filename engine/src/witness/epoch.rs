@@ -302,7 +302,6 @@ impl ActiveEpochs {
 	{
 		let vault_end_signals = Arc::new(Mutex::new(FuturesUnordered::new()));
 
-		// We have a vault for each epoch
 		let known_vaults = futures::stream::iter(self.known)
 			.filter_map(|epoch| {
 				let state_chain_client = state_chain_client.clone();
@@ -337,8 +336,12 @@ impl ActiveEpochs {
 						} else {
 							let (vault_end_signaller, vault_end_signal) = Signal::new();
 							let guard = vault_end_signals.lock().await;
-							guard.push(not_current_signal.wait((vault_end_signaller, epoch.index)));
-
+							guard.push(
+								not_current_signal
+									.wait()
+									.map(move |block_hash| (vault_end_signaller, index, block_hash))
+									.boxed(),
+							);
 							vault_end_signal
 						};
 
@@ -364,7 +367,7 @@ impl ActiveEpochs {
 				if vault_sender.is_closed() => let _ = futures::future::ready(()) => {
 					break Ok(())
 				},
-				let ((vault_end_signaller, old_epoch_index), block_hash) = async {
+				let (vault_end_signaller, old_epoch_index, block_hash) = async {
 					let mut guard = vault_end_signals.lock().await;
 					guard.next_or_pending().await
 				 } => {
@@ -395,7 +398,7 @@ impl ActiveEpochs {
 						let (vault_end_signaller, vault_end_signal) = Signal::new();
 						{
 							let guard = vault_end_signals.lock().await;
-							guard.push(not_current_signal.wait((vault_end_signaller, index)));
+							guard.push(not_current_signal.wait().map(move |block_hash| (vault_end_signaller, index, block_hash)).boxed());
 						}
 
 						let _result = vault_sender.send(Vault {
