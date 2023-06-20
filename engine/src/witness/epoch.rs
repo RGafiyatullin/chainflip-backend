@@ -1,14 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+	collections::{BTreeMap, BTreeSet},
+	sync::Arc,
+};
 
 use crate::{
-	common::{Signal, Signaller},
+	common::{Mutex, Signal, Signaller},
 	state_chain_observer::client,
 };
 use cf_primitives::EpochIndex;
 use futures::StreamExt;
-use futures_util::FutureExt;
+use futures_util::{stream::FuturesUnordered, FutureExt};
 use sp_core::H256;
-use sp_runtime::AccountId32;
+use sp_runtime::{traits::One, AccountId32, Saturating};
 use utilities::{
 	task_scope::{Scope, OR_CANCEL},
 	UnendingStream,
@@ -20,8 +23,8 @@ pub struct Epoch {
 	index: cf_primitives::EpochIndex,
 	// A block hash that allows us to query epoch data validly.
 	valid_block_hash: H256,
-	expired_signal: Signal<H256>,
 	not_current_signal: Signal<H256>,
+	expired_signal: Signal<()>,
 }
 
 pub struct ActiveEpochs {
@@ -43,11 +46,11 @@ impl Client {
 		mut state_chain_stream: StateChainStream,
 		state_chain_client: StateChainClient,
 	) -> Client {
-		struct SignallerAndSignal {
-			signaller: Signaller<H256>,
-			signal: Signal<H256>,
+		struct SignallerAndSignal<T> {
+			signaller: Signaller<T>,
+			signal: Signal<T>,
 		}
-		impl SignallerAndSignal {
+		impl<T: Clone + Send + 'static> SignallerAndSignal<T> {
 			fn new() -> Self {
 				let (signaller, signal) = Signal::new();
 				SignallerAndSignal { signaller, signal }
@@ -56,8 +59,8 @@ impl Client {
 
 		struct CurrentEpoch {
 			index: EpochIndex,
-			not_current: SignallerAndSignal,
-			expired: SignallerAndSignal,
+			not_current: SignallerAndSignal<H256>,
+			expired: SignallerAndSignal<()>,
 		}
 		impl CurrentEpoch {
 			fn new(index: EpochIndex) -> Self {
@@ -74,7 +77,6 @@ impl Client {
 
 		let initial_block_hash = state_chain_stream.cache().block_hash;
 
-		// TODO: Handle the fact that this contains both epochs.
 		let mut epoch_expiries = BTreeMap::from_iter(
 			state_chain_client
 				.storage_map::<pallet_cf_validator::EpochExpiries<state_chain_runtime::Runtime>>(
@@ -179,7 +181,7 @@ impl Client {
 					);
 
 					for (_, expired) in epoch_expiries {
-						expired.signaller.signal(block_hash);
+						expired.signaller.signal(());
 					}
 
 					epoch_expiries = new_epoch_expiries;
@@ -197,6 +199,27 @@ impl Client {
 		drop(self.request_sender.send(response_sender));
 		response_receiver.await.expect(OR_CANCEL)
 	}
+}
+
+#[async_trait::async_trait]
+pub trait GetVaultData {
+	type VaultData: Send + Sync + 'static;
+
+	async fn get_vault_data(&self, epoch_index: EpochIndex, block_hash: H256) -> Self::VaultData;
+}
+
+pub struct Vault<C: cf_chains::Chain> {
+	epoch_index: EpochIndex,
+	active_from_block: C::ChainBlockNumber,
+	start_data: C::EpochStartData,
+	vault_end_signal: Signal<C::ChainBlockNumber>,
+	// We don't care when the epoch expired, there's nothing we can do now anyway.
+	expired_signal: Signal<()>,
+}
+
+pub struct ActiveVaults<C: cf_chains::Chain> {
+	known: Vec<Vault<C>>,
+	incoming: tokio_stream::wrappers::UnboundedReceiverStream<Vault<C>>,
 }
 
 impl ActiveEpochs {
@@ -262,88 +285,134 @@ impl ActiveEpochs {
 			incoming: tokio_stream::wrappers::UnboundedReceiverStream::new(epoch_receiver),
 		}
 	}
-}
 
-#[async_trait::async_trait]
-pub trait GetVaultData {
-	type VaultData: Send + Sync + 'static;
+	async fn active_epochs_vault_data<C, I, StateChainClient, VaultDataGetter>(
+		mut self,
+		scope: &Scope<'_, StateChainClient>,
+		state_chain_client: StateChainClient,
+		chain_client: VaultDataGetter,
+	) -> ActiveVaults<C>
+	where
+		C: cf_chains::ChainAbi,
+		I: 'static + Send + Sync,
+		StateChainClient: client::storage_api::StorageApi + Clone + Send + Sync + 'static,
+		VaultDataGetter:
+			GetVaultData<VaultData = C::EpochStartData> + Clone + Send + Sync + 'static,
+		state_chain_runtime::Runtime: pallet_cf_vaults::Config<I, Chain = C>,
+	{
+		let vault_end_signals = Arc::new(Mutex::new(FuturesUnordered::new()));
 
-	async fn get_vault_data(&self, epoch: &Epoch) -> Self::VaultData;
-}
+		// We have a vault for each epoch
+		let known_vaults = futures::stream::iter(self.known)
+			.filter_map(|epoch| {
+				let state_chain_client = state_chain_client.clone();
+				let chain_client = chain_client.clone();
+				let vault_end_signals = vault_end_signals.clone();
+				async move {
+					if let Some(vault) = state_chain_client
+						.storage_map_entry::<pallet_cf_vaults::Vaults<state_chain_runtime::Runtime, I>>(
+							epoch.valid_block_hash,
+							&epoch.index,
+						)
+						.await
+						.unwrap()
+					{
+						let Epoch {
+							index,
+							valid_block_hash,
+							mut not_current_signal,
+							expired_signal,
+						} = epoch;
+						let vault_end_signal = if let Some(block_hash) = not_current_signal.get() {
+							// The start of the next epoch is the end of the previous
+							let vault = state_chain_client
+								.storage_map_entry::<pallet_cf_vaults::Vaults<state_chain_runtime::Runtime, I>>(
+									block_hash.clone(),
+									&(index.saturating_add(1)),
+								)
+								.await
+								.unwrap()
+								.expect("If a vault above, it must exist here.");
+							Signal::Signalled(vault.active_from_block.saturating_sub(One::one()))
+						} else {
+							let (vault_end_signaller, vault_end_signal) = Signal::new();
+							let guard = vault_end_signals.lock().await;
+							guard.push(not_current_signal.wait((vault_end_signaller, epoch.index)));
 
-pub struct Vault<C: cf_chains::Chain> {
-	active_from_block: C::ChainBlockNumber,
-	start_data: C::EpochStartData,
-	// end_block: Option<C::ChainBlockNumber>,
-}
+							vault_end_signal
+						};
 
-pub struct ActiveVaults<C: cf_chains::Chain> {
-	known: Vec<Vault<C>>,
-	incoming: tokio_stream::wrappers::UnboundedReceiverStream<Vault<C>>,
-}
+						Some(Vault {
+							epoch_index: index,
+							active_from_block: vault.active_from_block,
+							start_data: chain_client.get_vault_data(index, valid_block_hash).await,
+							vault_end_signal,
+							expired_signal,
+						})
+					} else {
+						None
+					}
+				}
+			})
+			.collect::<Vec<_>>()
+			.await;
 
-async fn active_epochs_vault_data<C, I, StateChainClient, VaultDataGetter>(
-	mut active_epochs: ActiveEpochs,
-	scope: &Scope<'_, StateChainClient>,
-	state_chain_client: StateChainClient,
-	chain_client: VaultDataGetter,
-) -> ActiveVaults<C>
-where
-	C: cf_chains::ChainAbi,
-	I: 'static + Send + Sync,
-	StateChainClient: client::storage_api::StorageApi + Clone + Send + Sync + 'static,
-	VaultDataGetter: GetVaultData<VaultData = C::EpochStartData> + Clone + Send + Sync + 'static,
-	state_chain_runtime::Runtime: pallet_cf_vaults::Config<I, Chain = C>,
-{
-	// We have a vault for each epoch
-	let known_vaults = futures::stream::iter(active_epochs.known)
-		.filter_map(|epoch| {
-			let state_chain_client = state_chain_client.clone();
-			let chain_client = chain_client.clone();
-			async move {
-				if let Some(vault) = state_chain_client
+		let (vault_sender, vault_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+		scope.spawn(async move {
+			utilities::loop_select! {
+				if vault_sender.is_closed() => let _ = futures::future::ready(()) => {
+					break Ok(())
+				},
+				let ((vault_end_signaller, old_epoch_index), block_hash) = async {
+					let mut guard = vault_end_signals.lock().await;
+					guard.next_or_pending().await
+				 } => {
+					let vault = state_chain_client
 					.storage_map_entry::<pallet_cf_vaults::Vaults<state_chain_runtime::Runtime, I>>(
-						epoch.valid_block_hash,
-						&epoch.index,
+						block_hash,
+						&old_epoch_index.saturating_add(1),
 					)
 					.await
-					.unwrap()
-				{
-					Some(Vault {
-						active_from_block: vault.active_from_block,
-						start_data: chain_client.get_vault_data(&epoch).await,
-					})
-				} else {
-					None
-				}
+					.unwrap().expect(
+						"We know the epoch ended, so the next vault must exist."
+					);
+
+					vault_end_signaller.signal(vault.active_from_block.saturating_sub(One::one()));
+				},
+				// When we get a new epoch we do not know when it ends.
+				let epoch = self.incoming.next_or_pending() => {
+					let Epoch { valid_block_hash, index, not_current_signal, expired_signal } = epoch;
+
+					if let Some(vault) = state_chain_client
+						.storage_map_entry::<pallet_cf_vaults::Vaults<state_chain_runtime::Runtime, I>>(
+							valid_block_hash,
+							&index,
+						)
+						.await
+						.unwrap() {
+
+						let (vault_end_signaller, vault_end_signal) = Signal::new();
+						{
+							let guard = vault_end_signals.lock().await;
+							guard.push(not_current_signal.wait((vault_end_signaller, index)));
+						}
+
+						let _result = vault_sender.send(Vault {
+							epoch_index: index,
+							active_from_block: vault.active_from_block,
+							start_data: chain_client.get_vault_data(index, valid_block_hash).await,
+							vault_end_signal,
+							expired_signal,
+						});
+					}
+				},
 			}
-		})
-		.collect::<Vec<_>>()
-		.await;
+		});
 
-	let (vault_sender, vault_receiver) = tokio::sync::mpsc::unbounded_channel();
-
-	scope.spawn(async move {
-		utilities::loop_select! {
-			if vault_sender.is_closed() => let _ = futures::future::ready(()) => {
-				break Ok(())
-			},
-			let epoch = active_epochs.incoming.next_or_pending() => {
-				if let Some(vault) = state_chain_client
-					.storage_map_entry::<pallet_cf_vaults::Vaults<state_chain_runtime::Runtime, I>>(
-						epoch.valid_block_hash,
-						&epoch.index,
-					)
-					.await
-					.unwrap() {
-					let _result = vault_sender.send(Vault { active_from_block: vault.active_from_block, start_data: chain_client.get_vault_data(&epoch).await });
-				}
-			},
+		ActiveVaults {
+			known: known_vaults,
+			incoming: tokio_stream::wrappers::UnboundedReceiverStream::new(vault_receiver),
 		}
-	});
-
-	ActiveVaults {
-		known: known_vaults,
-		incoming: tokio_stream::wrappers::UnboundedReceiverStream::new(vault_receiver),
 	}
 }

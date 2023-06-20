@@ -192,4 +192,13 @@ impl<T: Clone + Send + 'static> Signal<T> {
 			Signal::Signalled(t) => Some(t),
 		}
 	}
+
+	pub async fn wait<D>(self, extra_data: D) -> (D, T) {
+		match self {
+			// TODO: Check this unwrap()
+			Signal::Pending(mut receiver) =>
+				async move { (extra_data, receiver.recv().await.unwrap()) }.await,
+			Signal::Signalled(t) => (extra_data, t.clone()),
+		}
+	}
 }
