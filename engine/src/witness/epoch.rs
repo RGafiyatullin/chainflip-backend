@@ -16,22 +16,21 @@ use utilities::{
 
 const STATE_CHAIN_CONNECTION: &str = "State Chain client connection failed"; // TODO Replace with infallible SCC requests
 
-pub struct Epoch<Data> {
+pub struct Epoch {
 	index: cf_primitives::EpochIndex,
 	// A block hash that allows us to query epoch data validly.
 	valid_block_hash: H256,
 	expired_signal: Signal<H256>,
 	not_current_signal: Signal<H256>,
-	data: Data,
 }
 
-pub struct ActiveEpochs<Data> {
-	known: Vec<Epoch<Data>>,
-	incoming: tokio_stream::wrappers::UnboundedReceiverStream<Epoch<Data>>,
+pub struct ActiveEpochs {
+	known: Vec<Epoch>,
+	incoming: tokio_stream::wrappers::UnboundedReceiverStream<Epoch>,
 }
 
 pub struct Client {
-	request_sender: async_channel::Sender<tokio::sync::oneshot::Sender<ActiveEpochs<()>>>,
+	request_sender: async_channel::Sender<tokio::sync::oneshot::Sender<ActiveEpochs>>,
 }
 
 impl Client {
@@ -71,7 +70,7 @@ impl Client {
 		}
 
 		let (request_sender, mut request_receiver) =
-			async_channel::unbounded::<tokio::sync::oneshot::Sender<ActiveEpochs<()>>>();
+			async_channel::unbounded::<tokio::sync::oneshot::Sender<ActiveEpochs>>();
 
 		let initial_block_hash = state_chain_stream.cache().block_hash;
 
@@ -98,7 +97,7 @@ impl Client {
 
 		assert!(epoch_expiries.contains_key(&current_epoch.index));
 
-		let mut epoch_senders = Vec::<tokio::sync::mpsc::UnboundedSender<Epoch<()>>>::new();
+		let mut epoch_senders = Vec::<tokio::sync::mpsc::UnboundedSender<Epoch>>::new();
 
 		scope.spawn(async move {
 			utilities::loop_select! {
@@ -118,7 +117,6 @@ impl Client {
 								valid_block_hash: initial_block_hash,
 								expired_signal: expired.signal.clone(),
 								not_current_signal: Signal::signalled(initial_block_hash),
-								data: (),
 							}
 						}).chain(std::iter::once({
 							Epoch {
@@ -126,7 +124,6 @@ impl Client {
 								valid_block_hash: initial_block_hash,
 								expired_signal: current_epoch.expired.signal.clone(),
 								not_current_signal: current_epoch.not_current.signal.clone(),
-								data: (),
 							}
 						}))).collect(),
 						incoming: tokio_stream::wrappers::UnboundedReceiverStream::new(epoch_receiver),
@@ -154,7 +151,6 @@ impl Client {
 								valid_block_hash: block_hash,
 								expired_signal: current_epoch.expired.signal.clone(),
 								not_current_signal: current_epoch.not_current.signal.clone(),
-								data: (),
 							});
 						}
 					}
@@ -174,7 +170,6 @@ impl Client {
 										valid_block_hash: block_hash,
 										expired_signal: expired.signal.clone(),
 										not_current_signal: Signal::signalled(block_hash),
-										data: (),
 									});
 								}
 
@@ -197,14 +192,14 @@ impl Client {
 		Self { request_sender }
 	}
 
-	pub async fn active_epochs(&self) -> ActiveEpochs<()> {
+	pub async fn active_epochs(&self) -> ActiveEpochs {
 		let (response_sender, response_receiver) = tokio::sync::oneshot::channel();
 		drop(self.request_sender.send(response_sender));
 		response_receiver.await.expect(OR_CANCEL)
 	}
 }
 
-impl<Data: Send + Sync + 'static> ActiveEpochs<Data> {
+impl ActiveEpochs {
 	pub async fn filter_by_participation<
 		StateChainClient: client::storage_api::StorageApi + Clone + Send + Sync + 'static,
 	>(
@@ -212,7 +207,7 @@ impl<Data: Send + Sync + 'static> ActiveEpochs<Data> {
 		scope: &Scope<'_, StateChainClient>,
 		account_id: AccountId32,
 		state_chain_client: StateChainClient,
-	) -> ActiveEpochs<Data> {
+	) -> ActiveEpochs {
 		let state_chain_client = state_chain_client.clone();
 		let known_and_participating = futures::stream::iter(self.known)
 			.filter_map(|epoch| {
@@ -241,6 +236,9 @@ impl<Data: Send + Sync + 'static> ActiveEpochs<Data> {
 
 		scope.spawn(async move {
 			utilities::loop_select! {
+				if epoch_sender.is_closed() => let _ = futures::future::ready(()) => {
+					break Ok(())
+				},
 				let epoch = self.incoming.next_or_pending() => {
 					let historical_active_epochs = BTreeSet::from_iter(
 						state_chain_client
@@ -253,13 +251,7 @@ impl<Data: Send + Sync + 'static> ActiveEpochs<Data> {
 					);
 
 					if historical_active_epochs.contains(&epoch.index) {
-						let _result = epoch_sender.send(Epoch {
-							index: epoch.index,
-							valid_block_hash: epoch.valid_block_hash,
-							expired_signal: epoch.expired_signal,
-							not_current_signal: epoch.not_current_signal,
-							data: epoch.data,
-						});
+						let _result = epoch_sender.send(epoch);
 					}
 				},
 			}
@@ -269,5 +261,89 @@ impl<Data: Send + Sync + 'static> ActiveEpochs<Data> {
 			known: known_and_participating,
 			incoming: tokio_stream::wrappers::UnboundedReceiverStream::new(epoch_receiver),
 		}
+	}
+}
+
+#[async_trait::async_trait]
+pub trait GetVaultData {
+	type VaultData: Send + Sync + 'static;
+
+	async fn get_vault_data(&self, epoch: &Epoch) -> Self::VaultData;
+}
+
+pub struct Vault<C: cf_chains::Chain> {
+	active_from_block: C::ChainBlockNumber,
+	start_data: C::EpochStartData,
+	// end_block: Option<C::ChainBlockNumber>,
+}
+
+pub struct ActiveVaults<C: cf_chains::Chain> {
+	known: Vec<Vault<C>>,
+	incoming: tokio_stream::wrappers::UnboundedReceiverStream<Vault<C>>,
+}
+
+async fn active_epochs_vault_data<C, I, StateChainClient, VaultDataGetter>(
+	mut active_epochs: ActiveEpochs,
+	scope: &Scope<'_, StateChainClient>,
+	state_chain_client: StateChainClient,
+	chain_client: VaultDataGetter,
+) -> ActiveVaults<C>
+where
+	C: cf_chains::ChainAbi,
+	I: 'static + Send + Sync,
+	StateChainClient: client::storage_api::StorageApi + Clone + Send + Sync + 'static,
+	VaultDataGetter: GetVaultData<VaultData = C::EpochStartData> + Clone + Send + Sync + 'static,
+	state_chain_runtime::Runtime: pallet_cf_vaults::Config<I, Chain = C>,
+{
+	// We have a vault for each epoch
+	let known_vaults = futures::stream::iter(active_epochs.known)
+		.filter_map(|epoch| {
+			let state_chain_client = state_chain_client.clone();
+			let chain_client = chain_client.clone();
+			async move {
+				if let Some(vault) = state_chain_client
+					.storage_map_entry::<pallet_cf_vaults::Vaults<state_chain_runtime::Runtime, I>>(
+						epoch.valid_block_hash,
+						&epoch.index,
+					)
+					.await
+					.unwrap()
+				{
+					Some(Vault {
+						active_from_block: vault.active_from_block,
+						start_data: chain_client.get_vault_data(&epoch).await,
+					})
+				} else {
+					None
+				}
+			}
+		})
+		.collect::<Vec<_>>()
+		.await;
+
+	let (vault_sender, vault_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+	scope.spawn(async move {
+		utilities::loop_select! {
+			if vault_sender.is_closed() => let _ = futures::future::ready(()) => {
+				break Ok(())
+			},
+			let epoch = active_epochs.incoming.next_or_pending() => {
+				if let Some(vault) = state_chain_client
+					.storage_map_entry::<pallet_cf_vaults::Vaults<state_chain_runtime::Runtime, I>>(
+						epoch.valid_block_hash,
+						&epoch.index,
+					)
+					.await
+					.unwrap() {
+					let _result = vault_sender.send(Vault { active_from_block: vault.active_from_block, start_data: chain_client.get_vault_data(&epoch).await });
+				}
+			},
+		}
+	});
+
+	ActiveVaults {
+		known: known_vaults,
+		incoming: tokio_stream::wrappers::UnboundedReceiverStream::new(vault_receiver),
 	}
 }
