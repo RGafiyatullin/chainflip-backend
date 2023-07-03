@@ -203,13 +203,8 @@ impl ExtBuilder {
 				<EthereumThresholdSigner as ThresholdSigner<_>>::request_signature(*message);
 			let ceremony_id = MockCeremonyIdProvider::get();
 
-			let maybe_pending_ceremony = EthereumThresholdSigner::pending_ceremonies(ceremony_id);
-			assert!(
-				maybe_pending_ceremony.is_some() !=
-					EthereumThresholdSigner::pending_requests(request_id).is_some(),
-					"The request should be either a pending ceremony OR a pending request at this point"
-			);
-			if let Some(pending_ceremony) = maybe_pending_ceremony {
+			if let Some(pending_ceremony) = EthereumThresholdSigner::pending_ceremonies(ceremony_id)
+			{
 				assert_eq!(
 					pending_ceremony.remaining_respondents,
 					BTreeSet::from_iter(MockNominator::get_nominees().unwrap_or_default())

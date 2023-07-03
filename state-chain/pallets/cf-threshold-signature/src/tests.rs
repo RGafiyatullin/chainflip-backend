@@ -24,11 +24,12 @@ fn get_ceremony_context(
 	expected_attempt: AttemptCount,
 ) -> CeremonyContext<Test, Instance1> {
 	let CeremonyContext::<Test, Instance1> {
-		request_context: RequestContext { request_id, attempt_count, .. },
+		request_context: RequestContext { request_id, .. },
+		attempt_number,
 		..
 	} = EthereumThresholdSigner::pending_ceremonies(ceremony_id).unwrap();
 	assert_eq!(request_id, expected_request_id);
-	assert_eq!(attempt_count, expected_attempt);
+	assert_eq!(attempt_number, expected_attempt);
 	EthereumThresholdSigner::pending_ceremonies(ceremony_id)
 		.unwrap_or_else(|| panic!("Expected a ceremony with id {ceremony_id:?}"))
 }
@@ -305,7 +306,8 @@ fn fail_path_with_timeout() {
 		.execute_with(|| {
 			let ceremony_id = current_ceremony_id();
 			let CeremonyContext::<Test, Instance1> {
-				request_context: RequestContext { request_id, attempt_count, .. },
+				request_context: RequestContext { request_id, .. },
+				attempt_number,
 				..
 			} = EthereumThresholdSigner::pending_ceremonies(ceremony_id).unwrap();
 			let cfes = [
@@ -351,7 +353,7 @@ fn fail_path_with_timeout() {
 
 			// We have a new request pending: New ceremony_id, same request context.
 			assert_eq!(
-				get_ceremony_context(ceremony_id + 1, request_id, attempt_count + 1)
+				get_ceremony_context(ceremony_id + 1, request_id, attempt_number + 1)
 					.remaining_respondents,
 				BTreeSet::from_iter(MockNominator::get_nominees().unwrap().into_iter())
 			);
@@ -372,7 +374,8 @@ fn fail_path_due_to_report_signature_failed() {
 			System::set_block_number(frame_system::Pallet::<Test>::current_block_number() + 1);
 			let ceremony_id = current_ceremony_id();
 			let CeremonyContext::<Test, Instance1> {
-				request_context: RequestContext { request_id, attempt_count, .. },
+				request_context: RequestContext { request_id, .. },
+				attempt_number,
 				..
 			} = EthereumThresholdSigner::pending_ceremonies(ceremony_id).unwrap();
 			let cfes = [(1, vec![]), (2, vec![1]), (3, vec![1]), (4, vec![1]), (5, vec![1])]
@@ -413,7 +416,7 @@ fn fail_path_due_to_report_signature_failed() {
 			);
 
 			assert_eq!(
-				get_ceremony_context(ceremony_id + 1, request_id, attempt_count + 1)
+				get_ceremony_context(ceremony_id + 1, request_id, attempt_number + 1)
 					.remaining_respondents,
 				BTreeSet::from_iter(MockNominator::get_nominees().unwrap().into_iter())
 			);
@@ -464,7 +467,8 @@ fn test_retries_for_locked_key() {
 		.execute_with(|| {
 			let ceremony_id = current_ceremony_id();
 			let CeremonyContext::<Test, Instance1> {
-				request_context: RequestContext { request_id, attempt_count: first_attempt, .. },
+				request_context: RequestContext { request_id, .. },
+				attempt_number: first_attempt,
 				..
 			} = EthereumThresholdSigner::pending_ceremonies(ceremony_id).unwrap();
 
@@ -482,8 +486,8 @@ fn test_retries_for_locked_key() {
 
 			let retry_ceremony_id = current_ceremony_id();
 			let CeremonyContext::<Test, Instance1> {
-				request_context:
-					RequestContext { request_id: request_id_2, attempt_count: second_attempt, .. },
+				request_context: RequestContext { request_id: request_id_2, .. },
+				attempt_number: second_attempt,
 				..
 			} = EthereumThresholdSigner::pending_ceremonies(retry_ceremony_id).unwrap();
 			assert_eq!(request_id, request_id_2);
@@ -628,7 +632,7 @@ mod unsigned_validation {
 #[cfg(test)]
 mod failure_reporting {
 	use super::*;
-	use crate::{CeremonyContext, RequestContext, ThresholdCeremonyType};
+	use crate::{CeremonyContext, RequestContext, RequestType};
 	use cf_chains::{mocks::MockAggKey, ChainCrypto};
 
 	fn init_context(
@@ -637,13 +641,17 @@ mod failure_reporting {
 		const PAYLOAD: <MockEthereum as ChainCrypto>::Payload = *b"OHAI";
 		MockEpochInfo::set_authorities(validator_set.into_iter().collect());
 		CeremonyContext {
-			request_context: RequestContext { request_id: 1, attempt_count: 0, payload: PAYLOAD },
-			threshold_ceremony_type: ThresholdCeremonyType::Standard,
+			request_context: RequestContext {
+				request_id: 1,
+				payload: PAYLOAD,
+				request_type: RequestType::Standard,
+			},
+			attempt_number: 0,
 			epoch: 0,
 			key: MockAggKey(AGG_KEY),
 			remaining_respondents: BTreeSet::from_iter(validator_set),
 			blame_counts: Default::default(),
-			candidates: BTreeSet::from_iter(validator_set),
+			participants: BTreeSet::from_iter(validator_set),
 		}
 	}
 
