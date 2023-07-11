@@ -49,6 +49,37 @@ jobs:
       - name: Check Linting
         run: cargo cf-clippy-ci
 
+  lint-ci-bouncer:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure NodeJS
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: "pnpm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@chainflip-io"
+          cache-dependency-path: "bouncer/pnpm-lock.yaml"
+
+      - name: Install node dependencies
+        working-directory: bouncer
+        run: pnpm install
+
+      - name: Run prettier check
+        working-directory: bouncer
+        run: pnpm prettier:check
+
+      - name: Run eslint check
+        working-directory: bouncer
+        run: pnpm eslint:check
+
+      - name: Run typecheck
+        working-directory: bouncer
+        run: pnpm typecheck
+
   lint-ci-workflows:
     runs-on: ubuntu-20.04
     steps:
