@@ -50,10 +50,22 @@ jobs:
         run: cargo cf-clippy-ci
 
   lint-ci-bouncer:
-    runs-on: ubuntu-20.04
+    runs-on: [hetzner]
+    container:
+      image: "ghcr.io/${{ github.repository }}/rust-base:nightly-2023-03-20-ubuntu-20.04"
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout
+      - name: Checkout chainflip-backend
         uses: actions/checkout@v3
+
+      - name: Setup ngrok
+        run: |
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | tee /etc/apt/sources.list.d/ngrok.list
+          apt update
+          apt install ngrok
 
       - name: Configure NodeJS
         uses: actions/setup-node@v3
@@ -63,6 +75,16 @@ jobs:
           registry-url: "https://npm.pkg.github.com"
           scope: "@chainflip-io"
           cache-dependency-path: "bouncer/pnpm-lock.yaml"
+
+      - name: Set NPM registry
+        run: |
+          pnpm set @chainflip-io:registry=https://npm.pkg.github.com/
+          pnpm set //npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install system packages
+        run: |
+          apt-get update
+          apt-get install -y bc xxd
 
       - name: Install node dependencies
         working-directory: bouncer
