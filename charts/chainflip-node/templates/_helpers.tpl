@@ -1,26 +1,15 @@
 {{/*
-Expand the name of the chart.
+Define name for chainflip-node
 */}}
-{{- define "chainflip-node.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- define "chainflip-node.fullname" -}}
+{{ .Release.Name }}-node
 {{- end }}
 
 {{/*
-Create a default fully qualified app name.
-We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
-If release name contains chart name it will be used as a full name.
+Define name for chainflip-engine
 */}}
-{{- define "chainflip-node.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
-{{- end }}
+{{- define "chainflip-engine.fullname" -}}
+{{ .Release.Name }}-engine
 {{- end }}
 
 {{/*
@@ -34,19 +23,31 @@ Create chart name and version as used by the chart label.
 Common labels
 */}}
 {{- define "chainflip-node.labels" -}}
-helm.sh/chart: {{ include "chainflip-node.chart" . }}
 {{ include "chainflip-node.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+chainflip.io/unit: chainflip-node
 {{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
+
+{{/*
+Common labels for engine
+*/}}
+{{- define "chainflip-engine.labels" -}}
+{{ include "chainflip-engine.selectorLabels" . }}
+chainflip.io/unit: chainflip-engine
 {{- end }}
 
 {{/*
 Selector labels
 */}}
 {{- define "chainflip-node.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "chainflip-node.name" . }}
+app.kubernetes.io/name: {{ include "chainflip-node.fullname" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Selector labels for the engine
+*/}}
+{{- define "chainflip-engine.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "chainflip-engine.fullname" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 

@@ -2,18 +2,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "chainflip-node.fullname" . }}-engine
+  name: {{ include "chainflip-engine.fullname" . }}
   labels:
-    app: {{ include "chainflip-node.fullname" . }}-engine
+    app: {{ include "chainflip-engine.fullname" . }}
 spec:
   replicas: 1
   strategy:
     type: Recreate
   template:
     metadata:
-      name: {{ include "chainflip-node.fullname" . }}-engine
+      name: {{ include "chainflip-engine.fullname" . }}
       labels:
-        app: {{ include "chainflip-node.fullname" . }}-engine
+        {{ include "chainflip-engine.selectorLabels" . | nindent 8 }}
     spec:
       imagePullSecrets:
         {{ .Values.imagePullSecrets | toYaml | nindent 8 }}
@@ -94,10 +94,10 @@ spec:
       volumes:
         - name: datadb
           persistentVolumeClaim:
-            claimName: {{ include "chainflip-node.fullname" . }}-engine-datadb
+            claimName: {{ include "chainflip-engine.fullname" . }}-datadb
         - name: settings
           configMap:
-            name: {{ include "chainflip-node.fullname" . }}-engine-settings
+            name: {{ include "chainflip-engine.fullname" . }}-settings
         - name: node-keys
           secret:
             secretName: {{ include "chainflip-node.fullname" .}}-{{ .Values.secrets.existingOnePasswordSecret }}
@@ -110,5 +110,5 @@ spec:
                 path: ethereum_key_file
   selector:
     matchLabels:
-      app: {{ include "chainflip-node.fullname" . }}-engine
+      {{ include "chainflip-engine.selectorLabels" . | nindent 6 }}
 {{- end }}
