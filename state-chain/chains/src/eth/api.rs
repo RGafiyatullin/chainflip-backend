@@ -369,8 +369,11 @@ where
 		for FetchAssetParams { deposit_fetch_id, asset } in fetch_params {
 			if let Some(token_address) = E::token_address(asset) {
 				match deposit_fetch_id {
-					EthereumFetchId::Deployed(contract_address) => fetch_only_params
-						.push(EncodableFetchAssetParams { contract_address, asset: token_address }),
+					EthereumFetchId::Deployed(contract_address) => {
+						if asset != assets::eth::Asset::Eth {
+							fetch_only_params
+						.push(EncodableFetchAssetParams { contract_address, asset: token_address })}
+						}
 					EthereumFetchId::Undeployed(channel_id) => fetch_deploy_params
 						.push(EncodableFetchDeployAssetParams { channel_id, asset: token_address }),
 				};
