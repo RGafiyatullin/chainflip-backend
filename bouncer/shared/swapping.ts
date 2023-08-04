@@ -253,10 +253,8 @@ export async function testAllSwaps() {
   ]);
 
   const depositTestSwaps = Promise.all([
-    /*
     testDepositEthereum('ETH', 'DOT'),
-    testDepositEthereum('FLIP', 'BTC'),
-    */
+    // testDepositEthereum('FLIP', 'BTC'),
   ]);
 
   await Promise.all([contractSwaps, regularSwaps, ccmSwaps, ccmContractSwaps, depositTestSwaps]);

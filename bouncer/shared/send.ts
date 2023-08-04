@@ -7,6 +7,7 @@ import { sendEth, signAndSendTxEth } from './send_eth';
 import { getEthContractAddress, defaultAssetAmounts, amountToFineAmount } from './utils';
 import cfTesterAbi from '../../eth-contract-abis/perseverance-0.9-rc3/CFTester.json';
 import { approveErc20 } from './approve_erc20';
+import { getBalance } from './get_balance';
 
 export async function send(asset: Asset, address: string, amount?: string) {
   switch (asset) {
@@ -38,9 +39,15 @@ export async function sendViaCfTester(asset: Asset, toAddress: string, amount?: 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cfTesterContract = new web3.eth.Contract(cfTesterAbi as any, cfTesterAddress);
 
-  if ((await web3.eth.getCode(cfTesterAddress)) === '0x') {
+  const bytecode = await web3.eth.getCode(cfTesterAddress);
+  if (bytecode === '0x') {
     throw new Error('CFTester not deployed');
   }
+
+  console.log(bytecode);
+  const balanceSourceAsset = await getBalance(asset, '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266');
+  console.log('sourceAsset', asset);
+  console.log('balanceSourceAsset', balanceSourceAsset);
 
   let txData;
   let value = '0';
@@ -64,6 +71,7 @@ export async function sendViaCfTester(asset: Asset, toAddress: string, amount?: 
     default:
       throw new Error(`Unsupported asset type: ${asset}`);
   }
-
-  await signAndSendTxEth(cfTesterAddress, value, txData);
+  console.log('EthValue', value);
+  const receipt = await signAndSendTxEth(cfTesterAddress, value, txData);
+  console.log('receipt', receipt);
 }
