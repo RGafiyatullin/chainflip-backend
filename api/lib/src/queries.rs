@@ -1,11 +1,18 @@
 use super::*;
+use cf_amm::{
+	common::{Amount, ZeroToOne},
+	limit_orders,
+	limit_orders::CollectedAmounts,
+};
 use cf_chains::{address::ToHumanreadableAddress, Chain};
 use cf_primitives::chains::assets::any;
 use chainflip_engine::state_chain_observer::client::{
 	chain_api::ChainApi, storage_api::StorageApi, StateChainStreamApi,
 };
+use pallet_cf_pools::Order;
 pub use pallet_cf_pools::Pool;
 use serde::Deserialize;
+use sp_core::U256;
 use state_chain_runtime::PalletInstanceAlias;
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::log;
@@ -125,17 +132,16 @@ impl QueryApi {
 		})
 	}
 
-	/// Get the
-	pub async fn get_range_orders(
+	pub async fn get_orders(
 		&self,
 		block_hash: Option<state_chain_runtime::Hash>,
 		account_id: Option<state_chain_runtime::AccountId>,
-	) -> Result<BTreeMap<Asset, Vec<RangeOrderPosition>>, anyhow::Error> {
+	) -> Result<OrderPositions, anyhow::Error> {
 		let block_hash =
 			block_hash.unwrap_or_else(|| self.state_chain_client.latest_finalized_hash());
 		let account_id = account_id.unwrap_or_else(|| self.state_chain_client.account_id());
 
-		Ok(self
+		let range_orders = self
 			.state_chain_client
 			.storage_map::<pallet_cf_pools::Pools<state_chain_runtime::Runtime>>(block_hash)
 			.await?
@@ -157,8 +163,40 @@ impl QueryApi {
 						.collect(),
 				)
 			})
-			.collect())
+			.collect();
+
+		let limit_orders: BTreeMap<Asset, Vec<LimitOrderPosition>> = self
+			.state_chain_client
+			.storage_map::<pallet_cf_pools::Pools<state_chain_runtime::Runtime>>(block_hash)
+			.await?
+			.into_iter()
+			.map(|(asset, pool)| {
+				let limited_order = pool.clone().pool_state.limit_orders;
+				let liquidity = pool.pool_state.limit_orders.liquidity::<ZeroToOne>();
+				(
+					asset,
+					liquidity
+						.into_iter()
+						.map(|(tick, amount)| LimitOrderPosition {
+							tick,
+							liquidity: limited_order
+								.position::<ZeroToOne>(&account_id, tick)
+								.unwrap()
+								.1,
+						})
+						.collect(),
+				)
+			})
+			.collect();
+
+		Ok(OrderPositions { limit_orders, range_orders })
 	}
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderPositions {
+	pub limit_orders: BTreeMap<Asset, Vec<LimitOrderPosition>>,
+	pub range_orders: BTreeMap<Asset, Vec<RangeOrderPosition>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,4 +205,10 @@ pub struct RangeOrderPosition {
 	pub lower_tick: i32,
 	#[serde(with = "utilities::serde_helpers::number_or_hex")]
 	pub liquidity: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LimitOrderPosition {
+	pub tick: i32,
+	pub liquidity: U256,
 }

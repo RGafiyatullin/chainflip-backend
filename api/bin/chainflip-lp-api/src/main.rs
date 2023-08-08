@@ -10,7 +10,7 @@ use chainflip_api::{
 		chains::{Bitcoin, Ethereum, Polkadot},
 		AccountRole, Asset, ForeignChain, Hash,
 	},
-	queries::{Pool, QueryApi, RangeOrderPosition},
+	queries::{LimitOrderPosition, OrderPositions, Pool, QueryApi, RangeOrderPosition},
 	settings::StateChain,
 	AccountId32,
 };
@@ -154,11 +154,8 @@ pub trait Rpc {
 	#[method(name = "assetBalances")]
 	async fn asset_balances(&self) -> Result<BTreeMap<Asset, u128>, Error>;
 
-	#[method(name = "getRangeOrders")]
-	async fn get_range_orders(
-		&self,
-		account_id: Option<AccountId32>,
-	) -> Result<BTreeMap<Asset, Vec<RangeOrderPosition>>, Error>;
+	#[method(name = "getOrders")]
+	async fn get_orders(&self, account_id: Option<AccountId32>) -> Result<OrderPositions, Error>;
 
 	#[method(name = "getOpenSwapChannels")]
 	async fn get_open_swap_channels(&self) -> Result<OpenSwapChannels, Error>;
@@ -226,14 +223,11 @@ impl RpcServer for RpcServerImpl {
 	}
 
 	/// Returns a list of all assets and their range order positions in json format
-	async fn get_range_orders(
-		&self,
-		account_id: Option<AccountId32>,
-	) -> Result<BTreeMap<Asset, Vec<RangeOrderPosition>>, Error> {
+	async fn get_orders(&self, account_id: Option<AccountId32>) -> Result<OrderPositions, Error> {
 		Ok(task_scope(|scope| {
 			async move {
 				let api = QueryApi::connect(scope, &self.state_chain_settings).await?;
-				let range_orders = api.get_range_orders(None, account_id).await?;
+				let range_orders = api.get_orders(None, account_id).await?;
 				Ok(range_orders)
 			}
 			.boxed()
