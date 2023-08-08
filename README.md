@@ -19,6 +19,26 @@ To compile the code execute:
 cargo build --release
 ```
 
+> If you have trouble building on a Mac, specifically if you are getting a wasm build error related to secp256k1, please
+> try the following:
+>
+> 1. Install llvm via homebrew:
+>
+>    ```sh
+>    brew install llvm
+>    ```
+>
+> 2. Add the paths to the cargo build environment, in `$HOME/.cargo/config.toml`:
+>
+>    ```toml
+>    [env]
+>    AR = "/opt/homebrew/opt/llvm/bin/llvm-ar"
+>    CC = "/opt/homebrew/opt/llvm/bin/clang"
+>    ```
+>
+> ([Context](https://github.com/rust-bitcoin/rust-secp256k1/issues/283))
+
+
 To run the test suite execute:
 
 ```bash
