@@ -40,7 +40,9 @@ use cf_chains::{
 	ChainCrypto, ChainEnvironment, ChainState, ForeignChain, ReplayProtectionProvider,
 	SetCommKeyWithAggKey, SetGovKeyWithAggKey, TransactionBuilder,
 };
-use cf_primitives::{chains::assets, AccountRole, Asset, BasisPoints, ChannelId, EgressId};
+use cf_primitives::{
+	chains::assets, AccountRole, Asset, BasisPoints, ChannelId, EgressId, EvmChain,
+};
 use cf_traits::{
 	impl_runtime_safe_mode, AccountRoleRegistry, BlockEmissions, BroadcastAnyChainGovKey,
 	Broadcaster, Chainflip, CommKeyBroadcaster, DepositApi, DepositHandler, EgressApi, EpochInfo,
@@ -316,8 +318,9 @@ impl ReplayProtectionProvider<Ethereum> for EthEnvironment {
 	}
 }
 
+// Pass in evm chain here, rather than impl it twice.
 impl EthEnvironmentProvider<Ethereum> for EthEnvironment {
-	fn token_address(asset: assets::eth::Asset) -> Option<H160> {
+	fn token_address(asset: <Ethereum as cf_chains::Chain>::ChainAsset) -> Option<H160> {
 		match asset {
 			assets::eth::Asset::Eth => Some(ETHEREUM_ETH_ADDRESS),
 			erc20 => Environment::supported_eth_assets(erc20).map(Into::into),
@@ -327,8 +330,9 @@ impl EthEnvironmentProvider<Ethereum> for EthEnvironment {
 	fn contract_address(contract: EthereumContract) -> H160 {
 		match contract {
 			EthereumContract::StateChainGateway => Environment::state_chain_gateway_address(),
-			EthereumContract::KeyManager => Environment::key_manager_address(),
-			EthereumContract::Vault => Environment::eth_vault_address(),
+			EthereumContract::KeyManager =>
+				Environment::key_manager_addresses().get(EvmChain::Ethereum),
+			EthereumContract::Vault => Environment::vault_addresses().get(EvmChain::Ethereum),
 		}
 	}
 
@@ -344,10 +348,10 @@ impl EthEnvironmentProvider<Ethereum> for EthEnvironment {
 pub struct ArbEnvironment;
 
 impl EthEnvironmentProvider<Arbitrum> for ArbEnvironment {
-	fn token_address(asset: assets::arb::Asset) -> Option<H160> {
+	fn token_address(asset: <Arbitrum as cf_chains::Chain>::ChainAsset) -> Option<H160> {
 		match asset {
 			assets::arb::Asset::ArbEth => Some(ETHEREUM_ETH_ADDRESS),
-			assets::arb::Asset::ArbUsdc => Environment::supported_arb_assets(asset).map(Into::into),
+			erc20 => Environment::supported_arb_assets(erc20).map(Into::into),
 		}
 	}
 
@@ -355,8 +359,9 @@ impl EthEnvironmentProvider<Arbitrum> for ArbEnvironment {
 		match contract {
 			// we dont have a state chain gateway contract on arbitrum.
 			EthereumContract::StateChainGateway => unimplemented!(),
-			EthereumContract::KeyManager => Environment::arb_key_manager_address(),
-			EthereumContract::Vault => Environment::arb_vault_address(),
+			EthereumContract::KeyManager =>
+				Environment::key_manager_addresses().get(EvmChain::Arbitrum),
+			EthereumContract::Vault => Environment::vault_addresses().get(EvmChain::Arbitrum),
 		}
 	}
 

@@ -4,11 +4,11 @@
 //!
 //! Primitive types to be used across Chainflip's various crates.
 use codec::{Decode, Encode, MaxEncodedLen};
-use scale_info::TypeInfo;
 use frame_support::sp_runtime::{
 	traits::{IdentifyAccount, Verify},
 	MultiSignature, RuntimeDebug,
 };
+use scale_info::TypeInfo;
 use serde::{Deserialize, Serialize};
 use sp_std::{
 	cmp::{Ord, PartialOrd},
@@ -190,4 +190,25 @@ impl core::fmt::Display for NetworkEnvironment {
 			NetworkEnvironment::Development => write!(f, "Development"),
 		}
 	}
+}
+
+#[derive(
+	Default,
+	Copy,
+	Clone,
+	Debug,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Encode,
+	Decode,
+	TypeInfo,
+	MaxEncodedLen,
+)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+pub enum EvmChain {
+	#[default]
+	Ethereum,
+	Arbitrum,
 }

@@ -6,6 +6,7 @@ authors = ['Chainflip <https://chainflip.io>']
 description = 'Common primitive types used across Chainflip'
 
 [dependencies]
+enum-map = "2.5.0"
 serde = { default_features = false, version = '1.0.126', features = [
   'alloc',
   'derive',

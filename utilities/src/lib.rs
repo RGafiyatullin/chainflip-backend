@@ -290,3 +290,32 @@ mod test_asserts {
 		assert_panics!(assert_ok!(Err::<u32, u32>(1)));
 	}
 }
+
+use codec::{Decode, Encode, MaxEncodedLen};
+use scale_info::TypeInfo;
+use sp_std::collections::btree_map::BTreeMap;
+
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
+
+#[derive(
+	Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Encode, Decode, TypeInfo, MaxEncodedLen,
+)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+pub struct EnumMap<K: Ord, V> {
+	inner: BTreeMap<K, V>,
+}
+
+impl<K, V> EnumMap<K, V>
+where
+	K: Eq + Ord,
+	V: Clone + Default,
+{
+	pub fn insert(&mut self, key: K, value: V) {
+		self.inner.insert(key, value);
+	}
+
+	pub fn get(&self, key: K) -> V {
+		self.inner.get(&key).cloned().unwrap_or_default()
+	}
+}

@@ -9,7 +9,7 @@ pub mod vault;
 
 use std::{collections::HashMap, sync::Arc};
 
-use cf_primitives::chains::assets::eth;
+use cf_primitives::{chains::assets::eth, EvmChain};
 use sp_core::H160;
 use utilities::task_scope::Scope;
 
@@ -65,26 +65,31 @@ where
         .await
         .context("Failed to get StateChainGateway address from SC")?;
 
+	let evm_chain = EvmChain::Ethereum;
+
 	let key_manager_address = state_chain_client
-		.storage_value::<pallet_cf_environment::EthereumKeyManagerAddress<state_chain_runtime::Runtime>>(
+		.storage_value::<pallet_cf_environment::EvmKeyManagerAddress<state_chain_runtime::Runtime>>(
 			state_chain_client.latest_finalized_hash(),
 		)
 		.await
-		.context("Failed to get KeyManager address from SC")?;
+		.context("Failed to get KeyManager address from SC")?
+		.get(evm_chain);
 
 	let vault_address = state_chain_client
-		.storage_value::<pallet_cf_environment::EthereumVaultAddress<state_chain_runtime::Runtime>>(
+		.storage_value::<pallet_cf_environment::EvmVaultAddress<state_chain_runtime::Runtime>>(
 			state_chain_client.latest_finalized_hash(),
 		)
 		.await
-		.context("Failed to get Vault contract address from SC")?;
+		.context("Failed to get Vault contract address from SC")?
+		.get(evm_chain);
 
 	let address_checker_address = state_chain_client
-		.storage_value::<pallet_cf_environment::EthereumAddressCheckerAddress<state_chain_runtime::Runtime>>(
+		.storage_value::<pallet_cf_environment::EvmAddressCheckerAddress<state_chain_runtime::Runtime>>(
 			state_chain_client.latest_finalized_hash(),
 		)
 		.await
-		.expect(STATE_CHAIN_CONNECTION);
+		.expect(STATE_CHAIN_CONNECTION)
+		.get(evm_chain);
 
 	let supported_erc20_tokens: HashMap<cf_primitives::chains::assets::eth::Asset, H160> =
 		state_chain_client

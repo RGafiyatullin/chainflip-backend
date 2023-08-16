@@ -4,7 +4,7 @@ use cf_chains::{
 	eth::{api::EthEnvironmentProvider, deposit_address::get_create_2_address},
 	Chain, Ethereum,
 };
-use cf_primitives::{chains::assets::eth, ChannelId};
+use cf_primitives::{chains::assets::eth, ChannelId, EvmChain};
 use frame_support::sp_runtime::DispatchError;
 
 use super::AddressDerivation;
@@ -15,7 +15,7 @@ impl AddressDerivationApi<Ethereum> for AddressDerivation {
 		channel_id: ChannelId,
 	) -> Result<<Ethereum as Chain>::ChainAccount, DispatchError> {
 		Ok(get_create_2_address(
-			Environment::eth_vault_address(),
+			Environment::vault_addresses().get(EvmChain::Ethereum),
 			EthEnvironment::token_address(source_asset),
 			channel_id,
 		))

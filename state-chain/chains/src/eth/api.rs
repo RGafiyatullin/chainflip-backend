@@ -2,6 +2,7 @@ use super::{Ethereum, EthereumFetchId, SchnorrVerificationComponents};
 use crate::*;
 use common::*;
 use ethabi::{Address, ParamType, Token, Uint};
+use ethereum_types::H160;
 use frame_support::{
 	sp_runtime::{
 		traits::{Hash, Keccak256, UniqueSaturatedInto},
@@ -9,7 +10,6 @@ use frame_support::{
 	},
 	CloneNoBound, DebugNoBound, EqNoBound, Never, PartialEqNoBound,
 };
-use ethereum_types::H160;
 use sp_std::marker::PhantomData;
 
 pub use tokenizable::Tokenizable;

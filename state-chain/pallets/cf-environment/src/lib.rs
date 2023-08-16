@@ -15,9 +15,11 @@ use cf_chains::{
 };
 use cf_primitives::{
 	chains::assets::{arb::Asset as ArbAsset, eth::Asset as EthAsset},
-	NetworkEnvironment, SemVer,
+	EvmChain, NetworkEnvironment, SemVer,
 };
+
 use cf_traits::{CompatibleVersions, GetBitcoinFeeInfo, SafeMode};
+use cf_utilities::EnumMap;
 use frame_support::{
 	pallet_prelude::*,
 	traits::{OnRuntimeUpgrade, StorageVersion},
@@ -117,19 +119,21 @@ pub mod pallet {
 	pub type EthereumStateChainGatewayAddress<T> = StorageValue<_, EthereumAddress, ValueQuery>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn key_manager_address)]
-	/// The address of the ETH key manager contract
-	pub type EthereumKeyManagerAddress<T> = StorageValue<_, EthereumAddress, ValueQuery>;
+	#[pallet::getter(fn key_manager_addresses)]
+	/// The address of the key manager contracts for each EVM chain
+	pub type EvmKeyManagerAddress<T> =
+		StorageValue<_, EnumMap<EvmChain, EthereumAddress>, ValueQuery>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn eth_vault_address)]
-	/// The address of the ETH vault contract
-	pub type EthereumVaultAddress<T> = StorageValue<_, EthereumAddress, ValueQuery>;
+	#[pallet::getter(fn vault_addresses)]
+	/// The address of the vault contracts for each EVM chain.
+	pub type EvmVaultAddress<T> = StorageValue<_, EnumMap<EvmChain, EthereumAddress>, ValueQuery>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn eth_address_checker_address)]
-	/// The address of the Address Checker contract on ETH
-	pub type EthereumAddressCheckerAddress<T> = StorageValue<_, EthereumAddress, ValueQuery>;
+	#[pallet::getter(fn address_checker_addresses)]
+	/// The address of the Address Checker contracts on each EVM chain.
+	pub type EvmAddressCheckerAddress<T> =
+		StorageValue<_, EnumMap<EvmChain, EthereumAddress>, ValueQuery>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn ethereum_chain_id)]
@@ -181,21 +185,6 @@ pub mod pallet {
 	/// Map of supported assets for ARB
 	pub type ArbitrumSupportedAssets<T: Config> =
 		StorageMap<_, Blake2_128Concat, ArbAsset, EthereumAddress>;
-
-	#[pallet::storage]
-	#[pallet::getter(fn arb_key_manager_address)]
-	/// The address of the ARB key manager contract
-	pub type ArbitrumKeyManagerAddress<T> = StorageValue<_, EthereumAddress, ValueQuery>;
-
-	#[pallet::storage]
-	#[pallet::getter(fn arb_vault_address)]
-	/// The address of the ARB vault contract
-	pub type ArbitrumVaultAddress<T> = StorageValue<_, EthereumAddress, ValueQuery>;
-
-	#[pallet::storage]
-	#[pallet::getter(fn arb_address_checker_address)]
-	/// The address of the Address Checker contract on Arbitrum.
-	pub type ArbitrumAddressCheckerAddress<T> = StorageValue<_, EthereumAddress, ValueQuery>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn arbitrum_chain_id)]
@@ -259,7 +248,6 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-
 		/// Manually initiates Polkadot vault key rotation completion steps so Epoch rotation can be
 		/// continued and sets the Polkadot Pure Proxy Vault in environment pallet. The extrinsic
 		/// takes in the dot_pure_proxy_vault_key, which is obtained from the Polkadot blockchain as
@@ -474,9 +462,21 @@ pub mod pallet {
 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
 		fn build(&self) {
 			EthereumStateChainGatewayAddress::<T>::set(self.state_chain_gateway_address);
-			EthereumKeyManagerAddress::<T>::set(self.key_manager_address);
-			EthereumVaultAddress::<T>::set(self.eth_vault_address);
-			EthereumAddressCheckerAddress::<T>::set(self.eth_address_checker_address);
+
+			let mut key_manager_addresses = EnumMap::<EvmChain, EthereumAddress>::default();
+			key_manager_addresses.insert(EvmChain::Ethereum, self.key_manager_address);
+			key_manager_addresses.insert(EvmChain::Arbitrum, self.arb_key_manager_address);
+			EvmKeyManagerAddress::<T>::put(key_manager_addresses);
+
+			let mut vault_addresses = EnumMap::<EvmChain, EthereumAddress>::default();
+			vault_addresses.insert(EvmChain::Ethereum, self.eth_vault_address);
+			vault_addresses.insert(EvmChain::Arbitrum, self.arb_vault_address);
+			EvmVaultAddress::<T>::set(vault_addresses);
+
+			let mut address_checker_addresses = EnumMap::<EvmChain, EthereumAddress>::default();
+			address_checker_addresses.insert(EvmChain::Ethereum, self.eth_address_checker_address);
+			address_checker_addresses.insert(EvmChain::Arbitrum, self.arb_address_checker_address);
+			EvmAddressCheckerAddress::<T>::set(address_checker_addresses);
 
 			EthereumChainId::<T>::set(self.ethereum_chain_id);
 			EthereumSupportedAssets::<T>::insert(EthAsset::Flip, self.flip_token_address);
@@ -488,11 +488,8 @@ pub mod pallet {
 
 			BitcoinAvailableUtxos::<T>::set(vec![]);
 
-			ArbitrumKeyManagerAddress::<T>::set(self.arb_key_manager_address);
-			ArbitrumVaultAddress::<T>::set(self.arb_vault_address);
 			ArbitrumChainId::<T>::set(self.arbitrum_chain_id);
 			ArbitrumSupportedAssets::<T>::insert(ArbAsset::ArbUsdc, self.arbusdc_token_address);
-			ArbitrumAddressCheckerAddress::<T>::set(self.arb_address_checker_address);
 
 			ChainflipNetworkEnvironment::<T>::set(self.network_environment);
 		}

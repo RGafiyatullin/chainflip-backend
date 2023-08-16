@@ -19,6 +19,7 @@ use cf_chains::{
 	eth::{self, api::EthereumApi, Address as EthereumAddress, Ethereum},
 	Arbitrum, Bitcoin, Polkadot,
 };
+use cf_primitives::EvmChain;
 pub use frame_system::Call as SystemCall;
 use pallet_cf_governance::GovCallHash;
 use pallet_cf_reputation::ExclusionList;
@@ -928,7 +929,7 @@ impl_runtime_apis! {
 			Environment::state_chain_gateway_address()
 		}
 		fn cf_eth_key_manager_address() -> EthereumAddress {
-			Environment::key_manager_address()
+			Environment::key_manager_addresses().get(EvmChain::Ethereum)
 		}
 		fn cf_eth_chain_id() -> u64 {
 			Environment::ethereum_chain_id()
