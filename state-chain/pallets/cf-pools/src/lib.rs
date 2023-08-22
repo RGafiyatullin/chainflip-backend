@@ -1,7 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+use core::ops::Range;
+
 use cf_amm::{
 	common::{Order, Price, Side},
-	NewError, PoolState,
+	range_orders, NewError, PoolState,
 };
 use cf_primitives::{chains::assets::any, Asset, AssetAmount, SwapLeg, SwapOutput, STABLE_ASSET};
 use cf_traits::{impl_pallet_safe_mode, Chainflip, SwappingApi};
@@ -28,6 +30,129 @@ mod tests;
 
 impl_pallet_safe_mode!(PalletSafeMode; minting_range_order_enabled, minting_limit_order_enabled, burning_range_order_enabled, burning_limit_order_enabled);
 
+enum Stability {
+	Stable,
+	Unstable,
+}
+
+struct CanonialAssetPair<T: Config> {
+	assets: cf_amm::common::SideMap<Asset>,
+	_phantom: core::marker::PhantomData<T>,
+}
+impl<T: Config> CanonialAssetPair<T> {
+	fn new(base_asset: Asset, pair_asset: Asset) -> Result<Self, Error<T>> {
+		match (base_asset, pair_asset) {
+			(STABLE_ASSET, STABLE_ASSET) => Err(Error::<T>::PoolDoesNotExist),
+			(STABLE_ASSET, unstable_asset) | (unstable_asset, STABLE_ASSET) => Ok(Self {
+				assets: cf_amm::common::SideMap::<()>::default().map(|side, _| {
+					match Self::side_to_stability(side) {
+						Stability::Stable => STABLE_ASSET,
+						Stability::Unstable => unstable_asset,
+					}
+				}),
+				_phantom: Default::default(),
+			}),
+			_ => Err(Error::<T>::PoolDoesNotExist),
+		}
+	}
+
+	fn side_to_asset(&self, side: Side) -> Asset {
+		self.assets[side]
+	}
+
+	/// !!! Must match side_to_stability !!!
+	fn stability_to_side(stability: Stability) -> Side {
+		match stability {
+			Stability::Stable => Side::One,
+			Stability::Unstable => Side::Zero,
+		}
+	}
+
+	/// !!! Must match stability_to_side !!!
+	fn side_to_stability(side: Side) -> Stability {
+		match side {
+			Side::Zero => Stability::Unstable,
+			Side::One => Stability::Stable,
+		}
+	}
+}
+
+struct AssetPair<T: Config> {
+	canonial_asset_pair: CanonialAssetPair<T>,
+	base_side: Side,
+}
+impl<T: Config> AssetPair<T> {
+	fn new(base_asset: Asset, pair_asset: Asset) -> Result<Self, Error<T>> {
+		Ok(Self {
+			canonial_asset_pair: CanonialAssetPair::new(base_asset, pair_asset)?,
+			base_side: CanonialAssetPair::<T>::stability_to_side(match (base_asset, pair_asset) {
+				(STABLE_ASSET, STABLE_ASSET) => Err(Error::<T>::PoolDoesNotExist),
+				(STABLE_ASSET, _unstable_asset) => Ok(Stability::Stable),
+				(_unstable_asset, STABLE_ASSET) => Ok(Stability::Unstable),
+				_ => Err(Error::<T>::PoolDoesNotExist),
+			}?),
+		})
+	}
+
+	fn asset_amounts_to_side_map(
+		&self,
+		asset_amounts: AssetAmounts,
+	) -> cf_amm::common::SideMap<cf_amm::common::Amount> {
+		cf_amm::common::SideMap::from_array(match self.base_side {
+			Side::Zero => [asset_amounts.base.into(), asset_amounts.pair.into()],
+			Side::One => [asset_amounts.pair.into(), asset_amounts.base.into()],
+		})
+	}
+
+	fn side_map_to_asset_amounts(
+		&self,
+		side_map: cf_amm::common::SideMap<cf_amm::common::Amount>,
+	) -> Result<AssetAmounts, <cf_amm::common::Amount as TryInto<AssetAmount>>::Error> {
+		let side_map = side_map.try_map(|_, amount| amount.try_into())?;
+		Ok(AssetAmounts { base: side_map[self.base_side], pair: side_map[!self.base_side] })
+	}
+
+	fn try_debit_asset_amounts(
+		&self,
+		lp: &T::AccountId,
+		AssetAmounts { base, pair }: AssetAmounts,
+	) -> DispatchResult {
+		use cf_traits::LpBalanceApi;
+
+		T::LpBalance::try_debit_account(
+			lp,
+			self.canonial_asset_pair.side_to_asset(self.base_side),
+			base,
+		)?;
+		T::LpBalance::try_debit_account(
+			lp,
+			self.canonial_asset_pair.side_to_asset(!self.base_side),
+			pair,
+		)?;
+		Ok(())
+	}
+
+	fn try_credit_asset_amounts(
+		&self,
+		lp: &T::AccountId,
+		AssetAmounts { base, pair }: AssetAmounts,
+	) -> DispatchResult {
+		use cf_traits::LpBalanceApi;
+
+		T::LpBalance::try_credit_account(
+			lp,
+			self.canonial_asset_pair.side_to_asset(self.base_side),
+			base,
+		)?;
+		T::LpBalance::try_credit_account(
+			lp,
+			self.canonial_asset_pair.side_to_asset(!self.base_side),
+			pair,
+		)?;
+		Ok(())
+	}
+}
+
 #[frame_support::pallet]
 pub mod pallet {
 	use cf_amm::{
@@ -35,7 +160,7 @@ pub mod pallet {
 		limit_orders,
 		range_orders::{self, Liquidity},
 	};
-	use cf_traits::LpBalanceApi;
+	use cf_traits::{AccountRoleRegistry, LpBalanceApi};
 	use frame_system::pallet_prelude::BlockNumberFor;
 
 	use super::*;
@@ -81,7 +206,7 @@ pub mod pallet {
 	)]
 	pub enum RangeOrderSize {
 		AssetAmounts { maximum: AssetAmounts, minimum: AssetAmounts },
-		Liquidity(Liquidity),
+		Liquidity { liquidity: Liquidity },
 	}
 
 	#[derive(
@@ -261,13 +386,6 @@ pub mod pallet {
 			liquidity_delta: Liquidity,
 			liquidity_total: Liquidity,
 			assets_delta: AssetAmounts,
-		},
-		RangeOrderCollectedEarnings {
-			lp: T::AccountId,
-			base_asset: Asset,
-			pair_asset: Asset,
-			id: OrderId,
-			tick_range: core::ops::Range<Tick>,
 			collected_fees: AssetAmounts,
 		},
 		LimitOrderUpdated {
@@ -279,13 +397,6 @@ pub mod pallet {
 			increase_or_decrease: IncreaseOrDecrease,
 			amount_delta: AssetAmount,
 			amount_total: AssetAmount,
-		},
-		LimitOrderCollectedEarnings {
-			lp: T::AccountId,
-			sell_asset: any::Asset,
-			buy_asset: any::Asset,
-			id: OrderId,
-			tick: Tick,
 			collected_fees: AssetAmount,
 			swapped_liquidity: AssetAmount,
 		},
@@ -411,28 +522,101 @@ pub mod pallet {
 		#[pallet::call_index(3)]
 		#[pallet::weight(Weight::zero())]
 		pub fn update_range_order(
-			_origin: OriginFor<T>,
-			_base_asset: Asset,
-			_pair_asset: Asset,
-			_id: OrderId,
-			_tick_range: Option<core::ops::Range<Tick>>,
-			_size: RangeOrderSize,
-			_increase_or_decrease: IncreaseOrDecrease,
+			origin: OriginFor<T>,
+			base_asset: Asset,
+			pair_asset: Asset,
+			id: OrderId,
+			tick_range: Option<core::ops::Range<Tick>>,
+			size: RangeOrderSize,
+			increase_or_decrease: IncreaseOrDecrease, // TODO Change order
 		) -> DispatchResult {
-			Ok(())
+			let lp = T::AccountRoleRegistry::ensure_liquidity_provider(origin)?;
+
+			let asset_pair = AssetPair::<T>::new(base_asset, pair_asset)?;
+			Pools::<T>::try_mutate(
+				asset_pair
+					.canonial_asset_pair
+					.side_to_asset(CanonialAssetPair::<T>::stability_to_side(Stability::Unstable)),
+				|maybe_pool| {
+					let pool = maybe_pool.as_mut().ok_or(Error::<T>::PoolDoesNotExist)?;
+					ensure!(pool.enabled, Error::<T>::PoolDisabled);
+
+					let size = match size {
+						RangeOrderSize::Liquidity { liquidity } =>
+							range_orders::Size::Liquidity { liquidity },
+						RangeOrderSize::AssetAmounts { maximum, minimum } =>
+							range_orders::Size::Amount {
+								maximum: asset_pair.asset_amounts_to_side_map(maximum),
+								minimum: asset_pair.asset_amounts_to_side_map(minimum),
+							},
+					};
+
+					Self::inner_update_range_order(
+						pool,
+						&lp,
+						&asset_pair,
+						id,
+						tick_range.unwrap(),
+						size,
+						increase_or_decrease,
+					)
+				},
+			)
 		}
 
 		#[pallet::call_index(4)]
 		#[pallet::weight(Weight::zero())]
 		pub fn set_range_order(
-			_origin: OriginFor<T>,
-			_base_asset: Asset,
-			_pair_asset: Asset,
-			_id: OrderId,
-			_tick_range: Option<core::ops::Range<Tick>>,
-			_size: RangeOrderSize,
+			origin: OriginFor<T>,
+			base_asset: Asset,
+			pair_asset: Asset,
+			id: OrderId,
+			tick_range: Option<core::ops::Range<Tick>>,
+			size: RangeOrderSize,
 		) -> DispatchResult {
-			Ok(())
+			let lp = T::AccountRoleRegistry::ensure_liquidity_provider(origin)?;
+
+			let asset_pair = AssetPair::<T>::new(base_asset, pair_asset)?;
+			Pools::<T>::try_mutate(
+				asset_pair
+					.canonial_asset_pair
+					.side_to_asset(CanonialAssetPair::<T>::stability_to_side(Stability::Unstable)),
+				|maybe_pool| {
+					let pool = maybe_pool.as_mut().ok_or(Error::<T>::PoolDoesNotExist)?;
+					ensure!(pool.enabled, Error::<T>::PoolDisabled);
+
+					let size = match size {
+						RangeOrderSize::Liquidity { liquidity } =>
+							range_orders::Size::Liquidity { liquidity },
+						RangeOrderSize::AssetAmounts { maximum, minimum } =>
+							range_orders::Size::Amount {
+								maximum: asset_pair.asset_amounts_to_side_map(maximum),
+								minimum: asset_pair.asset_amounts_to_side_map(minimum),
+							},
+					};
+
+					Self::inner_update_range_order(
+						pool,
+						&lp,
+						&asset_pair,
+						id,
+						tick_range.clone().unwrap(),
+						range_orders::Size::Liquidity { liquidity: Liquidity::MAX },
+						IncreaseOrDecrease::Decrease,
+					)?;
+					Self::inner_update_range_order(
+						pool,
+						&lp,
+						&asset_pair,
+						id,
+						tick_range.unwrap(),
+						size,
+						IncreaseOrDecrease::Increase,
+					)?;
+
+					Ok(())
+				},
+			)
 		}
 
 		#[pallet::call_index(5)]
@@ -518,55 +702,94 @@ impl<T: Config> cf_traits::FlipBurnInfo for Pallet<T> {
 }
 
 impl<T: Config> Pallet<T> {
-	/*fn range_order_mint_error_to_pallet_error(
-		error: range_orders::PositionError<range_orders::MintError<DispatchError>>,
-	) -> DispatchError {
-		match error {
-			range_orders::PositionError::NonExistent => Error::<T>::PositionDoesNotExist.into(),
-			range_orders::PositionError::InvalidTickRange => Error::<T>::InvalidTickRange.into(),
-			range_orders::PositionError::Other(range_orders::MintError::MaximumGrossLiquidity) =>
-				Error::<T>::MaximumGrossLiquidity.into(),
-			range_orders::PositionError::Other(
-				range_orders::MintError::AssetRatioUnachieveable,
-			) => Error::<T>::AssetRatioUnachieveable.into(),
-			range_orders::PositionError::Other(range_orders::MintError::CallbackFailed(e)) => e,
-		}
-	}
+	fn inner_update_range_order(
+		pool: &mut Pool<T::AccountId>,
+		lp: &T::AccountId,
+		asset_pair: &AssetPair<T>,
+		id: OrderId,
+		tick_range: Range<cf_amm::common::Tick>,
+		size: range_orders::Size,
+		increase_or_decrease: IncreaseOrDecrease,
+	) -> DispatchResult {
+		let (liquidity_delta, liquidity_total, assets_delta, collected_fees) =
+			match increase_or_decrease {
+				IncreaseOrDecrease::Increase => {
+					let (assets_debited, minted_liquidity, collected, position_info) = pool
+						.pool_state
+						.collect_and_mint_range_order(
+							lp,
+							tick_range.clone(),
+							size,
+							|required_amounts| {
+								let required_amounts =
+									asset_pair.side_map_to_asset_amounts(required_amounts)?;
+								asset_pair
+									.try_debit_asset_amounts(lp, required_amounts)
+									.map(|()| required_amounts)
+							},
+						)
+						.map_err(|e| match e {
+							range_orders::PositionError::InvalidTickRange =>
+								Error::<T>::InvalidTickRange.into(),
+							range_orders::PositionError::NonExistent =>
+								Error::<T>::PositionDoesNotExist.into(),
+							range_orders::PositionError::Other(
+								range_orders::MintError::CallbackFailed(e),
+							) => e,
+							range_orders::PositionError::Other(
+								range_orders::MintError::MaximumGrossLiquidity,
+							) => Error::<T>::MaximumGrossLiquidity.into(),
+							range_orders::PositionError::Other(
+								cf_amm::range_orders::MintError::AssetRatioUnachieveable,
+							) => Error::<T>::AssetRatioUnachieveable.into(),
+						})?;
 
-	fn range_order_burn_error_to_pallet_error(
-		error: range_orders::PositionError<range_orders::BurnError>,
-	) -> Error<T> {
-		match error {
-			range_orders::PositionError::NonExistent => Error::PositionDoesNotExist,
-			range_orders::PositionError::InvalidTickRange => Error::InvalidTickRange,
-			range_orders::PositionError::Other(
-				range_orders::BurnError::AssetRatioUnachieveable,
-			) => Error::AssetRatioUnachieveable,
-		}
-	}
+					let collected_fees = asset_pair.side_map_to_asset_amounts(collected.fees)?;
+					asset_pair.try_credit_asset_amounts(lp, collected_fees)?;
 
-	fn limit_order_mint_error_to_pallet_error(
-		error: limit_orders::PositionError<limit_orders::MintError>,
-	) -> Error<T> {
-		match error {
-			limit_orders::PositionError::NonExistent => Error::PositionDoesNotExist,
-			limit_orders::PositionError::InvalidTick => Error::InvalidTick,
-			limit_orders::PositionError::Other(limit_orders::MintError::MaximumLiquidity) =>
-				Error::MaximumGrossLiquidity,
-			limit_orders::PositionError::Other(limit_orders::MintError::MaximumPoolInstances) =>
-				Error::AssetRatioUnachieveable,
-		}
-	}
+					(minted_liquidity, position_info.liquidity, assets_debited, collected_fees)
+				},
+				IncreaseOrDecrease::Decrease => {
+					let (assets_withdrawn, burnt_liquidity, collected, position_info) = pool
+						.pool_state
+						.collect_and_burn_range_order(lp, tick_range.clone(), size)
+						.map_err(|e| match e {
+							range_orders::PositionError::InvalidTickRange =>
+								Error::<T>::InvalidTickRange,
+							range_orders::PositionError::NonExistent =>
+								Error::<T>::PositionDoesNotExist,
+							range_orders::PositionError::Other(e) => match e {
+								range_orders::BurnError::AssetRatioUnachieveable =>
+									Error::<T>::AssetRatioUnachieveable,
+							},
+						})?;
 
-	fn limit_order_burn_error_to_pallet_error(
-		error: limit_orders::PositionError<limit_orders::BurnError>,
-	) -> Error<T> {
-		match error {
-			limit_orders::PositionError::NonExistent => Error::PositionDoesNotExist,
-			limit_orders::PositionError::InvalidTick => Error::InvalidTick,
-			limit_orders::PositionError::Other(error) => match error {},
-		}
-	}*/
+					let assets_withdrawn =
+						asset_pair.side_map_to_asset_amounts(assets_withdrawn)?;
+					asset_pair.try_credit_asset_amounts(lp, assets_withdrawn)?;
+
+					let collected_fees = asset_pair.side_map_to_asset_amounts(collected.fees)?;
+					asset_pair.try_credit_asset_amounts(lp, collected_fees)?;
+
+					(burnt_liquidity, position_info.liquidity, assets_withdrawn, collected_fees)
+				},
+			};
+
+		Self::deposit_event(Event::<T>::RangeOrderUpdated {
+			lp: lp.clone(),
+			base_asset: asset_pair.canonial_asset_pair.side_to_asset(asset_pair.base_side),
+			pair_asset: asset_pair.canonial_asset_pair.side_to_asset(!asset_pair.base_side),
+			id,
+			tick_range,
+			increase_or_decrease,
+			liquidity_delta,
+			liquidity_total,
+			assets_delta,
+			collected_fees,
+		});
+
+		Ok(())
+	}
 
 	#[transactional]
 	pub fn swap_with_network_fee(
@@ -605,52 +828,6 @@ impl<T: Config> Pallet<T> {
 	pub fn get_pool(asset: Asset) -> Option<Pool<T::AccountId>> {
 		Pools::<T>::get(asset)
 	}
-
-	/*
-	fn try_credit_single_asset(
-		lp: &T::AccountId,
-		unstable_asset: Asset,
-		side: Side,
-		amount: cf_amm::common::Amount,
-	) -> Result<AssetAmount, DispatchError> {
-		let assets_credited = amount.try_into()?;
-		T::LpBalance::try_credit_account(
-			lp,
-			utilities::side_to_asset(unstable_asset, side),
-			assets_credited,
-		)?;
-		Ok(assets_credited)
-	}
-
-	fn try_credit_both_assets(
-		lp: &T::AccountId,
-		unstable_asset: Asset,
-		amounts: SideMap<cf_amm::common::Amount>,
-	) -> Result<SideMap<AssetAmount>, DispatchError> {
-		amounts
-			.try_map(|side, amount| Self::try_credit_single_asset(lp, unstable_asset, side, amount))
-	}
-
-	fn try_debit_single_asset(
-		lp: &T::AccountId,
-		unstable_asset: Asset,
-		side: Side,
-		amount: AssetAmount,
-	) -> DispatchResult {
-		T::LpBalance::try_debit_account(lp, utilities::side_to_asset(unstable_asset, side), amount)
-	}
-
-	fn try_debit_both_assets(
-		lp: &T::AccountId,
-		unstable_asset: Asset,
-		amounts: SideMap<cf_amm::common::Amount>,
-	) -> Result<SideMap<AssetAmount>, DispatchError> {
-		amounts.try_map(|side, amount| {
-			let assets_debited = amount.try_into()?;
-			Self::try_debit_single_asset(lp, unstable_asset, side, assets_debited)?;
-			Ok(assets_debited)
-		})
-	}*/
 
 	fn try_mutate_pool_state<
 		R,

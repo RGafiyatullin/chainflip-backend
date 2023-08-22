@@ -96,7 +96,7 @@ fn set_range_order(
 		pair_asset,
 		id,
 		range,
-		RangeOrderSize::Liquidity(liquidity),
+		RangeOrderSize::Liquidity { liquidity },
 	));
 	let new_balances = [base_asset, pair_asset].map(|asset| {
 		pallet_cf_lp::FreeBalances::<Runtime>::get(account_id, asset).unwrap_or_default()

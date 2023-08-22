@@ -84,7 +84,7 @@ fn can_enable_disable_trading_pool() {
 				unstable_asset,
 				0,
 				Some(range.clone()),
-				RangeOrderSize::Liquidity(1_000_000),
+				RangeOrderSize::Liquidity { liquidity: 1_000_000 },
 			),
 			Error::<Test>::PoolDisabled
 		);
@@ -105,7 +105,7 @@ fn can_enable_disable_trading_pool() {
 			unstable_asset,
 			0,
 			Some(range),
-			RangeOrderSize::Liquidity(1_000_000),
+			RangeOrderSize::Liquidity { liquidity: 1_000_000 },
 		));
 	});
 }
@@ -169,7 +169,7 @@ fn test_buy_back_flip_2() {
 			FLIP,
 			0,
 			Some(POSITION),
-			RangeOrderSize::Liquidity(0)
+			RangeOrderSize::Liquidity { liquidity: 0 }
 		));
 	});
 }
@@ -194,7 +194,7 @@ fn test_buy_back_flip() {
 			FLIP,
 			0,
 			Some(POSITION),
-			RangeOrderSize::Liquidity(1_000_000),
+			RangeOrderSize::Liquidity { liquidity: 1_000_000 },
 		));
 
 		// Swapping should cause the network fee to be collected.
