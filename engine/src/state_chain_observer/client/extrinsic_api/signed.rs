@@ -206,6 +206,7 @@ impl SignedExtrinsicApi for SignedExtrinsicClient {
 		self.account_id.clone()
 	}
 
+	#[track_caller]
 	async fn submit_signed_extrinsic<Call>(&self, call: Call) -> (H256, Self::UntilFinalizedFuture)
 	where
 		Call: Into<state_chain_runtime::RuntimeCall>
