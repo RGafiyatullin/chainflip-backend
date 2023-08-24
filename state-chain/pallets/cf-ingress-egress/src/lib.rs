@@ -160,22 +160,40 @@ pub mod pallet {
 		},
 	}
 
-	#[derive(Clone, RuntimeDebug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen)]
-	pub struct DepositTracker {
-		pub unfetched: AssetAmount,
-		pub fetched: AssetAmount,
+	#[derive(
+		CloneNoBound,
+		DefaultNoBound,
+		RuntimeDebug,
+		PartialEq,
+		Eq,
+		Encode,
+		Decode,
+		TypeInfo,
+		MaxEncodedLen,
+	)]
+	#[scale_info(skip_type_params(T, I))]
+	pub struct DepositTracker<T: Config<I>, I: 'static> {
+		pub unfetched: TargetChainAmount<T, I>,
+		pub fetched: TargetChainAmount<T, I>,
 	}
 
-	impl DepositTracker {
-		pub fn total(&self) -> AssetAmount {
+	// TODO: make this chain-specific. Something like:
+	// Replace Amount with an type representing a single deposit (ie. a single UTXO).
+	// Register transfer would store the change UTXO.
+	impl<T: Config<I>, I: 'static> DepositTracker<T, I> {
+		pub fn total(&self) -> TargetChainAmount<T, I> {
 			self.unfetched + self.fetched
 		}
 
-		pub fn register_deposit(&mut self, amount: AssetAmount) {
+		pub fn register_deposit(&mut self, amount: TargetChainAmount<T, I>) {
 			self.unfetched.saturating_accrue(amount);
 		}
 
-		pub fn mark_as_fetched(&mut self, amount: AssetAmount) {
+		pub fn register_transfer(&mut self, amount: TargetChainAmount<T, I>) {
+			self.fetched.saturating_reduce(amount);
+		}
+
+		pub fn mark_as_fetched(&mut self, amount: TargetChainAmount<T, I>) {
 			let amount = amount.min(self.unfetched);
 			self.unfetched -= amount;
 			self.fetched.saturating_accrue(amount);
@@ -312,8 +330,8 @@ pub mod pallet {
 		StorageValue<_, Vec<VaultTransfer<T::TargetChain>>, ValueQuery>;
 
 	#[pallet::storage]
-	pub type DepositBalance<T: Config<I>, I: 'static = ()> =
-		StorageValue<_, DepositTracker, ValueQuery>;
+	pub type DepositBalances<T: Config<I>, I: 'static = ()> =
+		StorageMap<_, Twox64Concat, TargetChainAsset<T, I>, DepositTracker<T, I>, ValueQuery>;
 
 	#[pallet::storage]
 	pub type DepositChannelRecycleBlocks<T: Config<I>, I: 'static = ()> =
@@ -843,7 +861,7 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 			amount,
 			deposit_channel_details.deposit_channel,
 		);
-		DepositBalance::<T, I>::mutate(|deposits| deposits.register_deposit(amount));
+		DepositBalances::<T, I>::mutate(asset, |deposits| deposits.register_deposit(amount));
 
 		Self::deposit_event(Event::DepositReceived {
 			deposit_address,
