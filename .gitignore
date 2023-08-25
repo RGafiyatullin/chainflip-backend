@@ -12,10 +12,6 @@ localnet/.setup_complete
 # The cache for chain data in container
 .local
 
-# docker-compose is generated dynamically
-localnet/init/polkadot/docker-compose.yml
-./docker-compose.yaml
-
 # Logs and test artifacts
 **/*.log
 **/*.db
