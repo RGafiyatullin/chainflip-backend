@@ -18,8 +18,8 @@ pub use weights::WeightInfo;
 use cf_chains::{
 	address::{AddressConverter, AddressDerivationApi},
 	AllBatch, AllBatchError, CcmCfParameters, CcmChannelMetadata, CcmDepositMetadata, CcmMessage,
-	Chain, ChannelLifecycleHooks, DepositChannel, ExecutexSwapAndCall, FetchAssetParams,
-	ForeignChainAddress, SwapOrigin, TransferAssetParams,
+	Chain, ChannelLifecycleHooks, DepositChannel, DepositTracker, ExecutexSwapAndCall,
+	FetchAssetParams, ForeignChainAddress, SwapOrigin, TransferAssetParams,
 };
 use cf_primitives::{
 	Asset, AssetAmount, BasisPoints, ChannelId, EgressCounter, EgressId, ForeignChain,
@@ -30,7 +30,7 @@ use cf_traits::{
 };
 use frame_support::{
 	pallet_prelude::*,
-	sp_runtime::{DispatchError, Saturating, TransactionOutcome},
+	sp_runtime::{DispatchError, TransactionOutcome},
 };
 use frame_system::pallet_prelude::*;
 pub use pallet::*;
@@ -102,7 +102,6 @@ pub mod pallet {
 	use frame_support::{
 		storage::with_transaction,
 		traits::{EnsureOrigin, IsType},
-		DefaultNoBound,
 	};
 	use sp_std::vec::Vec;
 
@@ -115,6 +114,8 @@ pub mod pallet {
 	pub(crate) type TargetChainAmount<T, I> = <<T as Config<I>>::TargetChain as Chain>::ChainAmount;
 	pub(crate) type TargetChainBlockNumber<T, I> =
 		<<T as Config<I>>::TargetChain as Chain>::ChainBlockNumber;
+	pub(crate) type TargetChainDepositTracker<T, I> =
+		<<T as Config<I>>::TargetChain as Chain>::DepositTracker;
 
 	#[derive(Clone, RuntimeDebug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen)]
 	pub struct DepositWitness<C: Chain> {
@@ -158,46 +159,6 @@ pub mod pallet {
 			destination_address: ForeignChainAddress,
 			channel_metadata: CcmChannelMetadata,
 		},
-	}
-
-	#[derive(
-		CloneNoBound,
-		DefaultNoBound,
-		RuntimeDebug,
-		PartialEq,
-		Eq,
-		Encode,
-		Decode,
-		TypeInfo,
-		MaxEncodedLen,
-	)]
-	#[scale_info(skip_type_params(T, I))]
-	pub struct DepositTracker<T: Config<I>, I: 'static> {
-		pub unfetched: TargetChainAmount<T, I>,
-		pub fetched: TargetChainAmount<T, I>,
-	}
-
-	// TODO: make this chain-specific. Something like:
-	// Replace Amount with an type representing a single deposit (ie. a single UTXO).
-	// Register transfer would store the change UTXO.
-	impl<T: Config<I>, I: 'static> DepositTracker<T, I> {
-		pub fn total(&self) -> TargetChainAmount<T, I> {
-			self.unfetched.saturating_add(self.fetched)
-		}
-
-		pub fn register_deposit(&mut self, amount: TargetChainAmount<T, I>) {
-			self.unfetched.saturating_accrue(amount);
-		}
-
-		pub fn register_transfer(&mut self, amount: TargetChainAmount<T, I>) {
-			self.fetched.saturating_reduce(amount);
-		}
-
-		pub fn mark_as_fetched(&mut self, amount: TargetChainAmount<T, I>) {
-			let amount = amount.min(self.unfetched);
-			self.unfetched -= amount;
-			self.fetched.saturating_accrue(amount);
-		}
 	}
 
 	#[pallet::genesis_config]
@@ -330,8 +291,14 @@ pub mod pallet {
 		StorageValue<_, Vec<VaultTransfer<T::TargetChain>>, ValueQuery>;
 
 	#[pallet::storage]
-	pub type DepositBalances<T: Config<I>, I: 'static = ()> =
-		StorageMap<_, Twox64Concat, TargetChainAsset<T, I>, DepositTracker<T, I>, ValueQuery>;
+	// TODO: rename to `Deposits`
+	pub type DepositBalances<T: Config<I>, I: 'static = ()> = StorageMap<
+		_,
+		Twox64Concat,
+		TargetChainAsset<T, I>,
+		TargetChainDepositTracker<T, I>,
+		ValueQuery,
+	>;
 
 	#[pallet::storage]
 	pub type DepositChannelRecycleBlocks<T: Config<I>, I: 'static = ()> =
@@ -616,6 +583,8 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 	///
 	/// Note: Egress transactions with Blacklisted assets are not sent, and kept in storage.
 	fn do_egress_scheduled_fetch_transfer() -> TransactionOutcome<DispatchResult> {
+		// 1. Get all transfers.
+		// 2. Based on required transfers, select fetches.
 		let batch_to_send: Vec<_> =
 			ScheduledEgressFetchOrTransfer::<T, I>::mutate(|requests: &mut Vec<_>| {
 				// Filter out disabled assets and requests that are not ready to be egressed.
@@ -855,13 +824,13 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 			),
 		};
 
-		// Add the deposit to the balance.
-		T::DepositHandler::on_deposit_made(
-			deposit_details.clone(),
-			amount,
-			deposit_channel_details.deposit_channel,
-		);
-		DepositBalances::<T, I>::mutate(asset, |deposits| deposits.register_deposit(amount));
+		DepositBalances::<T, I>::mutate(asset, |deposits| {
+			deposits.register_deposit(
+				amount,
+				&deposit_details,
+				&deposit_channel_details.deposit_channel,
+			)
+		});
 
 		Self::deposit_event(Event::DepositReceived {
 			deposit_address,

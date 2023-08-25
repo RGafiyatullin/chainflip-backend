@@ -748,16 +748,6 @@ pub trait FlipBurnInfo {
 	fn take_flip_to_burn() -> AssetAmount;
 }
 
-/// The trait implementation is intentionally no-op by default
-pub trait DepositHandler<C: Chain> {
-	fn on_deposit_made(
-		_deposit_details: C::DepositDetails,
-		_amount: C::ChainAmount,
-		_channel: DepositChannel<C>,
-	) {
-	}
-}
-
 /// Trait for handling cross chain messages.
 pub trait CcmHandler {
 	/// Triggered when a ccm deposit is made.
