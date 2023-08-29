@@ -571,6 +571,7 @@ impl Transaction {
 	}
 }
 
+// Are these even used?
 #[derive(Encode, Decode, TypeInfo, Clone, PartialEq, Eq, Default)]
 pub struct TransactionHash(H256);
 impl core::fmt::Debug for TransactionHash {
