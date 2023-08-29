@@ -571,21 +571,6 @@ impl Transaction {
 	}
 }
 
-// Are these even used?
-#[derive(Encode, Decode, TypeInfo, Clone, PartialEq, Eq, Default)]
-pub struct TransactionHash(H256);
-impl core::fmt::Debug for TransactionHash {
-	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
-		f.write_fmt(format_args!("{:#?}", self.0))
-	}
-}
-
-impl From<H256> for TransactionHash {
-	fn from(x: H256) -> Self {
-		Self(x)
-	}
-}
-
 #[derive(Encode, Decode, TypeInfo, Clone, PartialEq, Eq, Copy, Debug, Default)]
 pub enum DeploymentStatus {
 	#[default]
