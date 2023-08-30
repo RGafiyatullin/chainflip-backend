@@ -338,7 +338,7 @@ export async function observeEVMEvent(
   // Get the parameter names of the event
   const parameterNames = eventAbi.inputs.map((input) => input.name);
 
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 240; i++) {
     if (stopObserve()) return undefined;
     const currentBlockNumber = await web3.eth.getBlockNumber();
     if (currentBlockNumber >= initBlockNumber) {
@@ -368,7 +368,7 @@ export async function observeEVMEvent(
       }
       initBlockNumber = currentBlockNumber + 1;
     }
-    await sleep(2500);
+    await sleep(6000);
   }
 
   throw new Error(`Failed to observe the ${eventName} event`);

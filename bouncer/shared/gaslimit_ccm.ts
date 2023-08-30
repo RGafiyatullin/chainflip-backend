@@ -227,6 +227,7 @@ export async function testGasLimitCcmSwaps() {
     await getChainflipApi(),
     (_) => {
       ++broadcastAborted;
+      console.log('Broadcast Aborted number', broadcastAborted);
       if (broadcastAborted === gasLimitSwapsAborted.length) {
         stopObservingCcmReceived = true;
       }
