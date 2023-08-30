@@ -281,7 +281,7 @@ export async function observeBalanceIncrease(
   address: string,
   oldBalance: string,
 ): Promise<number> {
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 1200; i++) {
     const newBalance = Number(await getBalance(dstCcy as Asset, address));
     if (newBalance > Number(oldBalance)) {
       return newBalance;
