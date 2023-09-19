@@ -7,10 +7,11 @@
 
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { Asset } from '@chainflip-io/cli';
-import { runWithTimeout } from '../shared/utils';
+import { getChainflipApi, runWithTimeout } from '../shared/utils';
 import { createLpPool } from '../shared/create_lp_pool';
 import { provideLiquidity } from '../shared/provide_liquidity';
 import { rangeOrder } from '../shared/range_order';
+import { submitGovernanceExtrinsic } from '../shared/cf_governance';
 
 const deposits = new Map<Asset, number>([
   ['DOT', 10000],
@@ -52,6 +53,14 @@ async function main(): Promise<void> {
     rangeOrder('BTC', deposits.get('BTC')! * 0.9999),
     rangeOrder('FLIP', deposits.get('FLIP')! * 0.9999),
   ]);
+  const chainflip = await getChainflipApi();
+
+  const updateBuyInterval = chainflip.tx.liquidityPools.updateBuyInterval(5);
+  await submitGovernanceExtrinsic(updateBuyInterval);
+
+  const updateSupplyUpdateInterval = chainflip.tx.emissions.updateSupplyUpdateInterval(20);
+  await submitGovernanceExtrinsic(updateSupplyUpdateInterval);
+
   console.log('=== Swaps Setup completed ===');
 
   process.exit(0);
