@@ -1,36 +1,36 @@
 use crate::{
-	eth::retry_rpc::address_checker::*,
+	eth::{
+		retry_rpc::{address_checker::*, EthersRetryRpcApi},
+		rpc::address_checker::*,
+	},
 	state_chain_observer::client::{
 		chain_api::ChainApi, extrinsic_api::signed::SignedExtrinsicApi, storage_api::StorageApi,
 	},
-	witness::common::{RuntimeCallHasChain, RuntimeHasChain},
+	witness::{
+		common::{
+			chain_source::Header,
+			chunked_chain_source::chunked_by_vault::deposit_addresses::Addresses,
+			RuntimeCallHasChain, RuntimeHasChain,
+		},
+		eth::vault::VaultEvents,
+	},
 };
+
 use anyhow::ensure;
-use ethers::types::Bloom;
-use sp_core::H256;
+use ethers::{prelude::*, types::Bloom};
+use sp_core::{H256, U256};
 use state_chain_runtime::PalletInstanceAlias;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use crate::witness::{
-	common::chunked_chain_source::chunked_by_vault::deposit_addresses::Addresses,
-	eth::vault::VaultEvents,
-};
-
-use std::collections::BTreeMap;
-
-use ethers::prelude::*;
 use itertools::Itertools;
-use sp_core::U256;
 
-use crate::eth::rpc::address_checker::*;
-
-use super::{contract_common::events_at_block, vault::FetchedNativeFilter};
-use crate::witness::common::chain_source::Header;
-
-use super::super::common::chunked_chain_source::chunked_by_vault::{
-	builder::ChunkedByVaultBuilder, ChunkedByVault,
+use super::{
+	super::common::chunked_chain_source::chunked_by_vault::{
+		builder::ChunkedByVaultBuilder, ChunkedByVault,
+	},
+	contract_common::events_at_block,
+	vault::FetchedNativeFilter,
 };
-use crate::eth::retry_rpc::EthersRetryRpcApi;
 
 impl<Inner: ChunkedByVault> ChunkedByVaultBuilder<Inner> {
 	/// We track Ethereum deposits by checking the balance via our own deployed AddressChecker
