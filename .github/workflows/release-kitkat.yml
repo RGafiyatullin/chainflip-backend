@@ -1,20 +1,21 @@
 name: Release Chainflip KitKat
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - network/kitkat
 
 concurrency:
   group: ${{ github.ref }}-release-kitkat
   cancel-in-progress: true
 
 jobs:
-  check-versions:
-    uses: ./.github/workflows/_03_check_versions.yml
-  bins:
-    needs: [check-versions]
-    uses: ./.github/workflows/_02_retrieve-bins.yml
+  build:
+    uses: ./.github/workflows/_20_build.yml
     secrets: inherit
+    with:
+      network: kitkat
   docker:
-    needs: [bins]
+    needs: [build]
     uses: ./.github/workflows/_24_docker.yml
     with:
       network: kitkat
@@ -22,7 +23,7 @@ jobs:
       publish_public_images: true
     secrets: inherit
   package:
-    needs: [bins]
+    needs: [build]
     uses: ./.github/workflows/_25_package.yml
     with:
       network: "kitkat"
