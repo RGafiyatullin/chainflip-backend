@@ -82,7 +82,7 @@ use sp_version::RuntimeVersion;
 pub use cf_primitives::{
 	AccountRole, Asset, AssetAmount, BlockNumber, FlipBalance, SemVer, SwapOutput,
 };
-pub use cf_traits::{AccountInfo, EpochInfo, QualifyNode, SessionKeysRegistered, SwappingApi};
+pub use cf_traits::{AccountInfo, EpochInfo, QualifyNode, SessionKeysRegistered, SwappingApi, PoolApi};
 
 pub use chainflip::chain_instances::*;
 use chainflip::{
@@ -337,6 +337,7 @@ impl pallet_cf_lp::Config for Runtime {
 	type EgressHandler = chainflip::AnyChainIngressEgressHandler;
 	type AddressConverter = ChainAddressConverter;
 	type SafeMode = RuntimeSafeMode;
+	type PoolApi = LiquidityPools;
 	type WeightInfo = pallet_cf_lp::weights::PalletWeight<Runtime>;
 }
 
@@ -1062,6 +1063,8 @@ impl_runtime_apis! {
 				(chain, pallet_cf_lp::LiquidityRefundAddress::<Runtime>::get(&account_id, chain))
 			}).collect();
 
+			LiquidityPools::sweep(&account_id).unwrap();
+			
 			let balances = Asset::all().iter().map(|&asset|
 				(asset, pallet_cf_lp::FreeBalances::<Runtime>::get(&account_id, asset).unwrap_or(0))
 			).collect();
