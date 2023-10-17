@@ -1063,7 +1063,7 @@ impl_runtime_apis! {
 				(chain, pallet_cf_lp::LiquidityRefundAddress::<Runtime>::get(&account_id, chain))
 			}).collect();
 
-			LiquidityPools::sweep(&account_id).unwrap();
+			pallet_cf_pools::Pools::<Runtime>::get(&pallet_cf_pools::CanonicalAssetPair::new(Asset::Eth, Asset::Usdc).unwrap());
 			
 			let balances = Asset::all().iter().map(|&asset|
 				(asset, pallet_cf_lp::FreeBalances::<Runtime>::get(&account_id, asset).unwrap_or(0))

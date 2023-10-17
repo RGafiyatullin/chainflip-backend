@@ -1122,10 +1122,10 @@ impl<T: Config> Pallet<T> {
 		lp: &T::AccountId,
 	) -> DispatchResult {
 		// Collect to avoid undefined behaviour (See StorsgeMap::iter_keys documentation)
-		for canonical_asset_pair in Pools::<T>::iter_keys().collect::<Vec<_>>() {
+		/*for canonical_asset_pair in Pools::<T>::iter_keys().collect::<Vec<_>>() {
 			let mut pool = Pools::<T>::get(canonical_asset_pair).unwrap();
 
-			if let Some(range_orders_cache) = pool.range_orders_cache.get(lp).cloned() {
+			/*if let Some(range_orders_cache) = pool.range_orders_cache.get(lp).cloned() {
 				let asset_pair = AssetPair {
 					canonical_asset_pair,
 					base_side: Side::Zero,
@@ -1167,8 +1167,8 @@ impl<T: Config> Pallet<T> {
 				}
 			}
 
-			Pools::<T>::insert(canonical_asset_pair, pool);
-		}
+			Pools::<T>::insert(canonical_asset_pair, pool);*/
+		}*/
 
 		Ok(())
 	}

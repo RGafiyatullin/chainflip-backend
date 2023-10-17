@@ -29,7 +29,7 @@ pub struct RangeOrderReturn {
 
 fn collect_range_order_returns(
 	events: impl IntoIterator<Item = state_chain_runtime::RuntimeEvent>,
-	id: OrderId,
+	order_id: OrderId,
 ) -> Vec<RangeOrderReturn> {
 	events
 		.into_iter()
@@ -41,7 +41,7 @@ fn collect_range_order_returns(
 					assets_delta,
 					collected_fees,
 					tick_range,
-					order_id,
+					id,
 					..
 				},
 			) if order_id == id => Some(RangeOrderReturn {
@@ -68,7 +68,7 @@ pub struct LimitOrderReturn {
 
 fn collect_limit_order_returns(
 	events: impl IntoIterator<Item = state_chain_runtime::RuntimeEvent>,
-	id: OrderId,
+	order_id: OrderId,
 ) -> Vec<LimitOrderReturn> {
 	events
 		.into_iter()
@@ -80,7 +80,7 @@ fn collect_limit_order_returns(
 					collected_fees,
 					bought_amount,
 					tick,
-					order_id,
+					id,
 					..
 				},
 			) if order_id == id => Some(LimitOrderReturn {
