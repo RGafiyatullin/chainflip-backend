@@ -156,17 +156,12 @@ assets = [
   ],
 ]
 
-[package.metadata.deb.variants.kitkat]
-maintainer-scripts = "package/kitkat"
+[package.metadata.deb.variants.berghain]
+maintainer-scripts = "package/berghain"
 assets = [
   [
     "target/release/chainflip-node",
     "usr/bin/",
     "755",
-  ],
-  [
-    "chainspecs/kitkat.chainspec.raw.json",
-    "etc/chainflip/kitkat.chainspec.json",
-    "644",
   ],
 ]

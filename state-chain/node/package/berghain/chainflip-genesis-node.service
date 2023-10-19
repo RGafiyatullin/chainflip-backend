@@ -1,5 +1,5 @@
 [Unit]
-Description=Chainflip Archive Node
+Description=Chainflip Genesis Node
 
 [Service]
 Restart=always
@@ -8,16 +8,11 @@ RestartSec=30
 WorkingDirectory=/etc/chainflip
 
 ExecStart=/usr/bin/chainflip-node \
-    --chain=/etc/chainflip/kitkat.chainspec.json \
+    --chain=/etc/chainflip/berghain.chainspec.json \
     --base-path=/etc/chainflip/chaindata \
     --node-key-file=/etc/chainflip/keys/node_key_file \
+    --validator \
     --trie-cache-size=0 \
-    --prometheus-external \
-    --rpc-cors=all \
-    --rpc-methods=unsafe \
-    --state-pruning=archive \
-    --blocks-pruning=archive \
-    --unsafe-rpc-external \
     --sync=full
 
 [Install]

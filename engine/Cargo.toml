@@ -11,13 +11,13 @@ extended-description = """\
 Chainflip Validator Engine Package"""
 maintainer = "Chainflip Labs GmbH <dev@chainflip.io>"
 maintainer-scripts = "package/"
-name = "chainflip-engine0.10"
+name = "chainflip-engine"
 priority = "required"
 section = "rust"
 systemd-units = [
-  { unit-name = "chainflip-engine0.10", enable = false },
+  { unit-name = "chainflip-engine", enable = false },
 ]
-assets = [["target/release/chainflip-engine", "usr/bin/chainflip-engine0.10", "755"]]
+assets = [["target/release/chainflip-engine", "usr/bin/chainflip-engine", "755"]]
 
 [package.metadata.deb.variants.development]
 maintainer-scripts = "package/development"
@@ -30,6 +30,9 @@ maintainer-scripts = "package/perseverance"
 
 [package.metadata.deb.variants.partnernet]
 maintainer-scripts = "package/partnernet"
+
+[package.metadata.deb.variants.berghain]
+maintainer-scripts = "package/berghain"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
