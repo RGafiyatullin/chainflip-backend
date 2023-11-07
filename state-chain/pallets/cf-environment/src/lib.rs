@@ -4,16 +4,14 @@
 
 use cf_chains::{
 	btc::{
-		api::{SelectedUtxosAndChangeAmount, UtxoSelectionType},
-		deposit_address::DepositAddress,
-		utxo_selection::select_utxos_from_pool,
-		Bitcoin, BitcoinFeeInfo, BtcAmount, Utxo, UtxoId, CHANGE_ADDRESS_SALT,
+		deposit_address::BitcoinDepositChannel, Bitcoin, BtcAmount, Utxo, UtxoId,
+		CHANGE_ADDRESS_SALT,
 	},
 	dot::{Polkadot, PolkadotAccountId, PolkadotHash, PolkadotIndex},
 	eth::Address as EthereumAddress,
 };
 use cf_primitives::{chains::assets::eth::Asset as EthAsset, NetworkEnvironment, SemVer};
-use cf_traits::{CompatibleCfeVersions, GetBitcoinFeeInfo, SafeMode};
+use cf_traits::{CompatibleCfeVersions, SafeMode};
 use frame_support::{
 	pallet_prelude::*,
 	traits::{OnRuntimeUpgrade, StorageVersion},
@@ -70,9 +68,6 @@ pub mod pallet {
 
 		/// The runtime's safe mode is stored in this pallet.
 		type RuntimeSafeMode: cf_traits::SafeMode + Member + Parameter + Default;
-
-		/// Get Bitcoin Fee info from chain tracking
-		type BitcoinFeeInfo: cf_traits::GetBitcoinFeeInfo;
 
 		/// Used to access the current Chainflip runtime's release version (distinct from the
 		/// substrate RuntimeVersion)
@@ -143,11 +138,6 @@ pub mod pallet {
 	#[pallet::storage]
 	/// Current Nonce of the current Polkadot Proxy Account
 	pub type PolkadotProxyAccountNonce<T> = StorageValue<_, PolkadotIndex, ValueQuery>;
-
-	// BITCOIN CHAIN RELATED ENVIRONMENT ITEMS
-	#[pallet::storage]
-	/// The set of available UTXOs available in our Bitcoin Vault.
-	pub type BitcoinAvailableUtxos<T> = StorageValue<_, Vec<Utxo>, ValueQuery>;
 
 	// OTHER ENVIRONMENT ITEMS
 	#[pallet::storage]
@@ -332,8 +322,6 @@ pub mod pallet {
 			PolkadotVaultAccountId::<T>::set(self.polkadot_vault_account_id);
 			PolkadotProxyAccountNonce::<T>::set(0);
 
-			BitcoinAvailableUtxos::<T>::set(vec![]);
-
 			ChainflipNetworkEnvironment::<T>::set(self.network_environment);
 
 			Pallet::<T>::update_current_release_version();
@@ -366,77 +354,13 @@ impl<T: Config> Pallet<T> {
 		})
 	}
 
-	pub fn add_bitcoin_utxo_to_list(
-		amount: BtcAmount,
-		utxo_id: UtxoId,
-		deposit_address: DepositAddress,
-	) {
-		BitcoinAvailableUtxos::<T>::append(Utxo { amount, id: utxo_id, deposit_address });
-	}
-
-	pub fn add_bitcoin_change_utxo(amount: BtcAmount, utxo_id: UtxoId, pubkey_x: [u8; 32]) {
-		BitcoinAvailableUtxos::<T>::append(Utxo {
-			amount,
-			id: utxo_id,
-			deposit_address: DepositAddress::new(pubkey_x, CHANGE_ADDRESS_SALT),
-		});
-	}
-
-	// Calculate the selection of utxos, return them and remove them from the list. The fee required
-	// to spend the input utxos are accounted for while selection. The fee required to include
-	// outputs and the minimum constant tx fee is incorporated by adding to the output amount. The
-	// function returns the selected Utxos and the change amount that remains from the selected
-	// input Utxo list once outputs and the tx fees have been taken into account.
-	pub fn select_and_take_bitcoin_utxos(
-		utxo_selection_type: UtxoSelectionType,
-	) -> Option<SelectedUtxosAndChangeAmount> {
-		let BitcoinFeeInfo { fee_per_input_utxo, fee_per_output_utxo, min_fee_required_per_tx } =
-			T::BitcoinFeeInfo::bitcoin_fee_info();
-		match utxo_selection_type {
-			UtxoSelectionType::SelectAllForRotation => {
-				let spendable_utxos: Vec<_> = BitcoinAvailableUtxos::<T>::take()
-					.into_iter()
-					.filter(|utxo| utxo.amount > fee_per_input_utxo)
-					.collect();
-
-				if spendable_utxos.is_empty() {
-					return None
-				}
-
-				let total_fee = spendable_utxos.len() as u64 * fee_per_input_utxo +
-					fee_per_output_utxo + min_fee_required_per_tx;
-
-				spendable_utxos
-					.iter()
-					.map(|utxo| utxo.amount)
-					.sum::<u64>()
-					.checked_sub(total_fee)
-					.map(|change_amount| (spendable_utxos, change_amount))
-			},
-			UtxoSelectionType::Some { output_amount, number_of_outputs } =>
-				BitcoinAvailableUtxos::<T>::try_mutate(|available_utxos| {
-					select_utxos_from_pool(
-						available_utxos,
-						fee_per_input_utxo,
-						output_amount +
-							number_of_outputs * fee_per_output_utxo +
-							min_fee_required_per_tx,
-					)
-					.ok_or_else(|| {
-						log::error!("Unable to select desired amount from available utxos.");
-					})
-				})
-				.ok()
-				.map(|(selected_utxos, total_input_spendable_amount)| {
-					(
-						selected_utxos,
-						total_input_spendable_amount -
-							output_amount - number_of_outputs * fee_per_output_utxo -
-							min_fee_required_per_tx,
-					)
-				}),
-		}
-	}
+	// pub fn add_bitcoin_change_utxo(amount: BtcAmount, utxo_id: UtxoId, pubkey_x: [u8; 32]) {
+	// 	BitcoinAvailableUtxos::<T>::append(Utxo {
+	// 		amount,
+	// 		id: utxo_id,
+	// 		deposit_address: BitcoinDepositChannel::new(pubkey_x, CHANGE_ADDRESS_SALT),
+	// 	});
+	// }
 }
 
 impl<T: Config> CompatibleCfeVersions for Pallet<T> {

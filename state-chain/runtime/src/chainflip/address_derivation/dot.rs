@@ -17,10 +17,6 @@ impl AddressDerivationApi<Polkadot> for AddressDerivation {
 		_source_asset: <Polkadot as Chain>::ChainAsset,
 		channel_id: ChannelId,
 	) -> Result<<Polkadot as Chain>::ChainAccount, DispatchError> {
-		const PREFIX: &[u8; 16] = b"modlpy/utilisuba";
-		const RAW_PUBLIC_KEY_SIZE: usize = 32;
-		const PAYLOAD_LENGTH: usize = PREFIX.len() + RAW_PUBLIC_KEY_SIZE + size_of::<u16>();
-
 		let master_account = Environment::polkadot_vault_account()
 			.ok_or(DispatchError::Other("Vault Account does not exist."))?;
 

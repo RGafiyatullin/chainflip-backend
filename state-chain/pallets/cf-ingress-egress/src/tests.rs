@@ -1,8 +1,8 @@
 use crate::{
 	mock::*, Call as PalletCall, ChannelAction, ChannelIdCounter, CrossChainMessage,
 	DepositChannelLookup, DepositChannelPool, DepositWitness, DisabledEgressAssets, Error,
-	Event as PalletEvent, FailedVaultTransfers, FetchOrTransfer, MinimumDeposit, Pallet,
-	ScheduledEgressCcm, ScheduledEgressFetchOrTransfer, TargetChainAccount, VaultTransfer,
+	Event as PalletEvent, FailedVaultTransfers, MinimumDeposit, Pallet, ScheduledEgressCcm,
+	TargetChainAccount, VaultTransfer,
 };
 use cf_chains::{
 	address::AddressConverter, evm::EvmFetchId, mocks::MockEthereum, CcmChannelMetadata,

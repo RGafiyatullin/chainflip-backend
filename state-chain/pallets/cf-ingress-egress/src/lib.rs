@@ -18,19 +18,19 @@ pub use weights::WeightInfo;
 use cf_chains::{
 	address::{AddressConverter, AddressDerivationApi},
 	AllBatch, AllBatchError, CcmCfParameters, CcmChannelMetadata, CcmDepositMetadata, CcmMessage,
-	Chain, ChannelLifecycleHooks, DepositChannel, DepositTracker, ExecutexSwapAndCall,
-	FetchAssetParams, ForeignChainAddress, SwapOrigin, TransferAssetParams,
+	Chain, DepositChannel, DepositTracker, ExecutexSwapAndCall, ForeignChainAddress, SwapOrigin,
+	TransferAssetParams,
 };
 use cf_primitives::{
 	Asset, AssetAmount, BasisPoints, ChannelId, EgressCounter, EgressId, ForeignChain,
 };
 use cf_traits::{
-	liquidity::LpBalanceApi, Broadcaster, CcmHandler, Chainflip, DepositApi, DepositHandler,
-	EgressApi, GetBlockHeight, SwapDepositHandler,
+	liquidity::LpBalanceApi, Broadcaster, CcmHandler, Chainflip, DepositApi, EgressApi,
+	GetBlockHeight, SwapDepositHandler,
 };
 use frame_support::{
 	pallet_prelude::*,
-	sp_runtime::{DispatchError, TransactionOutcome},
+	sp_runtime::{traits::Zero, DispatchError, Saturating, TransactionOutcome},
 };
 use frame_system::pallet_prelude::*;
 pub use pallet::*;
@@ -38,28 +38,9 @@ use sp_std::{vec, vec::Vec};
 
 /// Enum wrapper for fetch and egress requests.
 #[derive(RuntimeDebug, Eq, PartialEq, Clone, Encode, Decode, TypeInfo)]
-pub enum FetchOrTransfer<C: Chain> {
-	Fetch {
-		asset: C::ChainAsset,
-		deposit_address: C::ChainAccount,
-		deposit_fetch_id: Option<C::DepositFetchId>,
-		amount: C::ChainAmount,
-	},
-	Transfer {
-		egress_id: EgressId,
-		asset: C::ChainAsset,
-		destination_address: C::ChainAccount,
-		amount: C::ChainAmount,
-	},
-}
-
-impl<C: Chain> FetchOrTransfer<C> {
-	fn asset(&self) -> &C::ChainAsset {
-		match self {
-			FetchOrTransfer::Fetch { asset, .. } => asset,
-			FetchOrTransfer::Transfer { asset, .. } => asset,
-		}
-	}
+pub struct ScheduledTransfer<C: Chain> {
+	pub egress_id: EgressId,
+	pub params: TransferAssetParams<C>,
 }
 
 /// Cross-chain messaging requests.
@@ -130,7 +111,7 @@ pub mod pallet {
 	)]
 	#[scale_info(skip_type_params(T, I))]
 	pub struct DepositChannelDetails<T: Config<I>, I: 'static> {
-		pub deposit_channel: DepositChannel<T::TargetChain>,
+		pub deposit_channel: <T::TargetChain as Chain>::DepositChannel,
 		/// The block number at which the deposit channel was opened, expressed as a block number
 		/// on the external Chain.
 		pub opened_at: TargetChainBlockNumber<T, I>,
@@ -226,8 +207,7 @@ pub mod pallet {
 			Callback = <Self as Config<I>>::RuntimeCall,
 		>;
 
-		/// Provides callbacks for deposit lifecycle events.
-		type DepositHandler: DepositHandler<Self::TargetChain>;
+		type DepositTracker: DepositTracker<Self::TargetChain>;
 
 		/// Benchmark weights
 		type WeightInfo: WeightInfo;
@@ -253,10 +233,10 @@ pub mod pallet {
 	pub type EgressIdCounter<T: Config<I>, I: 'static = ()> =
 		StorageValue<_, EgressCounter, ValueQuery>;
 
-	/// Scheduled fetch and egress for the Ethereum chain.
+	/// Scheduled transfers for the target chain.
 	#[pallet::storage]
-	pub(crate) type ScheduledEgressFetchOrTransfer<T: Config<I>, I: 'static = ()> =
-		StorageValue<_, Vec<FetchOrTransfer<T::TargetChain>>, ValueQuery>;
+	pub(crate) type ScheduledTransfers<T: Config<I>, I: 'static = ()> =
+		StorageValue<_, Vec<ScheduledTransfer<T::TargetChain>>, ValueQuery>;
 
 	/// Scheduled cross chain messages for the Ethereum chain.
 	#[pallet::storage]
@@ -268,10 +248,16 @@ pub mod pallet {
 	pub type DisabledEgressAssets<T: Config<I>, I: 'static = ()> =
 		StorageMap<_, Twox64Concat, TargetChainAsset<T, I>, ()>;
 
-	/// Stores address ready for use.
+	/// Stores recycled addresses that can be re-used.
 	#[pallet::storage]
-	pub(crate) type DepositChannelPool<T: Config<I>, I: 'static = ()> =
-		StorageMap<_, Twox64Concat, ChannelId, DepositChannel<T::TargetChain>>;
+	pub(crate) type DepositChannelPool<T: Config<I>, I: 'static = ()> = StorageDoubleMap<
+		_,
+		Twox64Concat,
+		Option<Asset>,
+		Twox64Concat,
+		ChannelId,
+		<T::TargetChain as Chain>::DepositChannel,
+	>;
 
 	/// Defines the minimum amount of Deposit allowed for each asset.
 	#[pallet::storage]
@@ -390,10 +376,16 @@ pub mod pallet {
 
 			for address in can_recycle.iter() {
 				if let Some(details) = DepositChannelLookup::<T, I>::take(address) {
-					if let Some(state) = details.deposit_channel.state.maybe_recycle() {
+					if let Some(recycled_channel) = DepositBalances::<T, I>::mutate(
+						details.deposit_channel.asset(),
+						|deposit_tracker| {
+							deposit_tracker.maybe_recycle_channel(details.deposit_channel)
+						},
+					) {
 						DepositChannelPool::<T, I>::insert(
-							details.deposit_channel.channel_id,
-							DepositChannel { state, ..details.deposit_channel },
+							recycled_channel.asset(),
+							recycled_channel.channel_id(),
+							channel,
 						);
 					}
 				}
@@ -439,11 +431,21 @@ pub mod pallet {
 			T::EnsureWitnessedAtCurrentEpoch::ensure_origin(origin)?;
 
 			for deposit_address in addresses {
-				DepositChannelLookup::<T, I>::mutate(deposit_address, |deposit_channel_details| {
-					deposit_channel_details
-						.as_mut()
-						.map(|details| details.deposit_channel.state.on_fetch_completed());
-				});
+				if let Some(mut deposit_details) =
+					DepositChannelLookup::<T, I>::get(&deposit_address)
+				{
+					if deposit_details
+						.deposit_channel
+						.on_fetch_completed(&deposit_details.deposit_channel)
+					{
+						DepositChannelLookup::<T, I>::insert(&deposit_address, deposit_details);
+					}
+				} else {
+					log::error!(
+						"Deposit address {:?} not found in DepositChannelLookup",
+						deposit_address
+					);
+				}
 			}
 			Ok(())
 		}
@@ -583,92 +585,49 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 	///
 	/// Note: Egress transactions with Blacklisted assets are not sent, and kept in storage.
 	fn do_egress_scheduled_fetch_transfer() -> TransactionOutcome<DispatchResult> {
-		// 1. Get all transfers.
-		// 2. Based on required transfers, select fetches.
-		let batch_to_send: Vec<_> =
-			ScheduledEgressFetchOrTransfer::<T, I>::mutate(|requests: &mut Vec<_>| {
-				// Filter out disabled assets and requests that are not ready to be egressed.
-				requests
-					.extract_if(|request| {
-						!DisabledEgressAssets::<T, I>::contains_key(request.asset()) &&
-							match request {
-								FetchOrTransfer::Fetch {
-									deposit_address,
-									deposit_fetch_id,
-									..
-								} => DepositChannelLookup::<T, I>::mutate(
-									deposit_address,
-									|details| {
-										details
-											.as_mut()
-											.map(|details| {
-												let can_fetch =
-													details.deposit_channel.state.can_fetch();
-
-												if can_fetch {
-													deposit_fetch_id.replace(
-														details.deposit_channel.fetch_id(),
-													);
-													details
-														.deposit_channel
-														.state
-														.on_fetch_scheduled();
-												}
-												can_fetch
-											})
-											.unwrap_or(false)
-									},
-								),
-								FetchOrTransfer::Transfer { .. } => true,
-							}
-					})
-					.collect()
-			});
+		let batch_to_send: Vec<_> = ScheduledTransfers::<T, I>::mutate(|transfers: &mut Vec<_>| {
+			// Filter out disabled assets.
+			transfers
+				.extract_if(|ScheduledTransfer { params, .. }| {
+					!DisabledEgressAssets::<T, I>::contains_key(params.asset)
+				})
+				.collect()
+		});
 
 		if batch_to_send.is_empty() {
 			return TransactionOutcome::Commit(Ok(()))
 		}
 
-		let mut fetch_params = vec![];
-		let mut transfer_params = vec![];
-		let mut egress_ids = vec![];
-		let mut addresses = vec![];
+		let total_transfer_amounts = batch_to_send.iter().fold(
+			enum_map::enum_map! { _ => Zero::zero() },
+			|mut totals, transfer| {
+				totals[transfer.params.asset].saturating_accrue(transfer.params.amount);
+				totals
+			},
+		);
 
-		for request in batch_to_send {
-			match request {
-				FetchOrTransfer::<T::TargetChain>::Fetch {
-					asset,
-					deposit_address,
-					deposit_fetch_id,
-					amount,
-				} => {
-					fetch_params.push(FetchAssetParams {
-						deposit_fetch_id: deposit_fetch_id.expect("Checked in extract_if"),
-						asset,
-					});
-					addresses.push(deposit_address.clone());
-					DepositBalances::<T, I>::mutate(asset, |tracker| {
-						tracker.mark_as_fetched(amount);
-					});
-				},
-				FetchOrTransfer::<T::TargetChain>::Transfer {
-					asset,
-					amount,
-					destination_address,
-					egress_id,
-				} => {
-					egress_ids.push(egress_id);
-					transfer_params.push(TransferAssetParams {
-						asset,
-						amount,
-						to: destination_address,
-					});
-					DepositBalances::<T, I>::mutate(asset, |tracker| {
-						tracker.register_transfer(amount);
-					});
-				},
-			}
-		}
+		let fetch_params = total_transfer_amounts
+			.iter()
+			.map(|(asset, transfer_amount)| {
+				// TODO: use fetched amount to add change amount.
+				DepositBalances::<T, I>::mutate(asset, |tracker| {
+					tracker.withdraw_at_least(
+						*transfer_amount,
+						todo!("fees"),
+						DepositChannelLookup::<T, I>::mutate,
+					)
+				})
+				.map(|(fetches, _)| fetches)
+			})
+			.flatten()
+			.collect::<Vec<_>>();
+
+		let addresses = fetch_params.iter().map(|fetch| fetch.address()).collect::<Vec<_>>();
+
+		let (transfer_params, egress_ids) = batch_to_send
+			.into_iter()
+			.map(|ScheduledTransfer { egress_id, params }| (params, egress_id))
+			.unzip::<_, _, Vec<_>, Vec<_>>();
 
 		// Construct and send the transaction.
 		match <T::ChainApiCall as AllBatch<T::TargetChain>>::new_unsigned(
@@ -769,13 +728,6 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 			return Ok(())
 		}
 
-		ScheduledEgressFetchOrTransfer::<T, I>::append(FetchOrTransfer::<T::TargetChain>::Fetch {
-			asset,
-			deposit_address: deposit_address.clone(),
-			deposit_fetch_id: None,
-			amount,
-		});
-
 		let channel_id = deposit_channel_details.deposit_channel.channel_id;
 		Self::deposit_event(Event::<T, I>::DepositFetchesScheduled { channel_id, asset });
 
@@ -862,7 +814,9 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 	) -> Result<(ChannelId, TargetChainAccount<T, I>, TargetChainBlockNumber<T, I>), DispatchError>
 	{
 		let (deposit_channel, channel_id) = if let Some((channel_id, mut deposit_channel)) =
-			DepositChannelPool::<T, I>::drain().next()
+			DepositChannelPool::<T, I>::drain_prefix(&Some(source_asset))
+				.next()
+				.or_else(|| DepositChannelPool::<T, I>::drain_prefix(None).next())
 		{
 			deposit_channel.asset = source_asset;
 			(deposit_channel, channel_id)
@@ -929,13 +883,9 @@ impl<T: Config<I>, I: 'static> EgressApi<T::TargetChain> for Pallet<T, I> {
 				source_address,
 				gas_budget,
 			}),
-			None => ScheduledEgressFetchOrTransfer::<T, I>::append(FetchOrTransfer::<
-				T::TargetChain,
-			>::Transfer {
-				asset,
-				destination_address: destination_address.clone(),
-				amount,
+			None => ScheduledTransfers::<T, I>::append(ScheduledTransfer {
 				egress_id,
+				params: TransferAssetParams { asset, amount, to: destination_address.clone() },
 			}),
 		}
 

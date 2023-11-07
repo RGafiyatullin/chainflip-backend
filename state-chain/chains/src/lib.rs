@@ -1,16 +1,17 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![feature(step_trait)]
+#![feature(is_sorted)]
 use core::{fmt::Display, iter::Step};
 
 use crate::benchmarking_value::{BenchmarkValue, BenchmarkValueExtended};
 pub use address::ForeignChainAddress;
-use address::{AddressDerivationApi, ToHumanreadableAddress};
+use address::ToHumanreadableAddress;
 use cf_primitives::{AssetAmount, ChannelId, EgressId, EthAmount, TransactionHash};
 use codec::{Decode, Encode, FullCodec, MaxEncodedLen};
 use frame_support::{
 	pallet_prelude::{MaybeSerializeDeserialize, Member},
 	sp_runtime::{
-		traits::{AtLeast32BitUnsigned, CheckedSub},
+		traits::{AtLeast32BitUnsigned, CheckedSub, StaticLookup},
 		BoundedVec, DispatchError,
 	},
 	Blake2_256, CloneNoBound, DebugNoBound, EqNoBound, Parameter, PartialEqNoBound, RuntimeDebug,
@@ -78,6 +79,7 @@ pub trait Chain: Member + Parameter {
 		+ Copy
 		+ Default
 		+ AtLeast32BitUnsigned
+		+ sp_std::iter::Sum
 		+ Into<AssetAmount>
 		+ FullCodec
 		+ MaxEncodedLen
@@ -99,6 +101,8 @@ pub trait Chain: Member + Parameter {
 		+ Copy
 		+ BenchmarkValue
 		+ FullCodec
+		+ enum_map::Enum
+		+ enum_map::EnumArray<Self::ChainAmount>
 		+ Into<cf_primitives::Asset>
 		+ Into<cf_primitives::ForeignChain>
 		+ Unpin;
@@ -118,18 +122,12 @@ pub trait Chain: Member + Parameter {
 
 	type EpochStartData: Member + Parameter + MaxEncodedLen;
 
-	type DepositFetchId: Member
-		+ Parameter
-		+ Copy
-		+ BenchmarkValue
-		+ BenchmarkValueExtended
-		+ for<'a> From<&'a DepositChannel<Self>>;
-
-	type DepositChannelState: Member + Parameter + ChannelLifecycleHooks + Unpin;
+	type FetchParams: Member + Parameter + BenchmarkValue + BenchmarkValueExtended;
 
 	/// Extra data associated with a deposit.
 	type DepositDetails: Member + Parameter + BenchmarkValue;
 
+	type DepositChannel: Member + Parameter + DepositChannel<Self>;
 	type DepositTracker: Member + Parameter + Default + DepositTracker<Self>;
 
 	type Transaction: Member + Parameter + BenchmarkValue + FeeRefundCalculator<Self>;
@@ -279,9 +277,9 @@ impl<C: Chain> TransactionMetadata<C> for () {
 }
 
 /// Contains all the parameters required to fetch incoming transactions on an external chain.
-#[derive(RuntimeDebug, Copy, Clone, PartialEq, Eq, Encode, Decode, MaxEncodedLen, TypeInfo)]
+#[derive(RuntimeDebug, Clone, PartialEq, Eq, Encode, Decode, MaxEncodedLen, TypeInfo)]
 pub struct FetchAssetParams<C: Chain> {
-	pub deposit_fetch_id: <C as Chain>::DepositFetchId,
+	pub fetch_params: <C as Chain>::FetchParams,
 	pub asset: <C as Chain>::ChainAsset,
 }
 
@@ -306,6 +304,32 @@ pub trait ChainEnvironment<
 {
 	/// Attempt a lookup.
 	fn lookup(s: LookupKey) -> Option<LookupValue>;
+}
+
+pub trait ChainflipEnvironment:
+	// Bitcoin
+	ChainEnvironment<(), btc::AggKey> +
+	ChainEnvironment<(), Vec<btc::Utxo>> +
+	ChainEnvironment<(), btc::BitcoinFeeInfo> +
+	// Polkadot
+	ChainEnvironment<dot::api::SystemAccounts, dot::PolkadotAccountId> +
+	Get<dot::RuntimeVersion> +
+	Get<dot::PolkadotAccountId> +
+	// Ethereum
+	StaticLookup<Source = assets::eth::Asset, Target = eth::Address> +
+	Get<eth::Address>
+	{}
+
+impl<T> ChainflipEnvironment for T where
+	T: ChainEnvironment<(), btc::AggKey>
+		+ ChainEnvironment<(), Vec<btc::Utxo>>
+		+ ChainEnvironment<(), btc::BitcoinFeeInfo>
+		+ ChainEnvironment<dot::api::SystemAccounts, dot::PolkadotAccountId>
+		+ Get<dot::RuntimeVersion>
+		+ Get<dot::PolkadotAccountId>
+		+ StaticLookup<Source = assets::eth::Asset, Target = eth::Address>
+		+ Get<eth::Address>
+{
 }
 
 pub enum SetAggKeyWithAggKeyError {
