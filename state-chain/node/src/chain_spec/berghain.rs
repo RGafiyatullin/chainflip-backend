@@ -89,7 +89,7 @@ pub const MINIMUM_SWAP_AMOUNTS: &[(Asset, AssetAmount)] = &[
 	(Asset::Btc, 0u128),
 ];
 
-pub const MIN_FUNDING: FlipBalance = FLIPPERINOS_PER_FLIP;
+pub const MIN_FUNDING: FlipBalance = 5 * FLIPPERINOS_PER_FLIP;
 pub const REDEMPTION_TAX: FlipBalance = 5 * FLIPPERINOS_PER_FLIP;
 
 /// Redemption delay on mainnet is 48 HOURS.

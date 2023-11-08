@@ -1,7 +1,7 @@
 pub use super::common::*;
 use super::{get_account_id_from_seed, StateChainEnvironment};
 use cf_chains::{dot::RuntimeVersion, eth::CHAIN_ID_GOERLI};
-use cf_primitives::{AccountId, AccountRole, BlockNumber, FlipBalance, NetworkEnvironment};
+use cf_primitives::{AccountId, AccountRole, FlipBalance, NetworkEnvironment};
 use sc_service::ChainType;
 use sp_core::{sr25519, H256};
 
