@@ -1,3 +1,5 @@
+use crate::chain_spec::parse_account;
+
 pub use super::common::*;
 use super::{get_account_id_from_seed, StateChainEnvironment};
 use cf_chains::{dot::RuntimeVersion, eth::CHAIN_ID_GOERLI};
@@ -64,36 +66,10 @@ pub const SNOW_WHITE_SR25519: [u8; 32] =
 	hex_literal::hex!["ced2e4db6ce71779ac40ccec60bf670f38abbf9e27a718b4412060688a9ad212"];
 
 pub fn extra_accounts() -> Vec<(AccountId, AccountRole, FlipBalance, Option<Vec<u8>>)> {
-	vec![
-		(
-			get_account_id_from_seed::<sr25519::Public>("LP_1"),
-			AccountRole::LiquidityProvider,
-			100 * FLIPPERINOS_PER_FLIP,
-			Some(b"Chainflip Testnet LP 1".to_vec()),
-		),
-		(
-			get_account_id_from_seed::<sr25519::Public>("LP_2"),
-			AccountRole::LiquidityProvider,
-			100 * FLIPPERINOS_PER_FLIP,
-			Some(b"Chainflip Testnet LP 2".to_vec()),
-		),
-		(
-			get_account_id_from_seed::<sr25519::Public>("BROKER_1"),
-			AccountRole::Broker,
-			100 * FLIPPERINOS_PER_FLIP,
-			Some(b"Chainflip Testnet Broker 1".to_vec()),
-		),
-		(
-			get_account_id_from_seed::<sr25519::Public>("BROKER_2"),
-			AccountRole::Broker,
-			100 * FLIPPERINOS_PER_FLIP,
-			Some(b"Chainflip Testnet Broker 2".to_vec()),
-		),
-		(
-			get_account_id_from_seed::<sr25519::Public>("OVERFLOW"),
-			AccountRole::None,
-			100 * FLIPPERINOS_PER_FLIP,
-			Some(b"Overflow account".to_vec()),
-		),
-	]
+	vec![(
+		parse_account("cFK7GTahm9qeX5Jjct3yfSvV4qLb8LJaArHL2SL6m9HAzc2sq"),
+		AccountRole::Validator,
+		2990 * FLIPPERINOS_PER_FLIP,
+		None,
+	)]
 }
