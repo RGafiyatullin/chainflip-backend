@@ -37,7 +37,7 @@ pub const ENV: StateChainEnvironment = StateChainEnvironment {
 		"02e61afd677cdfbec838c6f309deff0b2c6056f8a27f2c783b68bba6b30f667be6"
 	),
 	ethereum_deployment_block: 0u64,
-	genesis_funding_amount: 5 * FLIPPERINOS_PER_FLIP,
+	genesis_funding_amount: 6 * FLIPPERINOS_PER_FLIP,
 	min_funding: MIN_FUNDING,
 	dot_genesis_hash: H256(hex_literal::hex!(
 		"13d0723c0891a46a0e0931e23fb7c9961c0f87bc73ad965b35cf0f1d84a986b8"
@@ -69,7 +69,7 @@ pub fn extra_accounts() -> Vec<(AccountId, AccountRole, FlipBalance, Option<Vec<
 	vec![(
 		parse_account("cFK7GTahm9qeX5Jjct3yfSvV4qLb8LJaArHL2SL6m9HAzc2sq"),
 		AccountRole::Validator,
-		2990 * FLIPPERINOS_PER_FLIP,
+		2988 * FLIPPERINOS_PER_FLIP,
 		None,
 	)]
 }
