@@ -344,7 +344,7 @@ pub mod pallet {
 		/// - [BadOrigin](frame_support::error::BadOrigin)
 		#[allow(clippy::boxed_local)]
 		#[pallet::call_index(4)]
-		#[pallet::weight((T::WeightInfo::call_as_sudo().saturating_add(call.get_dispatch_info().weight), DispatchClass::Operational))]
+		#[pallet::weight(T::WeightInfo::call_as_sudo().saturating_add(call.get_dispatch_info().weight))]
 		pub fn call_as_sudo(
 			origin: OriginFor<T>,
 			call: Box<<T as Config>::RuntimeCall>,
