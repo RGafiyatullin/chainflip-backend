@@ -551,7 +551,7 @@ pub mod pallet {
 		/// - [InvalidCeremonyId](Error::InvalidCeremonyId)
 		/// - [InvalidRespondent](Error::InvalidRespondent)
 		#[pallet::call_index(1)]
-		#[pallet::weight(T::Weights::report_signature_failed(offenders.len() as u32))]
+		#[pallet::weight((T::Weights::report_signature_failed(offenders.len() as u32), DispatchClass::Operational))]
 		pub fn report_signature_failed(
 			origin: OriginFor<T>,
 			ceremony_id: CeremonyId,
