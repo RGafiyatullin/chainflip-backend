@@ -987,7 +987,7 @@ pub mod pallet {
 				// If the swap amount is less than the minimum required,
 				// confiscate the fund and emit an event
 				CollectedRejectedFunds::<T>::mutate(from, |fund| {
-					*fund = fund.saturating_add(net_amount)
+					*fund = fund.saturating_add(amount)
 				});
 				Self::deposit_event(Event::<T>::SwapAmountTooLow {
 					asset: from,
