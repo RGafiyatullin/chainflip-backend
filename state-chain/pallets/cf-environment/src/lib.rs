@@ -3,10 +3,7 @@
 #![doc = include_str!("../../cf-doc-head.md")]
 
 use cf_chains::{
-	btc::{
-		deposit_address::BitcoinDepositChannel, Bitcoin, BtcAmount, Utxo, UtxoId,
-		CHANGE_ADDRESS_SALT,
-	},
+	btc::Bitcoin,
 	dot::{Polkadot, PolkadotAccountId, PolkadotHash, PolkadotIndex},
 	eth::Address as EthereumAddress,
 };
@@ -18,7 +15,7 @@ use frame_support::{
 };
 use frame_system::pallet_prelude::*;
 pub use pallet::*;
-use sp_std::{vec, vec::Vec};
+use sp_std::vec;
 
 mod benchmarking;
 
@@ -50,7 +47,6 @@ pub enum SafeModeUpdate<T: Config> {
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use cf_chains::btc::Utxo;
 	use cf_primitives::TxId;
 	use cf_traits::VaultKeyWitnessedHandler;
 	use frame_support::DefaultNoBound;

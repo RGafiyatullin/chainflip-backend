@@ -253,7 +253,7 @@ pub mod pallet {
 	pub(crate) type DepositChannelPool<T: Config<I>, I: 'static = ()> = StorageDoubleMap<
 		_,
 		Twox64Concat,
-		Option<Asset>,
+		Option<TargetChainAsset<T, I>>,
 		Twox64Concat,
 		ChannelId,
 		<T::TargetChain as Chain>::DepositChannel,
@@ -377,7 +377,7 @@ pub mod pallet {
 			for address in can_recycle.iter() {
 				if let Some(details) = DepositChannelLookup::<T, I>::take(address) {
 					if let Some(recycled_channel) = DepositBalances::<T, I>::mutate(
-						details.deposit_channel.asset(),
+						details.deposit_channel.asset().unwrap_or_default(),
 						|deposit_tracker| {
 							deposit_tracker.maybe_recycle_channel(details.deposit_channel)
 						},
@@ -385,7 +385,7 @@ pub mod pallet {
 						DepositChannelPool::<T, I>::insert(
 							recycled_channel.asset(),
 							recycled_channel.channel_id(),
-							channel,
+							recycled_channel,
 						);
 					}
 				}
@@ -701,8 +701,11 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 		let deposit_channel_details = DepositChannelLookup::<T, I>::get(&deposit_address)
 			.ok_or(Error::<T, I>::InvalidDepositAddress)?;
 
-		if DepositChannelPool::<T, I>::get(deposit_channel_details.deposit_channel.channel_id)
-			.is_some()
+		if DepositChannelPool::<T, I>::get(
+			deposit_channel_details.deposit_channel.asset(),
+			deposit_channel_details.deposit_channel.channel_id,
+		)
+		.is_some()
 		{
 			log_or_panic!(
 				"Deposit channel {} should not be in the recycled address pool if it's active",

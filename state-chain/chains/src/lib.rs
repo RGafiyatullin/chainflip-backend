@@ -98,6 +98,7 @@ pub trait Chain: Member + Parameter {
 	type ChainAsset: Member
 		+ Parameter
 		+ MaxEncodedLen
+		+ Default
 		+ Copy
 		+ BenchmarkValue
 		+ FullCodec
