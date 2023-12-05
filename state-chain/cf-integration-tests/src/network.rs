@@ -5,7 +5,7 @@ use crate::threshold_signing::{BtcThresholdSigner, DotThresholdSigner, EthThresh
 use cf_primitives::{AccountRole, BlockNumber, EpochIndex, FlipBalance, TxId, GENESIS_EPOCH};
 use cf_traits::{AccountRoleRegistry, EpochInfo, VaultRotator};
 use chainflip_node::test_account_from_seed;
-use codec::Encode;
+use codec::{Decode, Encode};
 use frame_support::{
 	dispatch::UnfilteredDispatchable,
 	inherent::ProvideInherent,
@@ -131,6 +131,18 @@ impl Cli {
 			account,
 			AccountRole::Validator
 		));
+	}
+
+	pub fn rotate_keys(account: &NodeId) {
+		assert_ok!(Validator::set_keys(
+			RuntimeOrigin::signed(account.clone()),
+			SessionKeys::decode(&mut &[0xcf; 64][..]).unwrap(),
+			Default::default()
+		));
+	}
+
+	pub fn purge_keys(account: &NodeId) {
+		assert_ok!(Validator::purge_keys(RuntimeOrigin::signed(account.clone())));
 	}
 }
 
