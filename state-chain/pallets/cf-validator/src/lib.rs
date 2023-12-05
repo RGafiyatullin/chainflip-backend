@@ -751,6 +751,13 @@ pub mod pallet {
 			}
 			T::AccountRoleRegistry::register_as_validator(&account_id)
 		}
+
+		#[pallet::call_index(7)]
+		#[pallet::weight(< T as pallet_session::Config >::WeightInfo::purge_keys())]
+		pub fn purge_keys(origin: OriginFor<T>) -> DispatchResult {
+			T::AccountRoleRegistry::ensure_validator(origin.clone())?;
+			<pallet_session::Pallet<T>>::purge_keys(origin)
+		}
 	}
 
 	#[pallet::genesis_config]
