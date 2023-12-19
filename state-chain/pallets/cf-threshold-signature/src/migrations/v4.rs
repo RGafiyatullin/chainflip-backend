@@ -1,6 +1,6 @@
 use crate::*;
 #[cfg(feature = "try-runtime")]
-use frame_support::dispatch::DispatchError;
+use frame_support::pallet_prelude::DispatchError;
 use frame_support::{traits::OnRuntimeUpgrade, weights::Weight};
 use sp_std::marker::PhantomData;
 

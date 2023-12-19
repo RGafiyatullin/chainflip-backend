@@ -7,10 +7,9 @@ use cf_traits::{AccountRoleRegistry, EpochInfo, VaultRotator};
 use chainflip_node::test_account_from_seed;
 use codec::Encode;
 use frame_support::{
-	dispatch::UnfilteredDispatchable,
 	inherent::ProvideInherent,
 	pallet_prelude::InherentData,
-	traits::{IntegrityTest, OnFinalize, OnIdle},
+	traits::{IntegrityTest, OnFinalize, OnIdle, UnfilteredDispatchable},
 };
 use pallet_cf_funding::{MinimumFunding, RedemptionAmount};
 use sp_consensus_aura::SlotDuration;

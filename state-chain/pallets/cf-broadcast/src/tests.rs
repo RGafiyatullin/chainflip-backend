@@ -23,7 +23,7 @@ use cf_traits::{
 };
 use frame_support::{
 	assert_noop, assert_ok,
-	dispatch::Weight,
+	pallet_prelude::Weight,
 	traits::{Hooks, OriginTrait},
 };
 use frame_system::RawOrigin;

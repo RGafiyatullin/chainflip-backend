@@ -21,10 +21,10 @@ use cf_traits::{
 use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::{
 	dispatch::DispatchResultWithPostInfo,
-	pallet_prelude::DispatchResult,
+	pallet_prelude::{DispatchResult, RuntimeDebug},
 	sp_runtime::traits::Saturating,
 	traits::{Defensive, Get, OriginTrait, StorageVersion, UnfilteredDispatchable},
-	RuntimeDebug, Twox64Concat,
+	Twox64Concat,
 };
 use frame_system::pallet_prelude::OriginFor;
 pub use pallet::*;
