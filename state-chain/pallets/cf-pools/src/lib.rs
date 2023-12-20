@@ -12,6 +12,7 @@ use cf_traits::{impl_pallet_safe_mode, Chainflip, LpBalanceApi, SwappingApi};
 use frame_support::{
 	pallet_prelude::*,
 	sp_runtime::{Permill, Saturating},
+	traits::{OnRuntimeUpgrade, StorageVersion},
 	transactional,
 };
 use frame_system::pallet_prelude::OriginFor;
@@ -24,6 +25,7 @@ pub use pallet::*;
 mod benchmarking;
 pub mod weights;
 pub use weights::WeightInfo;
+pub mod migrations;
 
 #[cfg(test)]
 mod mock;
@@ -187,6 +189,8 @@ impl<T: Config> AssetPair<T> {
 	}
 }
 
+pub const PALLET_VERSION: StorageVersion = StorageVersion::new(1);
+
 #[frame_support::pallet]
 pub mod pallet {
 	use cf_amm::{
@@ -329,6 +333,7 @@ pub mod pallet {
 
 	#[pallet::pallet]
 	#[pallet::without_storage_info]
+	#[pallet::storage_version(PALLET_VERSION)]
 	pub struct Pallet<T>(PhantomData<T>);
 
 	/// Pools are indexed by single asset since USDC is implicit.
@@ -396,6 +401,10 @@ pub mod pallet {
 				}
 			}
 			weight_used
+		}
+
+		fn on_runtime_upgrade() -> Weight {
+			migrations::PalletMigration::<T>::on_runtime_upgrade()
 		}
 	}
 
