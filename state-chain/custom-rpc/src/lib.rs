@@ -468,7 +468,7 @@ pub trait CustomApi {
 	#[subscription(name = "subscribe_pool_price", item = PoolPrice)]
 	fn cf_subscribe_pool_price(&self, from_asset: RpcAsset, to_asset: RpcAsset);
 
-	#[subscription(name = "subscribe_prewitness_swaps", item = Vec<AssetAmount>)]
+	#[subscription(name = "subscribe_prewitness_swaps", item = (state_chain_runtime::Hash, Vec<AssetAmount>))]
 	fn cf_subscribe_prewitness_swaps(&self, from_asset: RpcAsset, to_asset: RpcAsset);
 
 	#[method(name = "prewitness_swaps")]
@@ -1093,7 +1093,11 @@ where
 	) -> Result<(), SubscriptionEmptyError> {
 		let from = from_asset.try_into().map_err(|_| SubscriptionEmptyError)?;
 		let to = to_asset.try_into().map_err(|_| SubscriptionEmptyError)?;
-		self.new_items_subscription(sink, move |api, hash| api.cf_prewitness_swaps(hash, from, to))
+		self.new_items_subscription(sink, move |api, hash| {
+			api.cf_prewitness_swaps(hash, from, to).map(|res|
+				// interweave the current block hash into the result
+				res.map(|swaps|Some((hash, swaps))))
+		})
 	}
 
 	fn cf_prewitness_swaps(
