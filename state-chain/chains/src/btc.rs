@@ -212,6 +212,7 @@ impl ConsolidationParameters {
 
 impl Chain for Bitcoin {
 	const NAME: &'static str = "Bitcoin";
+	const WELL_KNOWN: Option<crate::WellKnownChain> = Some(crate::WellKnownChain::Bitcoin);
 	const GAS_ASSET: Self::ChainAsset = assets::btc::Asset::Btc;
 
 	type ChainCrypto = BitcoinCrypto;

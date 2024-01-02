@@ -1,4 +1,5 @@
 use crate::*;
+use cf_chains::WellKnownChain;
 use frame_support::traits::OnRuntimeUpgrade;
 use sp_std::marker::PhantomData;
 
@@ -54,11 +55,12 @@ mod old {
 
 impl<T: Config<I>, I: 'static> OnRuntimeUpgrade for Migration<T, I> {
 	fn on_runtime_upgrade() -> frame_support::weights::Weight {
-		let lifetime: TargetChainBlockNumber<T, I> = match T::TargetChain::NAME {
-			"Bitcoin" => BITCOIN_EXPIRY_BLOCKS.into(),
-			"Ethereum" => ETHEREUM_EXPIRY_BLOCKS.into(),
-			"Polkadot" => POLKADOT_EXPIRY_BLOCKS.into(),
-			_ => unreachable!("Unsupported chain"),
+		let lifetime: TargetChainBlockNumber<T, I> = match T::TargetChain::WELL_KNOWN {
+			Some(WellKnownChain::Bitcoin) => BITCOIN_EXPIRY_BLOCKS.into(),
+			Some(WellKnownChain::Ethereum) => ETHEREUM_EXPIRY_BLOCKS.into(),
+			Some(WellKnownChain::Polkadot)  => POLKADOT_EXPIRY_BLOCKS.into(),
+			
+			None => unreachable!("Unsupported chain"),
 		};
 
 		DepositChannelLifetime::<T, I>::put(lifetime);

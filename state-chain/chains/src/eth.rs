@@ -30,6 +30,7 @@ pub const CHAIN_ID_KOVAN: u64 = 42;
 
 impl Chain for Ethereum {
 	const NAME: &'static str = "Ethereum";
+	const WELL_KNOWN: Option<crate::WellKnownChain> = Some(crate::WellKnownChain::Ethereum);
 	const GAS_ASSET: Self::ChainAsset = assets::eth::Asset::Eth;
 
 	type ChainCrypto = evm::EvmCrypto;

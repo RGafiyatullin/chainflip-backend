@@ -46,10 +46,19 @@ pub use deposit_channel::*;
 
 pub mod mocks;
 
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+pub enum WellKnownChain {
+	Bitcoin,
+	Ethereum,
+	Polkadot,
+}
+
 /// A trait representing all the types and constants that need to be implemented for supported
 /// blockchains.
 pub trait Chain: Member + Parameter {
 	const NAME: &'static str;
+
+	const WELL_KNOWN: Option<WellKnownChain>;
 
 	const GAS_ASSET: Self::ChainAsset;
 
