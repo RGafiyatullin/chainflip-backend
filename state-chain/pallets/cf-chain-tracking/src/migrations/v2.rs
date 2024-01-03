@@ -57,7 +57,7 @@ mod v1 {
 		($chain: ty) => {
 			impl FromV1 for crate::ChainState<$chain> {
 				type OldType = Never;
-				fn from_v1(old: Self::OldType) -> Self {
+				fn from_v1(_: Self::OldType) -> Self {
 					unreachable!(
 						"We are not supposed to have an instance of {}",
 						core::any::type_name::<Self::OldType>()
@@ -70,11 +70,21 @@ mod v1 {
 	impl_unreachable_from_v1_for_chain!(cf_chains::Polkadot);
 
 	pub mod btc {
+		use cf_chains::btc::{BitcoinFeeInfo, BitcoinTrackedData};
+
 		use super::FromV1;
 		use crate::*;
 
+		// The following type-aliases and constants are defined here intentionally (as opposed to
+		// being imported). The types and values should correspond to the types and values that were
+		// in effect right before this migration.
 		pub type BtcBlockNumber = u64;
 		pub type BtcAmount = u64;
+
+		const BYTES_PER_KILOBYTE: BtcAmount = 1024;
+		const INPUT_UTXO_SIZE_IN_BYTES: BtcAmount = 178;
+		const OUTPUT_UTXO_SIZE_IN_BYTES: BtcAmount = 34;
+		const MINIMUM_BTC_TX_SIZE_IN_BYTES: BtcAmount = 12;
 
 		#[derive(
 			Copy, Clone, RuntimeDebug, PartialEq, Eq, Encode, Decode, MaxEncodedLen, TypeInfo,
@@ -97,8 +107,34 @@ mod v1 {
 			type OldType = TrackedData;
 
 			fn from_v1(TrackedData { block_height, tracked_data }: TrackedData) -> Self {
-                log::warn!("upgrading @{:?}", block_height);
-				unimplemented!()
+				log::info!("upgrading {} @{:?}", core::any::type_name::<Self>(), block_height);
+
+				fn undo(derived_fee: u64, size: u64) -> BtcAmount {
+					let a = derived_fee * BYTES_PER_KILOBYTE;
+					let q = a / size;
+					let r = a % size;
+
+					assert!(r == 0 || a == BtcAmount::MAX);
+
+					q
+				}
+
+				let via_out = undo(tracked_data.fee_per_input_utxo, INPUT_UTXO_SIZE_IN_BYTES);
+				let via_in = undo(tracked_data.fee_per_output_utxo, OUTPUT_UTXO_SIZE_IN_BYTES);
+				let via_min =
+					undo(tracked_data.min_fee_required_per_tx, MINIMUM_BTC_TX_SIZE_IN_BYTES);
+
+				if !(via_out == via_in && via_out == via_min) {
+					log::warn!("Fee estimate may be inaccurate!");
+				}
+				let sats_per_kilobyte = via_out.max(via_in).max(via_min);
+
+				ChainState {
+					block_height,
+					tracked_data: BitcoinTrackedData {
+						btc_fee_info: BitcoinFeeInfo::new(sats_per_kilobyte),
+					},
+				}
 			}
 		}
 	}
