@@ -3,6 +3,9 @@ use sp_std::marker::PhantomData;
 
 pub struct Migration<T: Config<I>, I: 'static>(PhantomData<(T, I)>);
 
+#[cfg(feature = "try-runtime")]
+use sp_std::prelude::Vec;
+
 impl<T, I> OnRuntimeUpgrade for Migration<T, I>
 where
 	T: Config<I>,
@@ -76,7 +79,7 @@ mod v1 {
 		#[derive(
 			Copy, Clone, RuntimeDebug, PartialEq, Eq, Encode, Decode, MaxEncodedLen, TypeInfo,
 		)]
-		pub struct BitcoinFeeInfo {
+		pub struct FeeInfo {
 			pub fee_per_input_utxo: BtcAmount,
 			pub fee_per_output_utxo: BtcAmount,
 			pub min_fee_required_per_tx: BtcAmount,
@@ -85,15 +88,15 @@ mod v1 {
 		#[derive(
 			Copy, Clone, RuntimeDebug, PartialEq, Eq, Encode, Decode, MaxEncodedLen, TypeInfo,
 		)]
-		pub struct Tracked {
+		pub struct TrackedData {
 			pub block_height: BtcBlockNumber,
-			pub tracked_data: BitcoinFeeInfo,
+			pub tracked_data: FeeInfo,
 		}
 
 		impl FromV1 for ChainState<cf_chains::Bitcoin> {
-			type OldType = Tracked;
+			type OldType = TrackedData;
 
-			fn from_v1(Tracked { block_height, tracked_data }: Tracked) -> Self {
+			fn from_v1(TrackedData { block_height, tracked_data }: TrackedData) -> Self {
                 log::warn!("upgrading @{:?}", block_height);
 				unimplemented!()
 			}
