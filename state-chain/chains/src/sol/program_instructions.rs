@@ -2,9 +2,9 @@ use super::{
 	vec, vec::Vec, AccountMeta, FromStr, Instruction, Pubkey, SYSTEM_PROGRRAM_ID, VAULT_PROGRAM,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
-use frame_support::sp_io::hashing::sha2_256;
 use scale_info::prelude::string::String;
 use serde::{Deserialize, Serialize};
+use sp_io::hashing::sha2_256;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum SystemProgramInstruction {
