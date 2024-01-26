@@ -90,7 +90,8 @@ macro_rules! chains {
 chains! {
 	Ethereum = 1,
 	Polkadot = 2,
-	Bitcoin = 3
+	Bitcoin = 3,
+	Solana = 4
 }
 
 /// Can be any Chain.
@@ -115,6 +116,7 @@ impl ForeignChain {
 			ForeignChain::Ethereum => assets::any::Asset::Eth,
 			ForeignChain::Polkadot => assets::any::Asset::Dot,
 			ForeignChain::Bitcoin => assets::any::Asset::Btc,
+			ForeignChain::Solana => assets::any::Asset::Sol,
 		}
 	}
 }
@@ -124,6 +126,7 @@ fn chain_as_u32() {
 	assert_eq!(ForeignChain::Ethereum as u32, 1);
 	assert_eq!(ForeignChain::Polkadot as u32, 2);
 	assert_eq!(ForeignChain::Bitcoin as u32, 3);
+	assert_eq!(ForeignChain::Solana as u32, 4);
 }
 
 #[test]

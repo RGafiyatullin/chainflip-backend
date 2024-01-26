@@ -1,7 +1,9 @@
 use core::str::FromStr;
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use codec::{Decode, Encode, MaxEncodedLen};
 use generic_array::{typenum::U64, GenericArray};
+use scale_info::TypeInfo;
 use serde::{Deserialize, Serialize};
 use sp_std::{collections::btree_map::BTreeMap, vec, vec::Vec};
 
@@ -597,7 +599,22 @@ pub struct CompiledInstruction {
 	pub data: Vec<u8>,
 }
 
-#[derive(Debug, PartialEq, Default, Eq, Clone, Serialize, Deserialize, Ord, PartialOrd, Copy)]
+#[derive(
+	Debug,
+	PartialEq,
+	Default,
+	Eq,
+	Clone,
+	Serialize,
+	Deserialize,
+	Ord,
+	PartialOrd,
+	Copy,
+	Encode,
+	Decode,
+	TypeInfo,
+	MaxEncodedLen,
+)]
 pub struct Pubkey(pub [u8; 32]);
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]

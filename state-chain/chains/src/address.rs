@@ -1,6 +1,9 @@
 extern crate alloc;
 
-use crate::{btc::ScriptPubkey, dot::PolkadotAccountId, eth::Address as EthereumAddress, Chain};
+use crate::{
+	btc::ScriptPubkey, dot::PolkadotAccountId, eth::Address as EthereumAddress, sol, Chain,
+};
+
 use cf_primitives::{ChannelId, ForeignChain, NetworkEnvironment};
 use codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
@@ -49,6 +52,7 @@ pub enum ForeignChainAddress {
 	Eth(EthereumAddress),
 	Dot(PolkadotAccountId),
 	Btc(ScriptPubkey),
+	Sol(sol::Pubkey),
 }
 
 impl ForeignChainAddress {
@@ -57,6 +61,7 @@ impl ForeignChainAddress {
 			ForeignChainAddress::Eth(_) => ForeignChain::Ethereum,
 			ForeignChainAddress::Dot(_) => ForeignChain::Polkadot,
 			ForeignChainAddress::Btc(_) => ForeignChain::Bitcoin,
+			ForeignChainAddress::Sol(_) => ForeignChain::Solana,
 		}
 	}
 }
@@ -68,6 +73,7 @@ pub enum EncodedAddress {
 	Eth([u8; 20]),
 	Dot([u8; 32]),
 	Btc(Vec<u8>),
+	Sol([u8; 32]),
 }
 
 pub trait AddressConverter: Sized {
@@ -95,6 +101,12 @@ impl core::fmt::Display for EncodedAddress {
 						.unwrap_or("The address cant be decoded from the utf8 encoded bytes")
 				)
 			},
+			EncodedAddress::Sol(addr) => write!(
+				f,
+				"0x{}",
+				/* XXX: PRO-1019 (come on, it allocates on Display :\ ) */
+				hex::encode(&addr[..])
+			),
 		}
 	}
 }
@@ -175,6 +187,13 @@ impl EncodedAddress {
 				Ok(EncodedAddress::Dot(address))
 			},
 			ForeignChain::Bitcoin => Ok(EncodedAddress::Btc(bytes)),
+
+			ForeignChain::Solana => {
+				let Ok(addr) = bytes.try_into() else {
+					return Err("Invalid Solana address length")
+				};
+				Ok(EncodedAddress::Sol(addr))
+			},
 		}
 	}
 }
@@ -189,6 +208,7 @@ pub fn to_encoded_address<GetNetwork: FnOnce() -> NetworkEnvironment>(
 		ForeignChainAddress::Btc(script_pubkey) => EncodedAddress::Btc(
 			script_pubkey.to_address(&network_environment().into()).as_bytes().to_vec(),
 		),
+		ForeignChainAddress::Sol(pubkey) => EncodedAddress::Sol(pubkey.0),
 	}
 }
 
@@ -208,6 +228,7 @@ pub fn try_from_encoded_address<GetNetwork: FnOnce() -> NetworkEnvironment>(
 			)
 			.map_err(|_| ())?,
 		)),
+		EncodedAddress::Sol(address_bytes) => Ok(ForeignChainAddress::Sol(address_bytes.into())),
 	}
 }
 
@@ -287,6 +308,9 @@ impl ToHumanreadableAddress for ForeignChainAddress {
 				ForeignChainAddressHumanreadable::Dot(address.to_humanreadable(network_environment)),
 			ForeignChainAddress::Btc(address) =>
 				ForeignChainAddressHumanreadable::Btc(address.to_humanreadable(network_environment)),
+			ForeignChainAddress::Sol(_address) =>
+			/* XXX: PRO-1019 */
+				todo!("Human readable for Solana address"),
 		}
 	}
 }

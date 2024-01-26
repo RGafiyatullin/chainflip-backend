@@ -49,6 +49,8 @@ impl ExecutexSwapAndCall {
 				(ForeignChain::Polkadot as u32, source_address.aliased_ref().to_vec()),
 			Some(ForeignChainAddress::Btc(script)) =>
 				(ForeignChain::Bitcoin as u32, script.bytes()),
+			Some(ForeignChainAddress::Sol(pubkey)) =>
+				(ForeignChain::Solana as u32, pubkey.0.into()),
 		}
 	}
 }

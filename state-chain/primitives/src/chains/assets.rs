@@ -57,6 +57,7 @@ pub mod any {
 		Usdc = 3u32,
 		Dot = 4u32,
 		Btc = 5u32,
+		Sol = 6u32,
 	}
 
 	impl TryFrom<u32> for Asset {
@@ -89,6 +90,7 @@ pub mod any {
 				Asset::Usdc => Self::Ethereum,
 				Asset::Dot => Self::Polkadot,
 				Asset::Btc => Self::Bitcoin,
+				Asset::Sol => Self::Solana,
 			}
 		}
 	}
@@ -103,6 +105,7 @@ pub mod any {
 				"usdc" => Ok(Asset::Usdc),
 				"dot" => Ok(Asset::Dot),
 				"btc" => Ok(Asset::Btc),
+				"sol" => Ok(Asset::Sol),
 				_ => Err("Unrecognized asset"),
 			}
 		}
