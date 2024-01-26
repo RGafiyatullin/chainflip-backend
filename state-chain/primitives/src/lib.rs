@@ -50,12 +50,16 @@ pub type ThresholdSignatureRequestId = u32;
 
 pub type PolkadotBlockNumber = u32;
 
+pub type Ed25519PublicKey = sp_core::ed25519::Public;
+pub type Ipv6Addr = u128;
+pub type Port = u16;
+
 pub const FLIP_DECIMALS: u32 = 18;
 pub const FLIPPERINOS_PER_FLIP: FlipBalance = 10u128.pow(FLIP_DECIMALS);
 
 // Bitcoin default fee, in sats per bytes, to be used if current fee is not available via chain
 // tracking.
-pub const DEFAULT_FEE_SATS_PER_KILO_BYTE: u64 = 102400;
+pub const DEFAULT_FEE_SATS_PER_KILOBYTE: u64 = 102400;
 
 // To spend one of our deposit UTXOs, we need:
 // 32 bytes for the TX ID

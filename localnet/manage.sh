@@ -10,6 +10,8 @@ CORE_CONTAINERS="bitcoin geth polkadot redis"
 ARB_CONTAINERS="sequencer staker-unsafe poster"
 export NODE_COUNT=1-node
 
+DEBUG_OUTPUT=${DEBUG_OUTPUT:-'/dev/null'}
+
 source ./localnet/helper.sh
 
 set -eo pipefail
@@ -28,13 +30,13 @@ setup() {
   echo "👽 We need to do some quick set up to get you ready!"
   sleep 3
 
-  if ! which op >/dev/null 2>&1; then
+  if ! which op >$DEBUG_OUTPUT 2>&1; then
     echo "❌  OnePassword CLI not installed."
     echo "https://developer.1password.com/docs/cli/get-started/#install"
     exit 1
   fi
 
-  if ! which docker >/dev/null 2>&1; then
+  if ! which docker >$DEBUG_OUTPUT 2>&1; then
     echo "❌  docker CLI not installed."
     echo "https://docs.docker.com/get-docker/"
     exit 1
@@ -90,23 +92,31 @@ build-localnet() {
   done
 
   echo "🔮 Initializing Network"
-  docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" up $INITIAL_CONTAINERS -d $additional_docker_compose_up_args > /dev/null 2>&1
+  docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" up $INITIAL_CONTAINERS -d $additional_docker_compose_up_args >$DEBUG_OUTPUT 2>&1
 
   echo "🏗 Building network"
-  docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" up $CORE_CONTAINERS -d $additional_docker_compose_up_args > /dev/null 2>&1
+  docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" up $CORE_CONTAINERS -d $additional_docker_compose_up_args >$DEBUG_OUTPUT 2>&1
 
   echo "🪙 Waiting for Bitcoin node to start"
-  check_endpoint_health -s --user flip:flip -H 'Content-Type: text/plain;' --data '{"jsonrpc":"1.0", "id": "1", "method": "getblockchaininfo", "params" : []}' http://localhost:8332 > /dev/null
+  check_endpoint_health -s --user flip:flip -H 'Content-Type: text/plain;' --data '{"jsonrpc":"1.0", "id": "1", "method": "getblockchaininfo", "params" : []}' http://localhost:8332 >$DEBUG_OUTPUT
 
   echo "💎 Waiting for ETH node to start"
-  check_endpoint_health -s -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"net_version","params":[],"id":67}' http://localhost:8545 > /dev/null
-  wscat -c ws://127.0.0.1:8546 -x '{"jsonrpc":"2.0","method":"net_version","params":[],"id":67}' > /dev/null
+  check_endpoint_health -s -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"net_version","params":[],"id":67}' http://localhost:8545 >$DEBUG_OUTPUT
+  wscat -c ws://127.0.0.1:8546 -x '{"jsonrpc":"2.0","method":"net_version","params":[],"id":67}' >$DEBUG_OUTPUT
 
   echo "🚦 Waiting for polkadot node to start"
   REPLY=$(check_endpoint_health -H "Content-Type: application/json" -s -d '{"id":1, "jsonrpc":"2.0", "method": "chain_getBlockHash", "params":[0]}' 'http://localhost:9947') || [ -z $(echo $REPLY | grep -o '\"result\":\"0x[^"]*' | grep -o '0x.*') ]
 
-  echo "🦑 Starting Arbitrum ..."
-  docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" up $ARB_CONTAINERS -d $additional_docker_compose_up_args > /dev/null 2>&1
+  if which solana-test-validator > $DEBUG_OUTPUT 2>&1; then
+    echo "☀️ Waiting for Solana node to start"
+    ./localnet/init/scripts/start-solana.sh
+    until curl -s http://localhost:8899 > $DEBUG_OUTPUT 2>&1; do sleep 1; done
+  else
+    echo "☀️ Solana not installed, skipping..."
+  fi
+
+  echo "🦑 Waiting for Arbitrum nodes to start"
+  docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" up $ARB_CONTAINERS -d $additional_docker_compose_up_args >$DEBUG_OUTPUT 2>&1
 
   DOT_GENESIS_HASH=$(echo $REPLY | grep -o '\"result\":\"0x[^"]*' | grep -o '0x.*')
 
@@ -123,7 +133,7 @@ build-localnet() {
 
   RPC_PORT=$INIT_RPC_PORT
   for NODE in "${SELECTED_NODES[@]}"; do
-    check_endpoint_health -s -H "Content-Type: application/json" -d '{"id":1, "jsonrpc":"2.0", "method": "chain_getBlock"}' "http://localhost:$RPC_PORT" > /dev/null
+    check_endpoint_health -s -H "Content-Type: application/json" -d '{"id":1, "jsonrpc":"2.0", "method": "chain_getBlock"}' "http://localhost:$RPC_PORT" >$DEBUG_OUTPUT
     echo "💚 $NODE's chainflip-node is running!"
     ((RPC_PORT++))
   done
@@ -164,9 +174,11 @@ build-localnet() {
 
 destroy() {
   echo -n "💣 Destroying network..."
-  docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" down $additional_docker_compose_down_args > /dev/null 2>&1
+  docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" down $additional_docker_compose_down_args >$DEBUG_OUTPUT 2>&1
   for pid in $(ps -ef | grep chainflip | grep -v grep | awk '{print $2}'); do kill -9 $pid; done
+  for pid in $(ps -ef | grep solana | grep -v grep | awk '{print $2}'); do kill -9 $pid; done
   rm -rf /tmp/chainflip
+  rm -rf /tmp/solana/
   echo "done"
 }
 
@@ -215,7 +227,7 @@ yeet() {
 
 logs() {
   echo "🤖 Which service would you like to tail?"
-  select SERVICE in node engine broker lp polkadot geth bitcoin poster sequencer staker all; do
+  select SERVICE in node engine broker lp polkadot geth bitcoin solana poster sequencer staker all; do
     if [[ $SERVICE == "all" ]]; then
       docker compose -f localnet/docker-compose.yml -p "chainflip-localnet" logs --follow
       tail -f /tmp/chainflip/chainflip-*.log
@@ -249,6 +261,9 @@ logs() {
     if [[ $SERVICE == "lp" ]]; then
       tail -f /tmp/chainflip/chainflip-lp-api.log
     fi
+    if [[ $SERVICE == "solana" ]]; then
+      tail -f /tmp/solana/solana.log
+    fi
     break
   done
 }
@@ -256,13 +271,13 @@ logs() {
 bouncer() {
   (
     cd ./bouncer
-    pnpm install > /dev/null 2>&1
+    pnpm install >$DEBUG_OUTPUT 2>&1
     ./run.sh $NODE_COUNT
   )
 }
 
 main() {
-    if ! which wscat > /dev/null; then
+    if ! which wscat >$DEBUG_OUTPUT; then
         echo "wscat is not installed. Installing now..."
         npm install -g wscat
     fi
