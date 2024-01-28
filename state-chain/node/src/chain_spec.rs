@@ -31,6 +31,8 @@ use state_chain_runtime::{
 	PolkadotVaultConfig, ReputationConfig, RuntimeGenesisConfig, SessionConfig, SetSizeParameters,
 	Signature, SystemConfig, ValidatorConfig, WASM_BINARY,
 };
+// use state_chain_runtime::{SolanaChainTrackingConfig, SolanaIngressEgressConfig,
+// SolanaThresholdSignerConfig, SolanaVaultConfig};
 
 use std::{
 	collections::{BTreeMap, BTreeSet},
@@ -621,6 +623,8 @@ fn testnet_genesis(
 			keygen_response_timeout: keygen_ceremony_timeout_blocks,
 			amount_to_slash: FLIPPERINOS_PER_FLIP,
 		},
+		solana_vault: Default::default(),
+
 		ethereum_threshold_signer: EthereumThresholdSignerConfig {
 			threshold_signature_response_timeout: threshold_signature_ceremony_timeout_blocks,
 			_instance: PhantomData,
@@ -634,6 +638,8 @@ fn testnet_genesis(
 			threshold_signature_response_timeout: threshold_signature_ceremony_timeout_blocks,
 			_instance: PhantomData,
 		},
+		solana_threshold_signer: Default::default(),
+
 		emissions: EmissionsConfig {
 			current_authority_emission_inflation: current_authority_emission_inflation_perbill,
 			backup_node_emission_inflation: backup_node_emission_inflation_perbill,
@@ -665,6 +671,8 @@ fn testnet_genesis(
 				tracked_data: BitcoinTrackedData { btc_fee_info: BitcoinFeeInfo::new(1000) },
 			},
 		},
+		solana_chain_tracking: Default::default(),
+
 		transaction_payment: Default::default(),
 		liquidity_pools: Default::default(),
 		// Channel lifetimes are set to ~2 hours at average block times.
@@ -680,6 +688,7 @@ fn testnet_genesis(
 			deposit_channel_lifetime: polkadot_deposit_channel_lifetime,
 			witness_safety_margin: None,
 		},
+		solana_ingress_egress: Default::default(),
 	}
 }
 

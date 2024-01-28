@@ -12,7 +12,8 @@ use crate::{
 	AccountId, AccountRoles, Authorship, BitcoinChainTracking, BitcoinIngressEgress, BitcoinVault,
 	BlockNumber, Emissions, Environment, EthereumBroadcaster, EthereumChainTracking,
 	EthereumIngressEgress, Flip, FlipBalance, PolkadotBroadcaster, PolkadotChainTracking,
-	PolkadotIngressEgress, PolkadotVault, Runtime, RuntimeCall, System, Validator, YEAR,
+	PolkadotIngressEgress, PolkadotVault, Runtime, RuntimeCall, SolanaIngressEgress, System,
+	Validator, YEAR,
 };
 use backup_node_rewards::calculate_backup_rewards;
 use cf_chains::{
@@ -38,9 +39,10 @@ use cf_chains::{
 		api::{EthEnvironmentProvider, EvmReplayProtection},
 		EvmCrypto, Transaction,
 	},
+	sol::api::SolanaApi,
 	AnyChain, ApiCall, CcmChannelMetadata, CcmDepositMetadata, Chain, ChainCrypto,
 	ChainEnvironment, ChainState, DepositChannel, ForeignChain, ReplayProtectionProvider,
-	SetCommKeyWithAggKey, SetGovKeyWithAggKey, TransactionBuilder,
+	SetCommKeyWithAggKey, SetGovKeyWithAggKey, Solana, TransactionBuilder,
 };
 use cf_primitives::{chains::assets, AccountRole, Asset, BasisPoints, ChannelId, EgressId};
 use cf_traits::{
@@ -404,6 +406,9 @@ impl BroadcastAnyChainGovKey for TokenholderGovernanceBroadcaster {
 			ForeignChain::Polkadot =>
 				Self::broadcast_gov_key::<Polkadot, PolkadotBroadcaster>(maybe_old_key, new_key),
 			ForeignChain::Bitcoin => Err(()),
+			ForeignChain::Solana =>
+			/* XXX: PRO-1019 */
+				todo!(),
 		}
 	}
 
@@ -414,6 +419,9 @@ impl BroadcastAnyChainGovKey for TokenholderGovernanceBroadcaster {
 			ForeignChain::Polkadot =>
 				Self::is_govkey_compatible::<<Polkadot as Chain>::ChainCrypto>(key),
 			ForeignChain::Bitcoin => false,
+			ForeignChain::Solana =>
+			/* XXX: PRO-1019 */
+				todo!(),
 		}
 	}
 }
@@ -505,14 +513,16 @@ impl_deposit_api_for_anychain!(
 	AnyChainIngressEgressHandler,
 	(Ethereum, EthereumIngressEgress),
 	(Polkadot, PolkadotIngressEgress),
-	(Bitcoin, BitcoinIngressEgress)
+	(Bitcoin, BitcoinIngressEgress),
+	(Solana, SolanaIngressEgress)
 );
 
 impl_egress_api_for_anychain!(
 	AnyChainIngressEgressHandler,
 	(Ethereum, EthereumIngressEgress),
 	(Polkadot, PolkadotIngressEgress),
-	(Bitcoin, BitcoinIngressEgress)
+	(Bitcoin, BitcoinIngressEgress),
+	(Solana, SolanaIngressEgress)
 );
 
 pub struct EthDepositHandler;
@@ -531,6 +541,9 @@ impl DepositHandler<Bitcoin> for BtcDepositHandler {
 		Environment::add_bitcoin_utxo_to_list(amount, utxo_id, channel.state)
 	}
 }
+
+pub struct SolDepositHandler;
+impl DepositHandler<Solana> for SolDepositHandler {}
 
 pub struct ChainAddressConverter;
 
@@ -572,6 +585,13 @@ impl OnBroadcastReady<Bitcoin> for BroadcastReadyProvider {
 			},
 			_ => unreachable!(),
 		}
+	}
+}
+impl OnBroadcastReady<Solana> for BroadcastReadyProvider {
+	type ApiCall = SolanaApi<()>;
+
+	fn on_broadcast_ready(_api_call: &Self::ApiCall) {
+		unimplemented!()
 	}
 }
 

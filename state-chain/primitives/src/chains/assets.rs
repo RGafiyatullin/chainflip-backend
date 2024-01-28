@@ -202,6 +202,7 @@ macro_rules! chain_assets {
 chain_assets!(eth, Ethereum, Eth, Flip, Usdc);
 chain_assets!(dot, Polkadot, Dot);
 chain_assets!(btc, Bitcoin, Btc);
+chain_assets!(sol, Solana, Sol);
 
 #[cfg(test)]
 mod test_assets {

@@ -149,6 +149,18 @@ impl TryFrom<ForeignChainAddress> for ScriptPubkey {
 	}
 }
 
+impl TryFrom<ForeignChainAddress> for sol::Pubkey {
+	type Error = AddressError;
+
+	fn try_from(value: ForeignChainAddress) -> Result<Self, Self::Error> {
+		if let ForeignChainAddress::Sol(value) = value {
+			Ok(value)
+		} else {
+			return Err(AddressError::InvalidAddress)
+		}
+	}
+}
+
 impl From<EthereumAddress> for ForeignChainAddress {
 	fn from(address: EthereumAddress) -> ForeignChainAddress {
 		ForeignChainAddress::Eth(address)
@@ -164,6 +176,12 @@ impl From<PolkadotAccountId> for ForeignChainAddress {
 impl From<ScriptPubkey> for ForeignChainAddress {
 	fn from(script_pubkey: ScriptPubkey) -> ForeignChainAddress {
 		ForeignChainAddress::Btc(script_pubkey)
+	}
+}
+
+impl From<sol::Pubkey> for ForeignChainAddress {
+	fn from(value: sol::Pubkey) -> Self {
+		Self::Sol(value)
 	}
 }
 
@@ -268,6 +286,16 @@ impl ToHumanreadableAddress for PolkadotAccountId {
 	#[cfg(feature = "std")]
 	fn to_humanreadable(&self, _network_environment: NetworkEnvironment) -> Self::Humanreadable {
 		crate::dot::SubstrateNetworkAddress::polkadot(*self.aliased_ref())
+	}
+}
+
+impl ToHumanreadableAddress for sol::Pubkey {
+	#[cfg(feature = "std")]
+	type Humanreadable = Self;
+
+	#[cfg(feature = "std")]
+	fn to_humanreadable(&self, _network_environment: NetworkEnvironment) -> Self::Humanreadable {
+		*self
 	}
 }
 

@@ -2,10 +2,11 @@ use core::str::FromStr;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use codec::{Decode, Encode, MaxEncodedLen};
-use generic_array::{typenum::U64, GenericArray};
 use scale_info::TypeInfo;
 use serde::{Deserialize, Serialize};
 use sp_std::{collections::btree_map::BTreeMap, vec, vec::Vec};
+
+pub use cf_primitives::chains::Solana;
 
 #[cfg(test)]
 use extra_types_for_testing::{SignerError, Signers, TransactionError};
@@ -16,8 +17,14 @@ use thiserror::Error;
 
 use self::program_instructions::SystemProgramInstruction;
 
+pub mod api;
 pub mod program_instructions;
 pub mod short_vec;
+pub mod transaction_builder;
+
+mod impl_chain;
+mod solana_crypto;
+pub use solana_crypto::SolanaCrypto;
 
 pub const SIGNATURE_BYTES: usize = 64;
 pub const HASH_BYTES: usize = 32;
@@ -47,7 +54,9 @@ pub const SYS_VAR_RECENT_BLOCKHASHES: &str = "SysvarRecentB1ockHashes11111111111
 /// if the caller has knowledge that the first account of the constructed
 /// transaction's `Message` is both a signer and the expected fee-payer, then
 /// redundantly specifying the fee-payer is not strictly required.
-#[derive(Debug, PartialEq, Default, Eq, Clone, Serialize, Deserialize)]
+#[derive(
+	Debug, PartialEq, Default, Eq, Clone, TypeInfo, Encode, Decode, Serialize, Deserialize,
+)]
 pub struct Transaction {
 	/// A set of signatures of a serialized [`Message`], signed by the first
 	/// keys of the `Message`'s [`account_keys`], where the number of signatures
@@ -337,7 +346,20 @@ impl AccountMeta {
 /// access the same read-write accounts are processed sequentially.
 ///
 /// [PoH]: https://docs.solana.com/cluster/synchronization
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(
+	Serialize,
+	Deserialize,
+	Default,
+	Debug,
+	PartialEq,
+	Eq,
+	Clone,
+	Copy,
+	TypeInfo,
+	Encode,
+	Decode,
+	MaxEncodedLen,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageHeader {
 	/// The number of signatures required for this message to be considered
@@ -371,7 +393,9 @@ pub struct MessageHeader {
 /// redundantly specifying the fee-payer is not strictly required.
 // NOTE: Serialization-related changes must be paired with the custom serialization
 // for versioned messages in the `RemainingLegacyMessage` struct.
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq, Clone)]
+#[derive(
+	Default, Debug, PartialEq, Eq, Clone, TypeInfo, Encode, Decode, Serialize, Deserialize,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
 	/// The message header, identifying signed and read-only `account_keys`.
@@ -584,7 +608,7 @@ fn compile_instructions(ixs: &[Instruction], keys: &[Pubkey]) -> Vec<CompiledIns
 /// construction of `Message`. Most users will not interact with it directly.
 ///
 /// [`Message`]: crate::message::Message
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, TypeInfo, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
 pub struct CompiledInstruction {
 	/// Index into the transaction keys array indicating the program account that executes this
@@ -654,8 +678,21 @@ impl TryFrom<Vec<u8>> for Pubkey {
 	}
 }
 
-#[derive(Debug, PartialEq, Default, Eq, Clone, Serialize, Deserialize, Copy)]
-pub struct Signature(GenericArray<u8, U64>);
+#[derive(
+	Debug,
+	PartialEq,
+	Default,
+	Eq,
+	Clone,
+	TypeInfo,
+	Encode,
+	Decode,
+	MaxEncodedLen,
+	Serialize,
+	Deserialize,
+	Copy,
+)]
+pub struct Signature([[u8; 32]; 2]);
 
 // impl Signature {
 // 	pub(self) fn verify_verbose(
@@ -674,8 +711,8 @@ pub struct Signature(GenericArray<u8, U64>);
 // }
 
 impl From<[u8; SIGNATURE_BYTES]> for Signature {
-	fn from(signature: [u8; SIGNATURE_BYTES]) -> Self {
-		Self(GenericArray::from(signature))
+	fn from(_signature: [u8; SIGNATURE_BYTES]) -> Self {
+		Self(todo!())
 	}
 }
 
@@ -693,6 +730,10 @@ impl From<[u8; SIGNATURE_BYTES]> for Signature {
 	Ord,
 	PartialOrd,
 	Hash,
+	TypeInfo,
+	Encode,
+	Decode,
+	MaxEncodedLen,
 )]
 pub struct Hash(pub [u8; HASH_BYTES]);
 impl Hash {

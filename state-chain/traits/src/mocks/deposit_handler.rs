@@ -62,6 +62,9 @@ impl<C: Chain, T: Chainflip> MockDepositHandler<C, T> {
 					PolkadotAccountId::from_aliased([channel_id as u8; 32]),
 				),
 				ForeignChain::Bitcoin => todo!("Bitcoin address"),
+				ForeignChain::Solana =>
+				/* XXX: PRO-1019 */
+					todo!("Solana address (How come the Bitcoin works?)"),
 			},
 		)
 	}
