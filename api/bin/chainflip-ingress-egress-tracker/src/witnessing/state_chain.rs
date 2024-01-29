@@ -209,6 +209,9 @@ where
 			}
 		},
 
+		SolanaIngressEgress { .. } => todo!(),
+		SolanaBroadcaster { .. } => todo!(),
+
 		EthereumIngressEgress(_) |
 		BitcoinIngressEgress(_) |
 		PolkadotIngressEgress(_) |
@@ -229,15 +232,19 @@ where
 		EthereumChainTracking(_) |
 		BitcoinChainTracking(_) |
 		PolkadotChainTracking(_) |
+		SolanaChainTracking(_) |
 		EthereumVault(_) |
 		PolkadotVault(_) |
 		BitcoinVault(_) |
+		SolanaVault(_) |
 		EthereumThresholdSigner(_) |
 		PolkadotThresholdSigner(_) |
 		BitcoinThresholdSigner(_) |
+		SolanaThresholdSigner(_) |
 		EthereumBroadcaster(_) |
 		PolkadotBroadcaster(_) |
 		BitcoinBroadcaster(_) |
+		SolanaBroadcaster(_) |
 		Swapping(_) |
 		LiquidityProvider(_) |
 		LiquidityPools(_) => {},
