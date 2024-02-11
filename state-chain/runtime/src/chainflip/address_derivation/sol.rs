@@ -1,5 +1,4 @@
 use cf_chains::{address::AddressDerivationApi, assets::sol::Asset, Solana};
-use core::marker::PhantomData;
 
 use crate::Environment;
 
@@ -40,6 +39,12 @@ impl AddressDerivationApi<Solana> for AddressDerivation {
 					.chain_seed(VAULT_PDA_ASSET_SOL)?
 					.chain_seed(channel_id.to_ne_bytes())?
 					.finish()?;
+				log::warn!(
+					"SOL DERIVED ADDR [vault: {}; CHAN: {}]: {}",
+					vault_address,
+					channel_id,
+					pda
+				);
 				Ok((pda, Default::default()))
 			},
 		}
