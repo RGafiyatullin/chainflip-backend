@@ -1,10 +1,16 @@
 use jsonrpsee::core::params::ArrayParams;
 
+use crate::types::JsValue;
+
 pub trait Call: Send + Sync {
 	type Response: serde::de::DeserializeOwned + Send;
 
 	const CALL_METHOD_NAME: &'static str;
 	fn call_params(&self) -> ArrayParams;
+
+	fn process_response(&self, input: JsValue) -> Result<Self::Response, serde_json::Error> {
+		serde_json::from_value(input)
+	}
 }
 
 pub trait Subscription: Send + Sync {
@@ -20,6 +26,7 @@ where
 	C: Call,
 {
 	type Response = C::Response;
+
 	const CALL_METHOD_NAME: &'static str = C::CALL_METHOD_NAME;
 	fn call_params(&self) -> ArrayParams {
 		<C as Call>::call_params(*self)
