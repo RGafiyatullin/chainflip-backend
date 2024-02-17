@@ -1,4 +1,6 @@
-use cf_chains::{address::AddressDerivationApi, assets::sol::Asset, Solana};
+use cf_chains::{
+	address::AddressDerivationApi, assets::sol::Asset, sol::DerivedAddressBuilder, Solana,
+};
 
 use crate::Environment;
 
@@ -34,8 +36,7 @@ impl AddressDerivationApi<Solana> for AddressDerivation {
 		let vault_address = Environment::sol_vault_address();
 		match source_asset {
 			Asset::Sol => {
-				let (pda, _bump) = vault_address
-					.derive()?
+				let (pda, _bump) = DerivedAddressBuilder::from_address(vault_address)?
 					.chain_seed(VAULT_PDA_ASSET_SOL)?
 					.chain_seed(channel_id.to_ne_bytes())?
 					.finish()?;

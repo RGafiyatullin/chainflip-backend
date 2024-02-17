@@ -3,7 +3,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 
 use cf_primitives::EpochIndex;
-use solana_rpc::traits::SolanaApi;
+use sol_rpc::traits::CallApi as SolanaApi;
 use state_chain_runtime::SolanaInstance;
 use utilities::task_scope::Scope;
 
@@ -23,7 +23,7 @@ mod sol_source;
 
 pub async fn start<StateChainClient, StateChainStream, ProcessCall, ProcessingFut>(
 	_scope: &Scope<'_, anyhow::Error>,
-	sol_client: impl SolanaApi,
+	_sol_client: impl SolanaApi,
 	_process_call: ProcessCall,
 	state_chain_client: Arc<StateChainClient>,
 	_state_chain_stream: StateChainStream,

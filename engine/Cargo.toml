@@ -120,8 +120,8 @@ pallet-cf-cfe-interface = { path = "../state-chain/pallets/cf-cfe-interface" }
 state-chain-runtime = { path = "../state-chain/runtime" }
 utilities = { path = "../utilities" }
 
-solana-rpc = {path = "chain-rpc/solana-rpc"}
-solana-rpc-2 = {path = "chain-rpc/solana-rpc-2"}
+sol-prim = {path = "../foreign-chains/solana/sol-prim", features = ["pda", "str", "serde", "std-error"]}
+sol-rpc = {path = "../foreign-chains/solana/sol-rpc"}
 
 # substrate deps
 cf-amm = { path = "../state-chain/amm" }

@@ -1,22 +1,24 @@
 pub use cf_primitives::chains::Solana;
 use cf_primitives::{AssetAmount, ChannelId};
 
-use crate::{assets, FeeRefundCalculator};
+use crate::{address, assets, FeeRefundCalculator};
 
 use super::Chain;
 
-mod address;
 mod chain_crypto;
-mod signature;
 mod tracked_data;
 mod transaction;
 
 pub mod api;
 pub mod consts;
 
-pub use address::{AddressDerivationError, DerivedAddressBuilder, SolAddress};
+pub use sol_prim::{
+	address::Address as SolAddress,
+	pda::{Pda as DerivedAddressBuilder, PdaError as AddressDerivationError},
+	signature::Signature as SolSignature,
+};
+
 pub use chain_crypto::SolanaCrypto;
-pub use signature::SolSignature;
 pub use transaction::SolTransaction;
 
 impl Chain for Solana {
@@ -46,5 +48,34 @@ impl FeeRefundCalculator<Solana> for SolTransaction {
 		fee_paid: <Solana as Chain>::TransactionFee,
 	) -> <Solana as Chain>::ChainAmount {
 		fee_paid
+	}
+}
+
+impl TryFrom<address::ForeignChainAddress> for SolAddress {
+	type Error = address::AddressError;
+	fn try_from(value: address::ForeignChainAddress) -> Result<Self, Self::Error> {
+		if let address::ForeignChainAddress::Sol(value) = value {
+			Ok(value)
+		} else {
+			Err(address::AddressError::InvalidAddress)
+		}
+	}
+}
+impl From<SolAddress> for address::ForeignChainAddress {
+	fn from(value: SolAddress) -> Self {
+		address::ForeignChainAddress::Sol(value)
+	}
+}
+
+impl address::ToHumanreadableAddress for SolAddress {
+	#[cfg(feature = "std")]
+	type Humanreadable = String;
+
+	#[cfg(feature = "std")]
+	fn to_humanreadable(
+		&self,
+		_network_environment: cf_primitives::NetworkEnvironment,
+	) -> Self::Humanreadable {
+		self.to_string()
 	}
 }

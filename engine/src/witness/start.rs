@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use utilities::task_scope::Scope;
 
-use solana_rpc::traits::SolanaApi;
+use sol_rpc::traits::CallApi as SolanaApi;
 
 use crate::{
 	btc::retry_rpc::BtcRetryRpcClient,
