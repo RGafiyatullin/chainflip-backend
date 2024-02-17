@@ -13,13 +13,13 @@ pub trait Call: Send + Sync {
 	}
 }
 
-pub trait Subscription: Send + Sync {
-	type Notification;
+// pub trait Subscription: Send + Sync {
+// 	type Notification;
 
-	const SUBSCRIBE_METHOD_NAME: &'static str;
-	const UNSUBSCRIBE_METHOD_NAME: &'static str;
-	fn subscribe_params(&self) -> ArrayParams;
-}
+// 	const SUBSCRIBE_METHOD_NAME: &'static str;
+// 	const UNSUBSCRIBE_METHOD_NAME: &'static str;
+// 	fn subscribe_params(&self) -> ArrayParams;
+// }
 
 impl<'a, C> Call for &'a C
 where
@@ -33,17 +33,17 @@ where
 	}
 }
 
-impl<'a, S> Subscription for &'a S
-where
-	S: Subscription,
-{
-	type Notification = S::Notification;
-	const SUBSCRIBE_METHOD_NAME: &'static str = S::SUBSCRIBE_METHOD_NAME;
-	const UNSUBSCRIBE_METHOD_NAME: &'static str = S::UNSUBSCRIBE_METHOD_NAME;
-	fn subscribe_params(&self) -> ArrayParams {
-		<S as Subscription>::subscribe_params(*self)
-	}
-}
+// impl<'a, S> Subscription for &'a S
+// where
+// 	S: Subscription,
+// {
+// 	type Notification = S::Notification;
+// 	const SUBSCRIBE_METHOD_NAME: &'static str = S::SUBSCRIBE_METHOD_NAME;
+// 	const UNSUBSCRIBE_METHOD_NAME: &'static str = S::UNSUBSCRIBE_METHOD_NAME;
+// 	fn subscribe_params(&self) -> ArrayParams {
+// 		<S as Subscription>::subscribe_params(*self)
+// 	}
+// }
 
 #[async_trait::async_trait]
 pub trait CallApi {

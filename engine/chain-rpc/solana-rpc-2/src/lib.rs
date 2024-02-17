@@ -1,8 +1,9 @@
 pub mod calls;
 pub mod consts;
-pub mod subscriptions;
 pub mod traits;
 pub mod types;
+
+pub mod retrying;
 
 mod jsonrpsee;
 mod utils;
