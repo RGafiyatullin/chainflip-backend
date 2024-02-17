@@ -1,12 +1,8 @@
-use super::*;
-
 #[cfg(feature = "str")]
 mod from_and_to_str {
-	use super::*;
-
 	use core::fmt::Write;
 
-	use crate::{address::Address, consts};
+	use crate::{address::Address, consts, utils::WriteBuffer};
 
 	#[test]
 	fn zero_address_from_str() {

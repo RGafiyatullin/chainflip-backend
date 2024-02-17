@@ -5,11 +5,16 @@ use crate::{address::Address, consts};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "std-error", derive(thiserror::Error))]
 pub enum PdaError {
+	#[cfg_attr(feature = "std-error", error("not a valid point"))]
 	NotAValidPoint,
+	#[cfg_attr(feature = "std-error", error("too many seeds"))]
 	TooManySeeds,
+	#[cfg_attr(feature = "std-error", error("seed too large"))]
 	SeedTooLarge,
 	// TODO: choose a better name
+	#[cfg_attr(feature = "std-error", error("bad luck bumping seed"))]
 	BumpSeedBadLuck,
 }
 

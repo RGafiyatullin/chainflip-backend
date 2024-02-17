@@ -18,8 +18,16 @@ macro_rules! define_binary {
     };
 
     (@define_struct, $type: ident, $size: expr) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[cfg_attr(not(feature = "str"), derive(Debug))]
+        #[cfg_attr(feature = "scale", derive(scale_info::TypeInfo, codec::Encode, codec::Decode, codec::MaxEncodedLen))]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $type(pub [u8; $size]);
+
+        impl Default for $type {
+            fn default() -> Self {
+                Self([0; $size])
+            }
+        }
     };
 
     (@impl_from_array, $type: ident, $size: expr) => {
@@ -69,6 +77,12 @@ macro_rules! define_binary {
         #[cfg(feature = "str")]
         mod to_str {
             use super::*;
+
+            impl core::fmt::Debug for $type {
+                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    write!(f, "{}({})", core::any::type_name::<Self>(), self)
+                }
+            }
 
             impl core::fmt::Display for $type {
                 fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(feature = "std-error"), no_std)]
 
 #[macro_use]
 mod macros;

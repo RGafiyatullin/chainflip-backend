@@ -1,12 +1,8 @@
-use super::*;
-
 #[cfg(feature = "str")]
 mod from_and_to_str {
-	use super::*;
-
 	use core::fmt::Write;
 
-	use crate::digest::Digest;
+	use crate::{digest::Digest, utils::WriteBuffer};
 
 	#[test]
 	fn round_trip() {

@@ -1,12 +1,8 @@
-use super::*;
-
 #[cfg(feature = "str")]
 mod from_and_to_str {
-	use super::*;
-
 	use core::fmt::Write;
 
-	use crate::signature::Signature;
+	use crate::{signature::Signature, utils::WriteBuffer};
 
 	#[test]
 	fn round_trip() {
