@@ -1798,6 +1798,7 @@ dependencies = [
  "serde_path_to_error",
  "sha2 0.10.8",
  "solana-rpc",
+ "solana-rpc-2",
  "sp-core 21.0.0 (git+https://github.com/chainflip-io/polkadot-sdk.git?tag=chainflip-substrate-1.1+3)",
  "sp-rpc",
  "sp-runtime 24.0.0 (git+https://github.com/chainflip-io/polkadot-sdk.git?tag=chainflip-substrate-1.1+3)",
@@ -11297,6 +11298,18 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "solana-rpc-2"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bs58 0.5.0",
+ "jsonrpsee 0.16.3",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

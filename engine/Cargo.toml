@@ -121,6 +121,7 @@ state-chain-runtime = { path = "../state-chain/runtime" }
 utilities = { path = "../utilities" }
 
 solana-rpc = {path = "chain-rpc/solana-rpc"}
+solana-rpc-2 = {path = "chain-rpc/solana-rpc-2"}
 
 # substrate deps
 cf-amm = { path = "../state-chain/amm" }
