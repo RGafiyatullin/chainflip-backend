@@ -1,13 +1,13 @@
 use solana_rpc::{
 	error::AnyError,
 	traits::{
-		SolanaCallApi, SolanaGetFeeForMessage, SolanaGetLatestBlockhash,
+		SolanaCallApi, SolanaGetFeeForMessage, SolanaGetGenesisHash, SolanaGetLatestBlockhash,
 		SolanaGetRecentPrioritizationFees,
 	},
 };
 
-const HTTP_API_URL: &str = "https://api.devnet.solana.com";
-const HTTP_WS_URL: &str = "wss://api.devnet.solana.com";
+const HTTP_API_URL: &str = "https://api.devnet.solana.com:443/";
+const HTTP_WS_URL: &str = "wss://api.devnet.solana.com:443/";
 const DEFAULT_MESSAGE: &[u8] = &[
 	0x01, 0x00, 0x01, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -22,6 +22,9 @@ const DEFAULT_MESSAGE: &[u8] = &[
 async fn main() -> Result<(), AnyError> {
 	let http_client =
 		ensure_trait(jsonrpsee::http_client::HttpClientBuilder::default().build(HTTP_API_URL)?);
+
+	let genesis_hash = http_client.get_genesis_hash().await?;
+	eprintln!("genesis-hash: {:02x?}", genesis_hash);
 
 	let latest_blockhash = http_client.get_latest_blockhash(Default::default()).await?;
 	eprintln!("latest-blockhash: {:02x?}", latest_blockhash);

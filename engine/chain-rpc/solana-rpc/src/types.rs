@@ -7,6 +7,7 @@ mod serde_b58_hash;
 
 pub const BLOCK_HASH_LEN: usize = 32;
 pub const ACCOUNT_ADDRESS_LEN: usize = 32;
+pub const SIGNATURE_LEN: usize = 64;
 
 pub type JsValue = serde_json::Value;
 

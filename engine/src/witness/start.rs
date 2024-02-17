@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use utilities::task_scope::Scope;
 
+use solana_rpc::traits::SolanaApi;
+
 use crate::{
 	btc::retry_rpc::BtcRetryRpcClient,
 	db::PersistentKeyDB,
@@ -30,6 +32,7 @@ pub async fn start<StateChainClient>(
 	eth_client: EthRetryRpcClient<EthRpcSigningClient>,
 	btc_client: BtcRetryRpcClient,
 	dot_client: DotRetryRpcClient,
+	sol_client: impl SolanaApi,
 	state_chain_client: Arc<StateChainClient>,
 	state_chain_stream: impl StreamApi<FINALIZED> + Clone,
 	unfinalised_state_chain_stream: impl StreamApi<UNFINALIZED> + Clone,
@@ -112,7 +115,7 @@ where
 
 	let start_sol = super::sol::start(
 		scope,
-		// sol_client,
+		sol_client,
 		witness_call,
 		state_chain_client,
 		state_chain_stream,
