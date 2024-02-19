@@ -32,7 +32,7 @@ pub async fn start<StateChainClient>(
 	eth_client: EthRetryRpcClient<EthRpcSigningClient>,
 	btc_client: BtcRetryRpcClient,
 	dot_client: DotRetryRpcClient,
-	sol_client: impl SolanaApi,
+	sol_client: impl SolanaApi + Send + Sync + 'static,
 	state_chain_client: Arc<StateChainClient>,
 	state_chain_stream: impl StreamApi<FINALIZED> + Clone,
 	unfinalised_state_chain_stream: impl StreamApi<UNFINALIZED> + Clone,

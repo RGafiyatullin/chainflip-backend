@@ -32,7 +32,7 @@ use state_chain_runtime::{
 	EthereumVaultConfig, FlipBalance, FlipConfig, FundingConfig, GovernanceConfig, GrandpaConfig,
 	PolkadotChainTrackingConfig, PolkadotIngressEgressConfig, PolkadotThresholdSignerConfig,
 	PolkadotVaultConfig, ReputationConfig, RuntimeGenesisConfig, SessionConfig, SetSizeParameters,
-	Signature, SystemConfig, ValidatorConfig, WASM_BINARY,
+	Signature, SolanaIngressEgressConfig, SystemConfig, ValidatorConfig, WASM_BINARY,
 };
 
 use std::{
@@ -469,6 +469,7 @@ fn testnet_genesis(
 	bitcoin_deposit_channel_lifetime: u32,
 	ethereum_deposit_channel_lifetime: u32,
 	polkadot_deposit_channel_lifetime: u32,
+
 	bitcoin_safety_margin: u64,
 	ethereum_safety_margin: u64,
 	auction_bid_cutoff_percentage: Percent,
@@ -692,7 +693,11 @@ fn testnet_genesis(
 			witness_safety_margin: None,
 			dust_limits: Default::default(),
 		},
-		solana_ingress_egress: Default::default(),
+		solana_ingress_egress: SolanaIngressEgressConfig {
+			deposit_channel_lifetime: 42,
+			witness_safety_margin: None,
+			dust_limits: Default::default(),
+		},
 	}
 }
 

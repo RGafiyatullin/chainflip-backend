@@ -550,7 +550,9 @@ pub mod pallet {
 			});
 
 			for address in can_recycle.iter() {
+				log::warn!("on_idle. can-recycle + {:?}", address);
 				if let Some(details) = DepositChannelLookup::<T, I>::take(address) {
+					log::warn!("on_idle. Taken: {:?}", address);
 					if let Some(state) = details.deposit_channel.state.maybe_recycle() {
 						DepositChannelPool::<T, I>::insert(
 							details.deposit_channel.channel_id,
@@ -1149,6 +1151,13 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 		boost_fee: BasisPoints,
 	) -> Result<(ChannelId, TargetChainAccount<T, I>, TargetChainBlockNumber<T, I>), DispatchError>
 	{
+		log::warn!(
+			"ingress-egress[{}] source: {:?}; action: {:?}; boost: {:?}",
+			T::TargetChain::NAME,
+			source_asset,
+			action,
+			boost_fee
+		);
 		let (deposit_channel, channel_id) = if let Some((channel_id, mut deposit_channel)) =
 			DepositChannelPool::<T, I>::drain().next()
 		{
@@ -1175,6 +1184,8 @@ impl<T: Config<I>, I: 'static> Pallet<T, I> {
 				next_channel_id,
 			)
 		};
+
+		log::warn!("deposit-channel: {:?}; channel-id: {:?}", deposit_channel, channel_id);
 
 		let deposit_address = deposit_channel.address.clone();
 

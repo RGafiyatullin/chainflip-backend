@@ -189,11 +189,15 @@ async fn run_main(settings: Settings) -> anyhow::Result<()> {
 				DotRetryRpcClient::new(scope, settings.dot.nodes, expected_dot_genesis_hash)?
 			};
 			let sol_client = {
-				let http_api_url = "https://api.devnet.solana.com";
+				let http_api_url = "https://api.devnet.solana.com:443";
 				let http_api =
 					jsonrpsee::http_client::HttpClientBuilder::default().build(http_api_url)?;
+				let retrying = sol_rpc::retrying::Retrying::new(
+					http_api,
+					sol_rpc::retrying::Delays::default(),
+				);
 
-				http_api
+				retrying
 			};
 
 			witness::start::start(

@@ -1,3 +1,5 @@
+use std::error::Error as StdError;
+
 use jsonrpsee::core::params::ArrayParams;
 
 use crate::types::JsValue;
@@ -15,7 +17,7 @@ pub trait Call: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait CallApi {
-	type Error: Send;
+	type Error: StdError + Send + Sync + 'static;
 	async fn call<C: Call>(&self, call: C) -> Result<C::Response, Self::Error>;
 }
 

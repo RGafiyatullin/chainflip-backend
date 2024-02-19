@@ -1,10 +1,11 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc};
 
 use anyhow::{Context, Result};
+use futures::stream::StreamExt;
 
+use cf_chains::sol::SolAddress;
 use cf_primitives::EpochIndex;
-use sol_rpc::traits::CallApi as SolanaApi;
-use state_chain_runtime::SolanaInstance;
+use sol_rpc::{calls::GetGenesisHash, traits::CallApi as SolanaApi};
 use utilities::task_scope::Scope;
 
 use crate::{
@@ -19,16 +20,17 @@ use crate::{
 
 use super::common::epoch_source::EpochSourceBuilder;
 
+mod deposit_addresses;
 mod sol_source;
 
 pub async fn start<StateChainClient, StateChainStream, ProcessCall, ProcessingFut>(
-	_scope: &Scope<'_, anyhow::Error>,
-	_sol_client: impl SolanaApi,
-	_process_call: ProcessCall,
+	scope: &Scope<'_, anyhow::Error>,
+	sol_client: impl SolanaApi + Send + Sync + 'static,
+	process_call: ProcessCall,
 	state_chain_client: Arc<StateChainClient>,
-	_state_chain_stream: StateChainStream,
-	_epoch_source: EpochSourceBuilder<'_, '_, StateChainClient, (), ()>,
-	_db: Arc<PersistentKeyDB>,
+	state_chain_stream: StateChainStream,
+	epoch_source: EpochSourceBuilder<'_, '_, StateChainClient, (), ()>,
+	db: Arc<PersistentKeyDB>,
 ) -> Result<()>
 where
 	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
@@ -40,6 +42,9 @@ where
 		+ 'static,
 	ProcessingFut: Future<Output = ()> + Send + 'static,
 {
+	let solana_genesis_hash = sol_client.call(GetGenesisHash::default()).await?;
+	tracing::info!("Solana genesis hash: {}", solana_genesis_hash);
+
 	let vault_address = state_chain_client
 		.storage_value::<pallet_cf_environment::SolanaVaultAddress<state_chain_runtime::Runtime>>(
 			state_chain_client.latest_finalized_block().hash,
@@ -49,33 +54,44 @@ where
 
 	tracing::info!("solana vault address: {}", vault_address);
 
-	tokio::spawn(poll_deposit_addresses(state_chain_client.clone()));
-
-	// let latest_blockhash = sol_client.get_latest_blockhash(Default::default()).await;
+	let what = tokio::spawn(run(
+		sol_client,
+		process_call,
+		state_chain_client,
+		state_chain_stream,
+		db,
+		vault_address,
+	));
 
 	Ok(())
 }
 
-const SC_BLOCK_TIME: Duration = Duration::from_secs(6);
-
-async fn poll_deposit_addresses<StateChainClient>(
+async fn run<StateChainClient, StateChainStream, ProcessCall, ProcessingFut>(
+	_sol_client: impl SolanaApi + Send + Sync + 'static,
+	_process_call: ProcessCall,
 	state_chain_client: Arc<StateChainClient>,
+	_state_chain_stream: StateChainStream,
+	_db: Arc<PersistentKeyDB>,
+
+	vault_address: SolAddress,
 ) -> Result<()>
 where
 	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
+	StateChainStream: StreamApi<FINALIZED> + Clone,
+	ProcessCall: Fn(state_chain_runtime::RuntimeCall, EpochIndex) -> ProcessingFut
+		+ Send
+		+ Sync
+		+ Clone
+		+ 'static,
+	ProcessingFut: Future<Output = ()> + Send + 'static,
 {
-	let mut interval = tokio::time::interval(SC_BLOCK_TIME);
+	let deposit_addresses_updates =
+		deposit_addresses::deposit_addresses_updates(state_chain_client.as_ref());
+	let mut deposit_addresses_updates = std::pin::pin!(deposit_addresses_updates);
 
-	loop {
-		let _at = interval.tick().await;
-
-		let deposit_addresses = state_chain_client
-			.storage_map_values::<pallet_cf_ingress_egress::DepositChannelLookup<
-				state_chain_runtime::Runtime,
-				SolanaInstance,
-			>>(state_chain_client.latest_finalized_block().hash)
-			.await?;
-
-		tracing::info!("deposit addresses: {:#?}", deposit_addresses);
+	while let Some(update) = deposit_addresses_updates.next().await {
+		tracing::warn!("DEPOSIT_ADDRESS_UPDATE: {:#?}", update);
 	}
+
+	Ok(())
 }
