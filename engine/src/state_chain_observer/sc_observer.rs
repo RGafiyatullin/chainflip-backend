@@ -490,9 +490,9 @@ where
                                         // Matching here to log the event due to the match_event macro.
                                     }
 
-                                    CfeEvent::SolThresholdSignatureRequest(_) => #[allow(unused_braces)]{todo!()}
-                                    CfeEvent::SolKeygenRequest(_) => #[allow(unused_braces)]{todo!()}
-                                    CfeEvent::SolTxBroadcastRequest(_) => #[allow(unused_braces)]{todo!()}
+                                    CfeEvent::SolThresholdSignatureRequest(unsupported) => #[allow(unused_braces)]{tracing::warn!("sol-threshold-signature-request: {:?}", unsupported)}
+                                    CfeEvent::SolKeygenRequest(unsupported) => #[allow(unused_braces)]{tracing::warn!("sol-keygen-request: {:?}", unsupported)}
+                                    CfeEvent::SolTxBroadcastRequest(unsupported) => #[allow(unused_braces)]{tracing::warn!("sol-tx-broadcast-request: {:?}", unsupported)}
                                 }}
                             }
                         }
