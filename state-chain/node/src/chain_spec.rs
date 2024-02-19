@@ -244,6 +244,7 @@ pub fn inner_cf_development_config(
 				polkadot_genesis_hash: dot_genesis_hash,
 				polkadot_vault_account_id: dot_vault_account_id,
 				network_environment: NetworkEnvironment::Development,
+				sol_vault_address,
 				..Default::default()
 			},
 			eth_init_agg_key,
@@ -363,6 +364,7 @@ macro_rules! network_spec {
 							polkadot_genesis_hash: dot_genesis_hash,
 							polkadot_vault_account_id: dot_vault_account_id.clone(),
 							network_environment: NETWORK_ENVIRONMENT,
+							sol_vault_address,
 							..Default::default()
 						},
 						eth_init_agg_key,
