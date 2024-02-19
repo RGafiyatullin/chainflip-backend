@@ -19,6 +19,7 @@ pub use sol_prim::{
 };
 
 pub use chain_crypto::SolanaCrypto;
+pub use tracked_data::SolTrackedData;
 pub use transaction::SolTransaction;
 
 impl Chain for Solana {
