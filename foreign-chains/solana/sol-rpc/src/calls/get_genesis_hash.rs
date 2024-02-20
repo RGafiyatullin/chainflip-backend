@@ -1,5 +1,5 @@
 use jsonrpsee::rpc_params;
-use sol_prim::digest::Digest;
+use sol_prim::Digest;
 
 use super::GetGenesisHash;
 use crate::traits::Call;

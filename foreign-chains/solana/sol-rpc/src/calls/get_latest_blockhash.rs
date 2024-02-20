@@ -1,6 +1,6 @@
 use jsonrpsee::rpc_params;
 use serde_json::json;
-use sol_prim::digest::Digest;
+use sol_prim::Digest;
 
 use super::GetLatestBlockhash;
 use crate::{traits::Call, types::WithContext};

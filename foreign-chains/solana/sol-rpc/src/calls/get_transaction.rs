@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use jsonrpsee::rpc_params;
 use serde_json::json;
 
-use sol_prim::{address::Address, signature::Signature};
+use sol_prim::{Address, Signature};
 
 use super::GetTransaction;
 use crate::{traits::Call, types::JsValue};

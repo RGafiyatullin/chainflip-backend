@@ -13,9 +13,8 @@ pub mod api;
 pub mod consts;
 
 pub use sol_prim::{
-	address::Address as SolAddress,
 	pda::{Pda as DerivedAddressBuilder, PdaError as AddressDerivationError},
-	signature::Signature as SolSignature,
+	Address as SolAddress, Signature as SolSignature,
 };
 
 pub use chain_crypto::SolanaCrypto;

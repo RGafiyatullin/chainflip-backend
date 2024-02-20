@@ -1,6 +1,6 @@
 macro_rules! define_binary {
     ($module: ident, $type: ident, $size: expr) => {
-        pub mod $module {
+        mod $module {
             define_binary!(@define_struct, $type, $size);
             define_binary!(@impl_as_ref, $type, $size);
             define_binary!(@impl_from_array, $type, $size);
