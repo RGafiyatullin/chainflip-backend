@@ -1,11 +1,8 @@
 //! A stream of transactions that "touch" the specified address.
 //! 
 //! Works fine if no two transactions have the same slot-number.
-//! I think the following is implemented incorrectly:
-//! - [case A](https://github.com/solana-labs/solana/blob/master/ledger/src/blockstore.rs#L2845)
-//! - [(maybe)case B](https://github.com/solana-labs/solana/blob/master/ledger/src/blockstore.rs#L2872)
+//! I think the following is implemented incorrectly: [handling `before` argument](https://github.com/solana-labs/solana/blob/master/ledger/src/blockstore.rs#L2845)
 //! 
-//! ### Case-A
 //! The argument `before` if specified — stands for the "most recent" exclusive boundary of the search,
 //! i.e. this transaction and anything that happens later — should be excluded.
 //! The code does the following:
@@ -15,7 +12,6 @@
 //! - truncates the list, effectively:
 //!   - throwing away the older transactions;
 //!   - keeping the newer transactions.
-//!
 //!
 
 
