@@ -54,7 +54,7 @@ where
 
 	tracing::info!("solana vault address: {}", vault_address);
 
-	let what = tokio::spawn(run(
+	scope.spawn(run(
 		sol_client,
 		process_call,
 		state_chain_client,
@@ -70,7 +70,7 @@ async fn run<StateChainClient, StateChainStream, ProcessCall, ProcessingFut>(
 	_sol_client: impl SolanaApi + Send + Sync + 'static,
 	_process_call: ProcessCall,
 	state_chain_client: Arc<StateChainClient>,
-	_state_chain_stream: StateChainStream,
+	state_chain_stream: StateChainStream,
 	_db: Arc<PersistentKeyDB>,
 
 	vault_address: SolAddress,
@@ -85,12 +85,19 @@ where
 		+ 'static,
 	ProcessingFut: Future<Output = ()> + Send + 'static,
 {
+	std::mem::drop(state_chain_stream);
+
 	let deposit_addresses_updates =
 		deposit_addresses::deposit_addresses_updates(state_chain_client.as_ref());
 	let mut deposit_addresses_updates = std::pin::pin!(deposit_addresses_updates);
 
 	while let Some(update) = deposit_addresses_updates.next().await {
-		tracing::warn!("DEPOSIT_ADDRESS_UPDATE: {:#?}", update);
+		for (channel_id, address) in update.added {
+			tracing::warn!("DEPOSIT_ADDRESS_UPDATE: ADD [{}] {}", channel_id, address);
+		}
+		for (channel_id, address) in update.removed {
+			tracing::warn!("DEPOSIT_ADDRESS_UPDATE: REM [{}] {}", channel_id, address);
+		}
 	}
 
 	Ok(())

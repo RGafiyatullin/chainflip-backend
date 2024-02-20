@@ -11,8 +11,6 @@ use crate::state_chain_observer::client::{
 	chain_api::ChainApi, extrinsic_api::signed::SignedExtrinsicApi, storage_api::StorageApi,
 };
 
-use super::Result;
-
 const SC_BLOCK_TIME: Duration = Duration::from_secs(6);
 
 #[derive(Debug, Clone)]
@@ -28,23 +26,13 @@ where
 	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
 {
 	IntervalStream::new(tokio::time::interval(SC_BLOCK_TIME))
-		// .then(|_| {
-		// 	let sc_latest_finalized_block = state_chain_client.latest_finalized_block();
-		// 	state_chain_client.storage_map_values::<pallet_cf_ingress_egress::DepositChannelLookup<
-		// 		state_chain_runtime::Runtime,
-		// 		BitcoinInstance,
-		// 	>>(sc_latest_finalized_block.hash)
-		// })
-		// .inspect(|btc_addresses| async {
-		// 	tracing::warn!("BITCOIN_ADDRESSES: {:?}", btc_addresses);
-		// })
 		.then(|_| {
 			let sc_latest_finalized_block = state_chain_client.latest_finalized_block();
-			tracing::warn!(
-				"SC_LATEST_FINALIZED_BLOCK: {:?}/{:?}",
-				sc_latest_finalized_block.number,
-				sc_latest_finalized_block.hash
-			);
+			// tracing::warn!(
+			// 	"SC_LATEST_FINALIZED_BLOCK: {:?}/{:?}",
+			// 	sc_latest_finalized_block.number,
+			// 	sc_latest_finalized_block.hash
+			// );
 			state_chain_client.storage_map_values::<pallet_cf_ingress_egress::DepositChannelLookup<
 				state_chain_runtime::Runtime,
 				SolanaInstance,
@@ -60,7 +48,9 @@ where
 			}
 		})
 		.map(|current_vec| {
-			tracing::warn!("DEPOSIT_ADDRESS_LOOKUP: {:#?}", current_vec);
+			// if !current_vec.is_empty() {
+			// 	tracing::warn!("DEPOSIT_ADDRESS_LOOKUP: {:#?}", current_vec);
+			// }
 			current_vec
 				.into_iter()
 				.map(|entry| {
@@ -77,5 +67,4 @@ where
 
 			async move { Some(DepositAddressesUpdate { added, removed }) }
 		})
-	// futures::stream::pending()
 }

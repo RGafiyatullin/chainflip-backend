@@ -50,7 +50,7 @@ where
 	let witness_call = {
 		let state_chain_client = state_chain_client.clone();
 		move |call, epoch_index| {
-			tracing::warn!("WITNESS: @{:?} — {:?}", epoch_index, call);
+			// tracing::warn!("WITNESS: @{:?} — {:?}", epoch_index, call);
 			let state_chain_client = state_chain_client.clone();
 			async move {
 				let _ = state_chain_client
@@ -66,7 +66,7 @@ where
 	let prewitness_call = {
 		let state_chain_client = state_chain_client.clone();
 		move |call, epoch_index| {
-			tracing::warn!("PREWITNESS: @{:?} — {:?}", epoch_index, call);
+			// tracing::warn!("PREWITNESS: @{:?} — {:?}", epoch_index, call);
 			let state_chain_client = state_chain_client.clone();
 			async move {
 				let _ = state_chain_client
