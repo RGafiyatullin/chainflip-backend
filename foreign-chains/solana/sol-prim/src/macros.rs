@@ -1,5 +1,5 @@
 macro_rules! define_binary {
-    ($module: ident, $type: ident, $size: expr) => {
+    ($module: ident, $type: ident, $size: expr, $marker: literal) => {
         mod $module {
             define_binary!(@define_struct, $type, $size);
             define_binary!(@impl_as_ref, $type, $size);
@@ -8,7 +8,7 @@ macro_rules! define_binary {
             #[cfg(feature = "str")]
             define_binary!(@impl_from_str, $type, $size);
             #[cfg(feature = "str")]
-            define_binary!(@impl_display, $type, $size);
+            define_binary!(@impl_display, $type, $size, $marker);
 
             #[cfg(feature = "serde")]
             define_binary!(@impl_serde_serialize, $type, $size);
@@ -55,6 +55,12 @@ macro_rules! define_binary {
                 &self.0
             }
         }
+
+        impl AsMut<[u8; $size]> for $type {
+            fn as_mut(&mut self) -> &mut [u8; $size] {
+                &mut self.0
+            }
+        }
     };
 
     (@impl_from_str, $type: ident, $size: expr) => {
@@ -73,14 +79,14 @@ macro_rules! define_binary {
             }
         }
     };
-    (@impl_display, $type: ident, $size: expr) => {
+    (@impl_display, $type: ident, $size: expr, $marker: literal) => {
         #[cfg(feature = "str")]
         mod to_str {
             use super::*;
 
             impl core::fmt::Debug for $type {
                 fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                    write!(f, "{}({})", core::any::type_name::<Self>(), self)
+                    write!(f, "{}({})", $marker, self)
                 }
             }
 

@@ -46,7 +46,7 @@ members = [
   'utilities',
   'state-chain/custom-rpc',
   'state-chain/cf-session-benchmarking',
-  'engine/multisig',
+  'engine/multisig', "foreign-chains/solana/sol-watch",
 ]
 
 [workspace.lints.clippy]

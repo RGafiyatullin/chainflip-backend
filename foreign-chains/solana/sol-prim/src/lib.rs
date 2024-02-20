@@ -6,9 +6,12 @@ mod utils;
 
 pub mod consts;
 
-define_binary!(address, Address, crate::consts::SOLANA_ADDRESS_LEN);
-define_binary!(digest, Digest, crate::consts::SOLANA_DIGEST_LEN);
-define_binary!(signature, Signature, crate::consts::SOLANA_SIGNATURE_LEN);
+pub type BalanceAmount = u64;
+pub type SlotNumber = u64;
+
+define_binary!(address, Address, crate::consts::SOLANA_ADDRESS_LEN, "A");
+define_binary!(digest, Digest, crate::consts::SOLANA_DIGEST_LEN, "D");
+define_binary!(signature, Signature, crate::consts::SOLANA_SIGNATURE_LEN, "S");
 
 pub use crate::{address::Address, digest::Digest, signature::Signature};
 

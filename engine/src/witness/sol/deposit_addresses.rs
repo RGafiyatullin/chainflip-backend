@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use futures::stream::{Stream, StreamExt};
-use state_chain_runtime::{BitcoinInstance, SolanaInstance};
+use state_chain_runtime::SolanaInstance;
 use tokio_stream::wrappers::IntervalStream;
 
 use cf_chains::sol::SolAddress;
@@ -28,11 +28,6 @@ where
 	IntervalStream::new(tokio::time::interval(SC_BLOCK_TIME))
 		.then(|_| {
 			let sc_latest_finalized_block = state_chain_client.latest_finalized_block();
-			// tracing::warn!(
-			// 	"SC_LATEST_FINALIZED_BLOCK: {:?}/{:?}",
-			// 	sc_latest_finalized_block.number,
-			// 	sc_latest_finalized_block.hash
-			// );
 			state_chain_client.storage_map_values::<pallet_cf_ingress_egress::DepositChannelLookup<
 				state_chain_runtime::Runtime,
 				SolanaInstance,
@@ -48,9 +43,6 @@ where
 			}
 		})
 		.map(|current_vec| {
-			// if !current_vec.is_empty() {
-			// 	tracing::warn!("DEPOSIT_ADDRESS_LOOKUP: {:#?}", current_vec);
-			// }
 			current_vec
 				.into_iter()
 				.map(|entry| {

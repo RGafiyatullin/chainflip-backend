@@ -16,7 +16,7 @@ pub trait Call: Send + Sync {
 }
 
 #[async_trait::async_trait]
-pub trait CallApi {
+pub trait CallApi: Send + Sync {
 	type Error: StdError + Send + Sync + 'static;
 	async fn call<C: Call>(&self, call: C) -> Result<C::Response, Self::Error>;
 }
@@ -30,5 +30,17 @@ where
 	const CALL_METHOD_NAME: &'static str = C::CALL_METHOD_NAME;
 	fn call_params(&self) -> ArrayParams {
 		<C as Call>::call_params(*self)
+	}
+}
+
+#[async_trait::async_trait]
+impl<'a, A> CallApi for &'a A
+where
+	A: CallApi,
+{
+	type Error = A::Error;
+
+	async fn call<C: Call>(&self, call: C) -> Result<C::Response, Self::Error> {
+		<A as CallApi>::call(*self, call).await
 	}
 }

@@ -2,10 +2,10 @@ use sol_prim::{Address, Signature};
 
 use crate::types::Commitment;
 
-mod get_genesis_hash;
-mod get_latest_blockhash;
-mod get_signatures_for_address;
-mod get_transaction;
+pub mod get_genesis_hash;
+pub mod get_latest_blockhash;
+pub mod get_signatures_for_address;
+pub mod get_transaction;
 
 #[derive(Debug, Clone, Default)]
 pub struct GetGenesisHash {}

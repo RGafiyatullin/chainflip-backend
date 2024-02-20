@@ -124,6 +124,7 @@ utilities = { path = "../utilities" }
 
 sol-prim = {path = "../foreign-chains/solana/sol-prim", features = ["pda", "str", "serde", "std-error"]}
 sol-rpc = {path = "../foreign-chains/solana/sol-rpc"}
+sol-watch = {path = "../foreign-chains/solana/sol-watch"}
 
 # substrate deps
 cf-amm = { path = "../state-chain/amm" }
