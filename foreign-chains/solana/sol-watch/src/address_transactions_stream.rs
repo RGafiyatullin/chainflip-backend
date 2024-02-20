@@ -1,18 +1,4 @@
-//! A stream of transactions that "touch" the specified address.
-//! 
-//! Works fine if no two transactions have the same slot-number.
-//! I think the following is implemented incorrectly: [handling `before` argument](https://github.com/solana-labs/solana/blob/master/ledger/src/blockstore.rs#L2845)
-//! 
-//! The argument `before` if specified — stands for the "most recent" exclusive boundary of the search,
-//! i.e. this transaction and anything that happens later — should be excluded.
-//! The code does the following:
-//! - looks up the `slot`, that the `before`-transaction belongs to;
-//! - takes all the tx-ids from that slot in reverse order (the newer — at the front, the older — at the back of the list);
-//! - finds the exact position of the `before`-transaction in this list;
-//! - truncates the list, effectively:
-//!   - throwing away the older transactions;
-//!   - keeping the newer transactions.
-//!
+//! Works fine until if there is no slot with multiple transactions :\
 
 
 use std::{collections::VecDeque, time::Duration};
@@ -21,7 +7,7 @@ use futures::{stream, Stream, TryStreamExt};
 use sol_prim::{Address, Signature, SlotNumber};
 use sol_rpc::{calls::GetSignaturesForAddress, traits::CallApi};
 
-const DEFAULT_MAX_PAGE_SIZE: usize = 1000;
+const DEFAULT_MAX_PAGE_SIZE: usize = 100;
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct AddressSignatures<Api> {
@@ -141,8 +127,9 @@ where
 			max_page_size,
 		)
 		.await?;
+		eprintln!("PAGE-SIZE: {:?}/{:?}", page_size, max_page_size);
 
-		before_tx = reference_signature.or(before_tx);
+		before_tx = reference_signature;
 
 		if page_size != max_page_size {
 			break Ok(())
@@ -164,14 +151,14 @@ async fn get_single_page<Api>(
 where
 	Api: CallApi,
 {
+	eprintln!("PAGE [since(until) {:?} upto(before) {:?}]", after_tx, before_tx);
 	let request = GetSignaturesForAddress {
 		before: before_tx,
 		until: after_tx,
 		limit: Some(max_page_size),
 		..GetSignaturesForAddress::for_address(address)
 	};
-
-	let mut page = call_api.call(request).await?;
+	let page = call_api.call(request).await?;
 
 	// page.sort_unstable_by(|lo, hi| {
 	// 	(lo.slot, &lo.signature).cmp(&(hi.slot, &hi.signature)).reverse()
