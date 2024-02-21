@@ -1,4 +1,4 @@
-use std::error::Error as StdError;
+use std::{error::Error as StdError, sync::Arc};
 
 use jsonrpsee::core::params::ArrayParams;
 
@@ -42,5 +42,29 @@ where
 
 	async fn call<C: Call>(&self, call: C) -> Result<C::Response, Self::Error> {
 		<A as CallApi>::call(*self, call).await
+	}
+}
+
+#[async_trait::async_trait]
+impl<A> CallApi for Box<A>
+where
+	A: CallApi,
+{
+	type Error = A::Error;
+
+	async fn call<C: Call>(&self, call: C) -> Result<C::Response, Self::Error> {
+		<A as CallApi>::call(self.as_ref(), call).await
+	}
+}
+
+#[async_trait::async_trait]
+impl<A> CallApi for Arc<A>
+where
+	A: CallApi,
+{
+	type Error = A::Error;
+
+	async fn call<C: Call>(&self, call: C) -> Result<C::Response, Self::Error> {
+		<A as CallApi>::call(self.as_ref(), call).await
 	}
 }
