@@ -1,11 +1,18 @@
-use sol_prim::{Address, Signature};
+use sol_prim::{Address, Signature, SlotNumber};
 
 use crate::types::Commitment;
 
+pub mod get_block;
 pub mod get_genesis_hash;
 pub mod get_latest_blockhash;
 pub mod get_signatures_for_address;
 pub mod get_transaction;
+
+#[derive(Debug, Clone)]
+pub struct GetBlock {
+	pub slot_number: SlotNumber,
+	pub commitment: Commitment,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct GetGenesisHash {}
