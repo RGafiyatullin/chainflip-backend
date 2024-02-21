@@ -126,7 +126,6 @@ where
 			max_page_size,
 		)
 		.await?;
-		// eprintln!("PAGE-SIZE: {:?}/{:?}", page_size, max_page_size);
 
 		before_tx = reference_signature;
 
@@ -150,7 +149,6 @@ async fn get_single_page<Api>(
 where
 	Api: CallApi,
 {
-	// eprintln!("PAGE [since(until) {:?} upto(before) {:?}]", after_tx, before_tx);
 	let request = GetSignaturesForAddress {
 		before: before_tx,
 		until: after_tx,
@@ -159,10 +157,7 @@ where
 	};
 	let page = call_api.call(request).await?;
 
-	// page.sort_unstable_by(|lo, hi| {
-	// 	(lo.slot, &lo.signature).cmp(&(hi.slot, &hi.signature)).reverse()
-	// });
-	// page.sort_by_key(|e| std::cmp::Reverse(e.slot));
+	// TODO: make sure the page is actually sorted by slot-number.
 
 	let mut row_count = 0;
 	let mut reference_signature = None;

@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, task::Poll};
+use std::{fmt, future::Future, pin::Pin, task::Poll};
 
 use futures::{FutureExt, Stream, TryStream};
 use sol_prim::{Address, BalanceAmount, Signature, SlotNumber};
@@ -51,7 +51,7 @@ pub struct FetchBalances<'a, S, C, E> {
 }
 
 impl Discrepancy {
-	pub fn is_benign(&self) -> bool {
+	pub fn is_reconciled(&self) -> bool {
 		self.deficite == self.proficite &&
 			self.deficite != BalanceAmount::MAX &&
 			self.proficite != BalanceAmount::MAX
@@ -162,4 +162,10 @@ where
 	let balance =
 		Balance { signature, slot: response.slot, before, after, discrepancy: Default::default() };
 	Ok((rpc, Some(balance)))
+}
+
+impl fmt::Display for Discrepancy {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "proficite: {:^15}; deficite: {:^15}", self.proficite, self.deficite)
+	}
 }

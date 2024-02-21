@@ -69,7 +69,7 @@ impl Pda {
 				.chain_update(self.program_id)
 				.chain_update(consts::SOLANA_PDA_MARKER)
 				.finalize();
-			if !bytes_are_curve_point(&digest) {
+			if !bytes_are_curve_point(digest) {
 				let address = Address(digest.into());
 				let pda = (address, bump);
 				return Ok(pda)

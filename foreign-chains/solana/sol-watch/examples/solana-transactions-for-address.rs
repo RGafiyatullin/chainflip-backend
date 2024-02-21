@@ -4,6 +4,7 @@ use futures::TryStreamExt;
 use sol_prim::{Address, SlotNumber};
 use sol_watch::{
 	address_transactions_stream::AddressSignatures, deduplicate_stream::DeduplicateStreamExt,
+	ensure_balance_continuity::EnsureBalanceContinuityStreamExt,
 	fetch_balance::FetchBalancesStreamExt,
 };
 use structopt::StructOpt;
@@ -45,16 +46,27 @@ async fn main() -> Result<(), AnyError> {
 			|tx_id, _| eprintln!("! {}", tx_id),
 		)
 		.fetch_balances(&call_api, args.address)
-		.try_for_each(|balance| async move {
-			Ok(eprintln!(
-				"[{:^10}] {:^92}: Dep: {:^15?}; Wit: {:^15?}; [{:^5}]; Def: {:^15}; Pro: {:^15}",
+		.inspect_ok(|balance| {
+			eprintln!(
+				"discovered [{:^10}] {:^92}: Dep: {:^15}; Wit: {:^15}; [{:^5}]; Def: {:^15}; Pro: {:^15}",
 				balance.slot,
 				balance.signature.to_string(),
 				balance.deposited().unwrap_or_default(),
 				balance.withdrawn().unwrap_or_default(),
-				if balance.discrepancy.is_benign() { "GO!" } else { "WAIT!" },
+				if balance.discrepancy.is_reconciled() { "GO!" } else { "WAIT!" },
 				balance.discrepancy.deficite,
 				balance.discrepancy.proficite,
+			)
+		})
+		.map_err(AnyError::from)
+		.ensure_balance_continuity(args.page_size)
+		.try_for_each(|balance| async move {
+			Ok(eprintln!(
+				"TO-WITNESS [{:^10}] {:^92}: DEP: {:^15}; WIT: {:^15}",
+				balance.slot,
+				balance.signature,
+				balance.deposited().unwrap_or_default(),
+				balance.withdrawn().unwrap_or_default()
 			))
 		})
 		.await?;
