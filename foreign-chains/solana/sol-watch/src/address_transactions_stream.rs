@@ -126,7 +126,7 @@ where
 			max_page_size,
 		)
 		.await?;
-		eprintln!("PAGE-SIZE: {:?}/{:?}", page_size, max_page_size);
+		// eprintln!("PAGE-SIZE: {:?}/{:?}", page_size, max_page_size);
 
 		before_tx = reference_signature;
 
@@ -150,7 +150,7 @@ async fn get_single_page<Api>(
 where
 	Api: CallApi,
 {
-	eprintln!("PAGE [since(until) {:?} upto(before) {:?}]", after_tx, before_tx);
+	// eprintln!("PAGE [since(until) {:?} upto(before) {:?}]", after_tx, before_tx);
 	let request = GetSignaturesForAddress {
 		before: before_tx,
 		until: after_tx,
