@@ -1,8 +1,11 @@
 use cf_chains::{
-	address::AddressDerivationApi, assets::sol::Asset, sol::DerivedAddressBuilder, Solana,
+	address::AddressDerivationApi,
+	assets::sol::Asset,
+	sol::{DepositChannelState, DerivedAddressBuilder},
+	Solana,
 };
 
-use crate::Environment;
+use crate::{Environment, SolanaChainTracking};
 
 use super::AddressDerivation;
 
@@ -46,7 +49,13 @@ impl AddressDerivationApi<Solana> for AddressDerivation {
 					channel_id,
 					pda
 				);
-				Ok((pda, Default::default()))
+
+				let last_tracked_slot =
+					SolanaChainTracking::chain_state().expect("get chain_state").block_height;
+				let channel_state =
+					DepositChannelState { active_since_slot_number: last_tracked_slot };
+
+				Ok((pda, channel_state))
 			},
 		}
 	}

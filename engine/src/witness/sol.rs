@@ -110,9 +110,14 @@ where
 
 			let mut deposit_processor_kill_switches = HashMap::new();
 
-			while let Some(update) = deposit_addresses_updates.next().await {
-				for (channel_id, address) in update.added {
-					tracing::warn!("DEPOSIT_ADDRESS_UPDATE: ADD [{}] {}", channel_id, address);
+			while let Some(update) = deposit_addresses_updates.next().await.transpose()? {
+				for (channel_id, address, channel_state) in update.added {
+					tracing::warn!(
+						"DEPOSIT_ADDRESS_UPDATE: ADD [{}] {} [{:?}]",
+						channel_id,
+						address,
+						channel_state
+					);
 
 					let kill_switch = Arc::new(AtomicBool::default());
 					deposit_processor_kill_switches.insert(channel_id, Arc::clone(&kill_switch));
@@ -123,8 +128,7 @@ where
 							.poll_interval(SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL)
 							// // TODO: find a way to start from where we may have left
 							// .after_transaction(last_known_transaction)
-							// // TODO: keep slot in the channel-state
-							// .starting_with_slot(starting_with_slot)
+							.starting_with_slot(channel_state.active_since_slot_number)
 							.into_stream()
 							.deduplicate(
 								SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE * 2,

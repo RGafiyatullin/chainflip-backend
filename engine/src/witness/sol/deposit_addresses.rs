@@ -1,10 +1,13 @@
 use std::{collections::HashSet, time::Duration};
 
-use futures::stream::{Stream, StreamExt};
+use futures::{
+	stream::{self, Stream, StreamExt},
+	TryFutureExt, TryStreamExt,
+};
 use state_chain_runtime::SolanaInstance;
 use tokio_stream::wrappers::IntervalStream;
 
-use cf_chains::sol::SolAddress;
+use cf_chains::sol::{DepositChannelState, SolAddress};
 use cf_primitives::ChannelId;
 
 use crate::state_chain_observer::client::{
@@ -14,14 +17,17 @@ use crate::state_chain_observer::client::{
 const SC_BLOCK_TIME: Duration = Duration::from_secs(6);
 
 #[derive(Debug, Clone)]
-pub struct DepositAddressesUpdate {
-	pub added: Vec<(ChannelId, SolAddress)>,
-	pub removed: Vec<(ChannelId, SolAddress)>,
+pub struct DepositAddressesUpdate<
+	Added = (ChannelId, SolAddress, DepositChannelState),
+	Removed = (ChannelId, SolAddress),
+> {
+	pub added: Vec<Added>,
+	pub removed: Vec<Removed>,
 }
 
 pub fn deposit_addresses_updates<StateChainClient>(
 	state_chain_client: &StateChainClient,
-) -> impl Stream<Item = DepositAddressesUpdate> + '_
+) -> impl Stream<Item = Result<DepositAddressesUpdate, anyhow::Error>> + '_
 where
 	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
 {
@@ -59,4 +65,30 @@ where
 
 			async move { Some(DepositAddressesUpdate { added, removed }) }
 		})
+		.then(|update| populate_update_with_channel_state(state_chain_client, update))
+}
+
+async fn populate_update_with_channel_state<StateChainClient>(
+	state_chain_client: &StateChainClient,
+	update: DepositAddressesUpdate<(ChannelId, SolAddress)>,
+) -> Result<DepositAddressesUpdate<(ChannelId, SolAddress, DepositChannelState)>, anyhow::Error>
+where
+	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
+{
+	let sc_latest_finalized_blockhash = state_chain_client.latest_finalized_block().hash;
+	let added = stream::iter(update.added)
+		.then(|(channel_id, address)| async move {
+			state_chain_client
+				.storage_map_entry::<pallet_cf_ingress_egress::DepositChannelPool<
+					state_chain_runtime::Runtime,
+					SolanaInstance,
+				>>(sc_latest_finalized_blockhash, &channel_id)
+				.map_ok(move |state| {
+					(channel_id, address, state.map(|c| c.state).unwrap_or_default())
+				})
+				.await
+		})
+		.try_collect::<Vec<_>>()
+		.await?;
+	Ok(DepositAddressesUpdate { added, removed: update.removed })
 }
