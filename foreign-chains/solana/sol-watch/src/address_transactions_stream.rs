@@ -1,6 +1,6 @@
 //! Works fine until if there is no slot with multiple transactions :\
 
-use std::{collections::VecDeque, time::Duration};
+use std::{borrow::Borrow, collections::VecDeque, sync::atomic::AtomicBool, time::Duration};
 
 use futures::{stream, Stream, TryStreamExt};
 use sol_prim::{Address, Signature, SlotNumber};
@@ -9,7 +9,7 @@ use sol_rpc::{calls::GetSignaturesForAddress, traits::CallApi};
 const DEFAULT_MAX_PAGE_SIZE: usize = 100;
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
-pub struct AddressSignatures<Api> {
+pub struct AddressSignatures<Api, K> {
 	call_api: Api,
 	address: Address,
 	starting_with_slot: Option<SlotNumber>,
@@ -18,10 +18,11 @@ pub struct AddressSignatures<Api> {
 	poll_interval: Duration,
 
 	state: State,
+	kill_switch: K,
 }
 
-impl<Api> AddressSignatures<Api> {
-	pub fn new(call_api: Api, address: Address) -> Self {
+impl<Api, K> AddressSignatures<Api, K> {
+	pub fn new(call_api: Api, address: Address, kill_switch: K) -> Self {
 		Self {
 			call_api,
 			address,
@@ -31,6 +32,7 @@ impl<Api> AddressSignatures<Api> {
 			poll_interval: DEFAULT_POLL_INTERVAL,
 
 			state: State::GetHistory(Duration::ZERO, None),
+			kill_switch,
 		}
 	}
 
@@ -48,9 +50,10 @@ impl<Api> AddressSignatures<Api> {
 	}
 }
 
-impl<Api> AddressSignatures<Api>
+impl<Api, K> AddressSignatures<Api, K>
 where
 	Api: CallApi,
+	K: Borrow<AtomicBool>,
 {
 	pub fn into_stream(mut self) -> impl Stream<Item = Result<Signature, Api::Error>> {
 		self.state = State::GetHistory(Duration::ZERO, self.after_transaction);
@@ -63,11 +66,16 @@ enum State {
 	Drain(VecDeque<Signature>, Option<Signature>),
 }
 
-impl<Api> AddressSignatures<Api>
+impl<Api, K> AddressSignatures<Api, K>
 where
 	Api: CallApi,
+	K: Borrow<AtomicBool>,
 {
 	async fn unfold(mut self) -> Result<Option<(Option<Signature>, Self)>, Api::Error> {
+		if self.kill_switch.borrow().load(std::sync::atomic::Ordering::Relaxed) {
+			return Ok(None)
+		}
+
 		let out = match self.state {
 			State::GetHistory(sleep, last_signature) => {
 				tokio::time::sleep(sleep).await;
