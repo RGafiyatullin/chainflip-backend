@@ -49,7 +49,7 @@ pub struct TxMeta {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Response {
+pub struct Transaction {
 	pub slot: u64,
 	pub block_time: u64,
 	pub transaction: TxInfo,
@@ -57,7 +57,7 @@ pub struct Response {
 }
 
 impl Call for GetTransaction {
-	type Response = Response;
+	type Response = Transaction;
 	const CALL_METHOD_NAME: &'static str = "getTransaction";
 	fn call_params(&self) -> jsonrpsee::core::params::ArrayParams {
 		let signature = self.signature.to_string();
@@ -76,7 +76,7 @@ impl GetTransaction {
 	}
 }
 
-impl Response {
+impl Transaction {
 	pub fn addresses(&self) -> impl Iterator<Item = &Address> + '_ {
 		self.transaction.message.account_keys.iter()
 	}

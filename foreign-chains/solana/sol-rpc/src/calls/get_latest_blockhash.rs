@@ -7,13 +7,13 @@ use crate::{traits::Call, types::WithContext};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Response {
+pub struct LatestBlockhash {
 	pub blockhash: Digest,
 	pub last_valid_block_height: u64,
 }
 
 impl Call for GetLatestBlockhash {
-	type Response = WithContext<Response>;
+	type Response = WithContext<LatestBlockhash>;
 	const CALL_METHOD_NAME: &'static str = "getLatestBlockhash";
 
 	fn call_params(&self) -> jsonrpsee::core::params::ArrayParams {

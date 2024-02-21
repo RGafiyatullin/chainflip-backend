@@ -11,7 +11,7 @@ use crate::{
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Entry {
+pub struct SignatureForAddress {
 	pub block_time: u64,
 	pub slot: u64,
 	pub signature: Signature,
@@ -35,7 +35,7 @@ impl GetSignaturesForAddress {
 }
 
 impl Call for GetSignaturesForAddress {
-	type Response = Vec<Entry>;
+	type Response = Vec<SignatureForAddress>;
 	const CALL_METHOD_NAME: &'static str = "getSignaturesForAddress";
 	fn call_params(&self) -> jsonrpsee::core::params::ArrayParams {
 		let address = self.address.to_string();
@@ -52,7 +52,7 @@ impl Call for GetSignaturesForAddress {
 	}
 
 	fn process_response(&self, input: JsValue) -> Result<Self::Response, serde_json::Error> {
-		let mut entries: Vec<Entry> = serde_json::from_value(input)?;
+		let mut entries: Vec<SignatureForAddress> = serde_json::from_value(input)?;
 		entries.sort_by_key(|e| std::cmp::Reverse(e.slot));
 
 		Ok(entries)

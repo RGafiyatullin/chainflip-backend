@@ -1,23 +1,23 @@
 use std::{fmt, future::Future, pin::Pin, task::Poll};
 
 use futures::{FutureExt, Stream, TryStream};
-use sol_prim::{Address, BalanceAmount, Signature, SlotNumber};
+use sol_prim::{Address, Amount, Signature, SlotNumber};
 use sol_rpc::{calls::GetTransaction, traits::CallApi};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Balance {
 	pub signature: Signature,
 	pub slot: SlotNumber,
-	pub before: BalanceAmount,
-	pub after: BalanceAmount,
+	pub before: Amount,
+	pub after: Amount,
 
 	pub discrepancy: Discrepancy,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Discrepancy {
-	pub deficite: BalanceAmount,
-	pub proficite: BalanceAmount,
+	pub deficite: Amount,
+	pub proficite: Amount,
 }
 
 pub trait FetchBalancesStreamExt: TryStream<Ok = Signature> + Sized {
@@ -53,8 +53,8 @@ pub struct FetchBalances<'a, S, C, E> {
 impl Discrepancy {
 	pub fn is_reconciled(&self) -> bool {
 		self.deficite == self.proficite &&
-			self.deficite != BalanceAmount::MAX &&
-			self.proficite != BalanceAmount::MAX
+			self.deficite != Amount::MAX &&
+			self.proficite != Amount::MAX
 	}
 }
 
@@ -66,10 +66,10 @@ impl<'a, S, C, E> FetchBalances<'a, S, C, E> {
 }
 
 impl Balance {
-	pub fn deposited(&self) -> Option<BalanceAmount> {
+	pub fn deposited(&self) -> Option<Amount> {
 		self.after.checked_sub(self.before).filter(|a| *a != 0)
 	}
-	pub fn withdrawn(&self) -> Option<BalanceAmount> {
+	pub fn withdrawn(&self) -> Option<Amount> {
 		self.before.checked_sub(self.after).filter(|a| *a != 0)
 	}
 }
