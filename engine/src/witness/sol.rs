@@ -31,21 +31,22 @@ use crate::{
 use super::common::epoch_source::EpochSourceBuilder;
 
 mod deposit_addresses;
-mod sol_source;
+mod tracked_data;
 
 const SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE: usize = 100;
 const SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
-pub async fn start<StateChainClient, StateChainStream, ProcessCall, ProcessingFut>(
+pub async fn start<SolanaClient, StateChainClient, StateChainStream, ProcessCall, ProcessingFut>(
 	scope: &Scope<'_, anyhow::Error>,
-	sol_client: impl SolanaApi + Send + Sync + 'static,
+	sol_client: SolanaClient,
 	process_call: ProcessCall,
 	state_chain_client: Arc<StateChainClient>,
-	state_chain_stream: StateChainStream,
-	epoch_source: EpochSourceBuilder<'_, '_, StateChainClient, (), ()>,
-	db: Arc<PersistentKeyDB>,
+	_state_chain_stream: StateChainStream,
+	_epoch_source: EpochSourceBuilder<'_, '_, StateChainClient, (), ()>,
+	_db: Arc<PersistentKeyDB>,
 ) -> Result<()>
 where
+	SolanaClient: SolanaApi + Send + Sync + 'static,
 	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
 	StateChainStream: StreamApi<FINALIZED> + Clone,
 	ProcessCall: Fn(state_chain_runtime::RuntimeCall, EpochIndex) -> ProcessingFut
@@ -55,6 +56,8 @@ where
 		+ 'static,
 	ProcessingFut: Future<Output = ()> + Send + 'static,
 {
+	let sol_client = Arc::new(sol_client);
+
 	let solana_genesis_hash = sol_client.call(GetGenesisHash::default()).await?;
 	tracing::info!("Solana genesis hash: {}", solana_genesis_hash);
 
@@ -67,30 +70,25 @@ where
 
 	tracing::info!("solana vault address: {}", vault_address);
 
-	scope.spawn(run(
-		sol_client,
-		process_call,
-		state_chain_client,
-		state_chain_stream,
-		db,
-		vault_address,
+	scope.spawn(track_chain_state(
+		Arc::clone(&sol_client),
+		process_call.clone(),
+		state_chain_client.clone(),
 	));
+
+	scope.spawn(track_deposit_addresses(sol_client, process_call, state_chain_client));
 
 	Ok(())
 }
 
-async fn run<StateChainClient, StateChainStream, ProcessCall, ProcessingFut>(
-	sol_client: impl SolanaApi + Send + Sync + 'static,
+async fn track_chain_state<SolanaClient, StateChainClient, ProcessCall, ProcessingFut>(
+	sol_client: Arc<SolanaClient>,
 	_process_call: ProcessCall,
 	state_chain_client: Arc<StateChainClient>,
-	state_chain_stream: StateChainStream,
-	_db: Arc<PersistentKeyDB>,
-
-	vault_address: SolAddress,
 ) -> Result<()>
 where
+	SolanaClient: SolanaApi + Send + Sync + 'static,
 	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
-	StateChainStream: StreamApi<FINALIZED> + Clone,
 	ProcessCall: Fn(state_chain_runtime::RuntimeCall, EpochIndex) -> ProcessingFut
 		+ Send
 		+ Sync
@@ -98,12 +96,28 @@ where
 		+ 'static,
 	ProcessingFut: Future<Output = ()> + Send + 'static,
 {
-	std::mem::drop(state_chain_stream);
+	std::future::pending().await
+}
+
+async fn track_deposit_addresses<SolanaClient, StateChainClient, ProcessCall, ProcessingFut>(
+	sol_client: Arc<SolanaClient>,
+	_process_call: ProcessCall,
+	state_chain_client: Arc<StateChainClient>,
+) -> Result<()>
+where
+	SolanaClient: SolanaApi + Send + Sync + 'static,
+	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
+	ProcessCall: Fn(state_chain_runtime::RuntimeCall, EpochIndex) -> ProcessingFut
+		+ Send
+		+ Sync
+		+ Clone
+		+ 'static,
+	ProcessingFut: Future<Output = ()> + Send + 'static,
+{
+	// std::mem::drop(state_chain_stream);
 
 	utilities::task_scope::task_scope(move |scope| {
 		async move {
-			let sol_client = Arc::new(sol_client);
-
 			let deposit_addresses_updates =
 				deposit_addresses::deposit_addresses_updates(state_chain_client.as_ref());
 			let mut deposit_addresses_updates = std::pin::pin!(deposit_addresses_updates);
