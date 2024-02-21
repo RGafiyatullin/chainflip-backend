@@ -1,6 +1,5 @@
 //! Works fine until if there is no slot with multiple transactions :\
 
-
 use std::{collections::VecDeque, time::Duration};
 
 use futures::{stream, Stream, TryStreamExt};
