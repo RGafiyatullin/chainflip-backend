@@ -1,7 +1,8 @@
-use std::{future::Future, sync::Arc};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use cf_chains::{sol::SolTrackedData, ChainState, Solana};
 use cf_primitives::EpochIndex;
+use futures::StreamExt;
 use sol_rpc::calls::{GetExistingBlocks, GetSlot};
 use state_chain_runtime::SolanaInstance;
 
@@ -51,9 +52,9 @@ where
 {
 	let ActiveAndFuture { active: active_epochs, future: upcoming_epochs } =
 		epoch_source.into_stream().await;
+	let mut upcoming_epochs = std::pin::pin!(upcoming_epochs);
 
 	let mut current_epoch = active_epochs
-		.inspect(|e| tracing::warn!("ACTIVE: EPOCHS[{}] {:?}", e.index, e.info))
 		.last()
 		.ok_or(anyhow::anyhow!("No active_epochs — empty iterator"))?;
 
@@ -63,11 +64,23 @@ where
 	loop {
 		ticks.tick().await;
 
+		if let Some(new_epoch) = tokio::time::timeout(Duration::ZERO, upcoming_epochs.next())
+			.await
+			.ok()
+			.flatten()
+		{
+			current_epoch = new_epoch;
+		}
+
 		let chain_state = collect_tracked_data(&sol_client).await?;
 
 		if last_reported_height.replace(chain_state.block_height) != Some(chain_state.block_height)
 		{
-			tracing::info!("updating chain state with {:?}", chain_state);
+			tracing::info!(
+				"updating chain at {} state with {:?}",
+				current_epoch.index,
+				chain_state
+			);
 
 			let call = pallet_cf_chain_tracking::Call::<
 				state_chain_runtime::Runtime,
