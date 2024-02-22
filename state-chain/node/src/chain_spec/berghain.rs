@@ -17,7 +17,7 @@ pub const PROTOCOL_ID: &str = "flip-berghain";
 pub const BITCOIN_EXPIRY_BLOCKS: u32 = 24 * 60 / 10;
 pub const ETHEREUM_EXPIRY_BLOCKS: u32 = 24 * 3600 / 14;
 pub const POLKADOT_EXPIRY_BLOCKS: u32 = 24 * 3600 / 6;
-pub const SOLANA_EXPIRY_BLOCKS: u32 = 24 * 3600 / 6;
+pub const SOLANA_EXPIRY_BLOCKS: u32 = 24 * 3600 * 10 / 4;
 
 pub const ENV: StateChainEnvironment = StateChainEnvironment {
 	flip_token_address: hex_literal::hex!("826180541412D574cf1336d22c0C0a287822678A"),

@@ -12,3 +12,9 @@ impl Call for GetExistingBlocks {
 		rpc_params![self.lo, self.hi]
 	}
 }
+
+impl GetExistingBlocks {
+	pub fn range(lo: SlotNumber, hi: SlotNumber) -> Self {
+		Self { lo, hi }
+	}
+}
