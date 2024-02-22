@@ -99,7 +99,7 @@ impl core::fmt::Display for EncodedAddress {
 				std::str::from_utf8(addr)
 					.unwrap_or("The address cant be decoded from the utf8 encoded bytes")
 			),
-			EncodedAddress::Sol(addr) => write!(f, "0x{}", hex::encode(&addr[..])),
+			EncodedAddress::Sol(addr) => core::fmt::Display::fmt(&SolAddress(*addr), f),
 		}
 	}
 }
