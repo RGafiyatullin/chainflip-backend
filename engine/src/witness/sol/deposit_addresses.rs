@@ -1,30 +1,19 @@
-use std::collections::HashSet;
-
-use futures::{
-	stream::{Stream, StreamExt},
-	TryStreamExt,
-};
-use pallet_cf_ingress_egress::DepositWitness;
-use state_chain_runtime::SolanaInstance;
-use tokio_stream::wrappers::IntervalStream;
-
-use cf_chains::{assets::sol::Asset, sol::SolAddress, Solana};
-use cf_primitives::ChannelId;
-
-use crate::state_chain_observer::client::{
-	chain_api::ChainApi, extrinsic_api::signed::SignedExtrinsicApi, storage_api::StorageApi,
-};
-
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	future::Future,
 	sync::{atomic::AtomicBool, Arc},
 };
 
 use anyhow::Result;
-use futures::FutureExt;
+use futures::{
+	stream::{Stream, StreamExt},
+	FutureExt, TryStreamExt,
+};
+use tokio_stream::wrappers::IntervalStream;
 
-use cf_primitives::EpochIndex;
+use cf_chains::{assets::sol::Asset, sol::SolAddress, Solana};
+use cf_primitives::{ChannelId, EpochIndex};
+use pallet_cf_ingress_egress::DepositWitness;
 use sol_prim::SlotNumber;
 use sol_rpc::traits::CallApi as SolanaApi;
 use sol_watch::{
@@ -32,9 +21,20 @@ use sol_watch::{
 	ensure_balance_continuity::EnsureBalanceContinuityStreamExt,
 	fetch_balance::FetchBalancesStreamExt,
 };
+use state_chain_runtime::SolanaInstance;
+
+use crate::{
+	state_chain_observer::client::{
+		chain_api::ChainApi, extrinsic_api::signed::SignedExtrinsicApi, storage_api::StorageApi,
+	},
+	witness::{
+		common::epoch_source::{Epoch, EpochSource},
+		sol::epoch_stream::epoch_stream,
+	},
+};
 
 use super::{
-	SC_BLOCK_TIME, SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE,
+	zip_with_latest::TryZipLatestExt, SC_BLOCK_TIME, SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE,
 	SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL,
 };
 
@@ -108,6 +108,7 @@ where
 }
 
 pub async fn track_deposit_addresses<SolanaClient, StateChainClient, ProcessCall, ProcessingFut>(
+	epoch_source: EpochSource<(), ()>,
 	sol_client: Arc<SolanaClient>,
 	process_call: ProcessCall,
 	state_chain_client: Arc<StateChainClient>,
@@ -145,6 +146,7 @@ where
 					deposit_processor_kill_switches.insert(channel_id, Arc::clone(&kill_switch));
 
 					let running = track_single_deposit_address(
+						epoch_stream(epoch_source.clone()).await,
 						Arc::clone(&sol_client),
 						channel_id,
 						address,
@@ -177,7 +179,8 @@ where
 	.await
 }
 
-async fn track_single_deposit_address<SolanaClient, ProcessCall, ProcessingFut>(
+async fn track_single_deposit_address<EpochStream, SolanaClient, ProcessCall, ProcessingFut>(
+	epoch_stream: EpochStream,
 	sol_client: Arc<SolanaClient>,
 	channel_id: ChannelId,
 	address: SolAddress,
@@ -187,6 +190,7 @@ async fn track_single_deposit_address<SolanaClient, ProcessCall, ProcessingFut>(
 	process_call: ProcessCall,
 ) -> Result<()>
 where
+	EpochStream: Stream<Item = Epoch<(), ()>>,
 	SolanaClient: SolanaApi + Send + Sync + 'static,
 	ProcessCall: Fn(state_chain_runtime::RuntimeCall, EpochIndex) -> ProcessingFut
 		+ Send
@@ -212,7 +216,8 @@ where
 		.fetch_balances(Arc::clone(&sol_client), address)
 		.map_err(anyhow::Error::from)
 		.ensure_balance_continuity(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
-		.try_for_each(|balance| {
+		.try_zip_latest(epoch_stream)
+		.try_for_each(|(balance, epoch)| {
 			let process_call = &process_call;
 			async move {
 				if let Some(deposited_amount) = balance.deposited() {
@@ -237,7 +242,7 @@ where
 							block_height: balance.slot,
 						}
 						.into(),
-						1, // FIXME: need an epoch here
+						epoch.index,
 					)
 					.await;
 				}
