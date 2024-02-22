@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use jsonrpsee::rpc_params;
 use serde_json::json;
 
-use sol_prim::{Address, Signature};
+use sol_prim::{Address, Amount, Signature, SlotNumber};
 
 use super::GetTransaction;
 use crate::{traits::Call, types::JsValue};
@@ -38,9 +38,9 @@ pub struct LoadedAddresses {
 pub struct TxMeta {
 	pub log_messages: Vec<String>,
 	pub err: Option<JsValue>,
-	pub pre_balances: Vec<u64>,
-	pub post_balances: Vec<u64>,
-	pub fee: u64,
+	pub pre_balances: Vec<Amount>,
+	pub post_balances: Vec<Amount>,
+	pub fee: Amount,
 	pub loaded_addresses: LoadedAddresses,
 
 	#[serde(flatten)]
@@ -50,7 +50,7 @@ pub struct TxMeta {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
-	pub slot: u64,
+	pub slot: SlotNumber,
 	pub block_time: u64,
 	pub transaction: TxInfo,
 	pub meta: TxMeta,
@@ -81,7 +81,7 @@ impl Transaction {
 		self.transaction.message.account_keys.iter()
 	}
 
-	pub fn balances(&self, address: &Address) -> Option<(u64, u64)> {
+	pub fn balances(&self, address: &Address) -> Option<(Amount, Amount)> {
 		let account_idx =
 			self.transaction.message.account_keys.iter().position(|a| a == address)?;
 		Some((

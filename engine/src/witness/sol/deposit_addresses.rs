@@ -4,10 +4,11 @@ use futures::{
 	stream::{Stream, StreamExt},
 	TryStreamExt,
 };
+use pallet_cf_ingress_egress::DepositWitness;
 use state_chain_runtime::SolanaInstance;
 use tokio_stream::wrappers::IntervalStream;
 
-use cf_chains::sol::SolAddress;
+use cf_chains::{assets::sol::Asset, sol::SolAddress, Solana};
 use cf_primitives::ChannelId;
 
 use crate::state_chain_observer::client::{
@@ -108,7 +109,7 @@ where
 
 pub async fn track_deposit_addresses<SolanaClient, StateChainClient, ProcessCall, ProcessingFut>(
 	sol_client: Arc<SolanaClient>,
-	_process_call: ProcessCall,
+	process_call: ProcessCall,
 	state_chain_client: Arc<StateChainClient>,
 ) -> Result<()>
 where
@@ -150,6 +151,7 @@ where
 						opened_at,
 						expires_at,
 						kill_switch,
+						process_call.clone(),
 					);
 					scope.spawn(running);
 				}
@@ -175,16 +177,23 @@ where
 	.await
 }
 
-async fn track_single_deposit_address<SolanaClient>(
+async fn track_single_deposit_address<SolanaClient, ProcessCall, ProcessingFut>(
 	sol_client: Arc<SolanaClient>,
 	channel_id: ChannelId,
 	address: SolAddress,
 	opened_at: SlotNumber,
 	_expires_at: SlotNumber,
 	kill_switch: Arc<AtomicBool>,
+	process_call: ProcessCall,
 ) -> Result<()>
 where
 	SolanaClient: SolanaApi + Send + Sync + 'static,
+	ProcessCall: Fn(state_chain_runtime::RuntimeCall, EpochIndex) -> ProcessingFut
+		+ Send
+		+ Sync
+		+ Clone
+		+ 'static,
+	ProcessingFut: Future<Output = ()> + Send + 'static,
 {
 	AddressSignatures::new(Arc::clone(&sol_client), address, kill_switch)
 		.max_page_size(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
@@ -203,17 +212,37 @@ where
 		.fetch_balances(Arc::clone(&sol_client), address)
 		.map_err(anyhow::Error::from)
 		.ensure_balance_continuity(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
-		.try_for_each(move |balance| async move {
-			if let Some(deposited_amount) = balance.deposited() {
-				tracing::info!(
-					"  deposit-address #{}: +{} lamports; [addr: {}; tx: {}]",
-					channel_id,
-					deposited_amount,
-					address,
-					balance.signature,
-				);
+		.try_for_each(|balance| {
+			let process_call = &process_call;
+			async move {
+				if let Some(deposited_amount) = balance.deposited() {
+					tracing::info!(
+						"  deposit-address #{}: +{} lamports; [addr: {}; tx: {}]",
+						channel_id,
+						deposited_amount,
+						address,
+						balance.signature,
+					);
+
+					let deposit_witness = DepositWitness::<Solana> {
+						deposit_address: address,
+						asset: Asset::Sol,
+						amount: deposited_amount,
+						deposit_details: (),
+					};
+
+					process_call(
+						pallet_cf_ingress_egress::Call::<_, SolanaInstance>::process_deposits {
+							deposit_witnesses: vec![deposit_witness],
+							block_height: balance.slot,
+						}
+						.into(),
+						1, // FIXME: need an epoch here
+					)
+					.await;
+				}
+				Ok(())
 			}
-			Ok(())
 		})
 		.await?;
 	Ok(())

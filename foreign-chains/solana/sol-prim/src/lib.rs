@@ -6,7 +6,7 @@ mod utils;
 
 pub mod consts;
 
-pub type Amount = u64;
+pub type Amount = u128;
 pub type SlotNumber = u64;
 
 define_binary!(address, Address, crate::consts::SOLANA_ADDRESS_LEN, "A");

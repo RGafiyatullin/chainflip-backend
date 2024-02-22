@@ -1,3 +1,4 @@
+use frame_support::Never;
 use sp_core::ConstBool;
 use sp_std::vec;
 
@@ -15,7 +16,7 @@ impl ChainCrypto for SolanaCrypto {
 	type AggKey = SolAddress;
 	type Payload = [u8; 0];
 	type ThresholdSignature = SolSignature;
-	type TransactionInId = [u8; 0];
+	type TransactionInId = Never;
 	type TransactionOutId = Self::ThresholdSignature;
 
 	type GovKey = SolAddress;

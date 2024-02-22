@@ -17,22 +17,46 @@ use super::{Solana, SolanaCrypto};
 
 #[derive(CloneNoBound, DebugNoBound, PartialEqNoBound, EqNoBound, Encode, Decode, TypeInfo)]
 #[scale_info(skip_type_params(Env))]
-pub struct SolanaApi<Env>(PhantomData<Env>);
+pub enum SolanaApi<Env> {
+	AllBatch {
+		fetch_params: vec::Vec<FetchAssetParams<Solana>>,
+		transfer_params: vec::Vec<TransferAssetParams<Solana>>,
+	},
+	SetAggKeyWithAggKey {
+		maybe_old_key: Option<<SolanaCrypto as ChainCrypto>::AggKey>,
+		new_key: <SolanaCrypto as ChainCrypto>::AggKey,
+	},
+	TransferFallback {
+		transfer_param: TransferAssetParams<Solana>,
+	},
+	ExecutexSwapAndCall {
+		transfer_param: TransferAssetParams<Solana>,
+		source_chain: cf_primitives::ForeignChain,
+		source_address: Option<ForeignChainAddress>,
+		gas_budget: <Solana as Chain>::ChainAmount,
+		message: vec::Vec<u8>,
+	},
+	ApiCall {
+		threshold_signature: <SolanaCrypto as ChainCrypto>::ThresholdSignature,
+	},
+
+	_PhantomData(PhantomData<Env>),
+}
 
 impl<Env: 'static> ApiCall<SolanaCrypto> for SolanaApi<Env> {
 	fn threshold_signature_payload(&self) -> <SolanaCrypto as ChainCrypto>::Payload {
-		todo!()
+		[]
 	}
 
 	fn signed(
 		self,
-		_threshold_signature: &<SolanaCrypto as ChainCrypto>::ThresholdSignature,
+		threshold_signature: &<SolanaCrypto as ChainCrypto>::ThresholdSignature,
 	) -> Self {
-		todo!()
+		Self::ApiCall { threshold_signature: *threshold_signature }
 	}
 
 	fn chain_encoded(&self) -> vec::Vec<u8> {
-		todo!()
+		vec![]
 	}
 
 	fn is_signed(&self) -> bool {
@@ -52,36 +76,42 @@ impl<Env: 'static> ConsolidateCall<Solana> for SolanaApi<Env> {
 
 impl<Env: 'static> SetAggKeyWithAggKey<SolanaCrypto> for SolanaApi<Env> {
 	fn new_unsigned(
-		_maybe_old_key: Option<<SolanaCrypto as ChainCrypto>::AggKey>,
-		_new_key: <SolanaCrypto as ChainCrypto>::AggKey,
+		maybe_old_key: Option<<SolanaCrypto as ChainCrypto>::AggKey>,
+		new_key: <SolanaCrypto as ChainCrypto>::AggKey,
 	) -> Result<Self, crate::SetAggKeyWithAggKeyError> {
-		todo!()
+		Ok(Self::SetAggKeyWithAggKey { maybe_old_key, new_key })
 	}
 }
 
 impl<Env: 'static> ExecutexSwapAndCall<Solana> for SolanaApi<Env> {
 	fn new_unsigned(
-		_transfer_param: TransferAssetParams<Solana>,
-		_source_chain: cf_primitives::ForeignChain,
-		_source_address: Option<ForeignChainAddress>,
-		_gas_budget: <Solana as Chain>::ChainAmount,
-		_message: vec::Vec<u8>,
+		transfer_param: TransferAssetParams<Solana>,
+		source_chain: cf_primitives::ForeignChain,
+		source_address: Option<ForeignChainAddress>,
+		gas_budget: <Solana as Chain>::ChainAmount,
+		message: vec::Vec<u8>,
 	) -> Result<Self, DispatchError> {
-		todo!()
+		Ok(Self::ExecutexSwapAndCall {
+			transfer_param,
+			source_chain,
+			source_address,
+			gas_budget,
+			message,
+		})
 	}
 }
 
 impl<Env: 'static> AllBatch<Solana> for SolanaApi<Env> {
 	fn new_unsigned(
-		_fetch_params: vec::Vec<FetchAssetParams<Solana>>,
-		_transfer_params: vec::Vec<TransferAssetParams<Solana>>,
+		fetch_params: vec::Vec<FetchAssetParams<Solana>>,
+		transfer_params: vec::Vec<TransferAssetParams<Solana>>,
 	) -> Result<Self, AllBatchError> {
-		todo!()
+		Ok(Self::AllBatch { fetch_params, transfer_params })
 	}
 }
 
 impl<Env: 'static> TransferFallback<Solana> for SolanaApi<Env> {
-	fn new_unsigned(_transfer_param: TransferAssetParams<Solana>) -> Result<Self, DispatchError> {
-		todo!()
+	fn new_unsigned(transfer_param: TransferAssetParams<Solana>) -> Result<Self, DispatchError> {
+		Ok(Self::TransferFallback { transfer_param })
 	}
 }
