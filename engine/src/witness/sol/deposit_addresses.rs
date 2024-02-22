@@ -1,24 +1,45 @@
-use std::{collections::HashSet, time::Duration};
+use std::collections::HashSet;
 
 use futures::{
-	stream::{self, Stream, StreamExt},
-	TryFutureExt, TryStreamExt,
+	stream::{Stream, StreamExt},
+	TryStreamExt,
 };
 use state_chain_runtime::SolanaInstance;
 use tokio_stream::wrappers::IntervalStream;
 
-use cf_chains::sol::{DepositChannelState, SolAddress};
+use cf_chains::sol::SolAddress;
 use cf_primitives::ChannelId;
 
 use crate::state_chain_observer::client::{
 	chain_api::ChainApi, extrinsic_api::signed::SignedExtrinsicApi, storage_api::StorageApi,
 };
 
-const SC_BLOCK_TIME: Duration = Duration::from_secs(6);
+use std::{
+	collections::HashMap,
+	future::Future,
+	sync::{atomic::AtomicBool, Arc},
+};
+
+use anyhow::Result;
+use futures::FutureExt;
+
+use cf_primitives::EpochIndex;
+use sol_prim::SlotNumber;
+use sol_rpc::traits::CallApi as SolanaApi;
+use sol_watch::{
+	address_transactions_stream::AddressSignatures, deduplicate_stream::DeduplicateStreamExt,
+	ensure_balance_continuity::EnsureBalanceContinuityStreamExt,
+	fetch_balance::FetchBalancesStreamExt,
+};
+
+use super::{
+	SC_BLOCK_TIME, SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE,
+	SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL,
+};
 
 #[derive(Debug, Clone)]
 pub struct DepositAddressesUpdate<
-	Added = (ChannelId, SolAddress, DepositChannelState),
+	Added = (ChannelId, SolAddress, SlotNumber, SlotNumber),
 	Removed = (ChannelId, SolAddress),
 > {
 	pub added: Vec<Added>,
@@ -27,7 +48,7 @@ pub struct DepositAddressesUpdate<
 
 pub fn deposit_addresses_updates<StateChainClient>(
 	state_chain_client: &StateChainClient,
-) -> impl Stream<Item = Result<DepositAddressesUpdate, anyhow::Error>> + '_
+) -> impl Stream<Item = DepositAddressesUpdate> + '_
 where
 	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
 {
@@ -51,44 +72,149 @@ where
 		.map(|current_vec| {
 			current_vec
 				.into_iter()
-				.map(|entry| {
-					let chan = entry.deposit_channel;
-					(chan.channel_id, chan.address)
-				})
-				.collect::<HashSet<_>>()
+				.map(|entry| (entry.deposit_channel.channel_id, entry))
+				.collect::<HashMap<_, _>>()
 		})
-		.scan(HashSet::new(), |prev_set, current_set| {
-			let removed = prev_set.difference(&current_set).copied().collect::<Vec<_>>();
-			let added = current_set.difference(&prev_set).copied().collect::<Vec<_>>();
+		.scan(HashMap::<ChannelId, _>::new(), |current_map, new_map| {
+			let prev_map = std::mem::replace(current_map, new_map);
 
-			*prev_set = current_set;
+			let prev_keys = prev_map.keys().collect::<HashSet<_>>();
+			let current_keys = current_map.keys().collect::<HashSet<_>>();
+
+			let removed_keys = prev_keys.difference(&current_keys);
+			let added_keys = current_keys.difference(&prev_keys);
+
+			let added = added_keys
+				.flat_map(|k| current_map.get(k))
+				.map(|e| {
+					(
+						e.deposit_channel.channel_id,
+						e.deposit_channel.address,
+						e.opened_at,
+						e.expires_at,
+					)
+				})
+				.collect();
+
+			let removed = removed_keys
+				.flat_map(|k| prev_map.get(k))
+				.map(|e| (e.deposit_channel.channel_id, e.deposit_channel.address))
+				.collect();
 
 			async move { Some(DepositAddressesUpdate { added, removed }) }
 		})
-		.then(|update| populate_update_with_channel_state(state_chain_client, update))
+	// .then(|update| populate_update_with_channel_state(state_chain_client, update))
 }
 
-async fn populate_update_with_channel_state<StateChainClient>(
-	state_chain_client: &StateChainClient,
-	update: DepositAddressesUpdate<(ChannelId, SolAddress)>,
-) -> Result<DepositAddressesUpdate<(ChannelId, SolAddress, DepositChannelState)>, anyhow::Error>
+pub async fn track_deposit_addresses<SolanaClient, StateChainClient, ProcessCall, ProcessingFut>(
+	sol_client: Arc<SolanaClient>,
+	_process_call: ProcessCall,
+	state_chain_client: Arc<StateChainClient>,
+) -> Result<()>
 where
+	SolanaClient: SolanaApi + Send + Sync + 'static,
 	StateChainClient: StorageApi + ChainApi + SignedExtrinsicApi + 'static + Send + Sync,
+	ProcessCall: Fn(state_chain_runtime::RuntimeCall, EpochIndex) -> ProcessingFut
+		+ Send
+		+ Sync
+		+ Clone
+		+ 'static,
+	ProcessingFut: Future<Output = ()> + Send + 'static,
 {
-	let sc_latest_finalized_blockhash = state_chain_client.latest_finalized_block().hash;
-	let added = stream::iter(update.added)
-		.then(|(channel_id, address)| async move {
-			state_chain_client
-				.storage_map_entry::<pallet_cf_ingress_egress::DepositChannelPool<
-					state_chain_runtime::Runtime,
-					SolanaInstance,
-				>>(sc_latest_finalized_blockhash, &channel_id)
-				.map_ok(move |state| {
-					(channel_id, address, state.map(|c| c.state).unwrap_or_default())
-				})
-				.await
+	// std::mem::drop(state_chain_stream);
+
+	utilities::task_scope::task_scope(move |scope| {
+		async move {
+			let deposit_addresses_updates = deposit_addresses_updates(state_chain_client.as_ref());
+			let mut deposit_addresses_updates = std::pin::pin!(deposit_addresses_updates);
+
+			let mut deposit_processor_kill_switches = HashMap::new();
+
+			while let Some(update) = deposit_addresses_updates.next().await {
+				for (channel_id, address, opened_at, expires_at) in update.added {
+					tracing::info!(
+						"starting up a deposit-address tracking for #{}: {} [{}..{}]",
+						channel_id,
+						address,
+						opened_at,
+						expires_at,
+					);
+
+					let kill_switch = Arc::new(AtomicBool::default());
+					deposit_processor_kill_switches.insert(channel_id, Arc::clone(&kill_switch));
+
+					let running = track_single_deposit_address(
+						Arc::clone(&sol_client),
+						channel_id,
+						address,
+						opened_at,
+						expires_at,
+						kill_switch,
+					);
+					scope.spawn(running);
+				}
+				for (channel_id, address) in update.removed {
+					tracing::info!(
+						"shutting down a deposit-address tracking for #{}: {}",
+						channel_id,
+						address
+					);
+
+					if let Some(kill_switch) = deposit_processor_kill_switches.remove(&channel_id) {
+						kill_switch.store(false, std::sync::atomic::Ordering::Relaxed);
+					} else {
+						tracing::warn!("Could not find a kill-switch for channel #{}", channel_id);
+					}
+				}
+			}
+
+			Ok(())
+		}
+		.boxed()
+	})
+	.await
+}
+
+async fn track_single_deposit_address<SolanaClient>(
+	sol_client: Arc<SolanaClient>,
+	channel_id: ChannelId,
+	address: SolAddress,
+	opened_at: SlotNumber,
+	_expires_at: SlotNumber,
+	kill_switch: Arc<AtomicBool>,
+) -> Result<()>
+where
+	SolanaClient: SolanaApi + Send + Sync + 'static,
+{
+	AddressSignatures::new(Arc::clone(&sol_client), address, kill_switch)
+		.max_page_size(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
+		.poll_interval(SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL)
+		// // TODO: find a way to start from where we may have left
+		// .after_transaction(last_known_transaction)
+		.starting_with_slot(opened_at)
+		.into_stream()
+		.deduplicate(
+			SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE * 2,
+			|r| r.as_ref().ok().copied(),
+			|tx_id, _| {
+				tracing::debug!("AddressSignatures has returned a duplicate tx-id: {}", tx_id);
+			},
+		)
+		.fetch_balances(Arc::clone(&sol_client), address)
+		.map_err(anyhow::Error::from)
+		.ensure_balance_continuity(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
+		.try_for_each(move |balance| async move {
+			if let Some(deposited_amount) = balance.deposited() {
+				tracing::info!(
+					"  deposit-address #{}: +{} lamports; [addr: {}; tx: {}]",
+					channel_id,
+					deposited_amount,
+					address,
+					balance.signature,
+				);
+			}
+			Ok(())
 		})
-		.try_collect::<Vec<_>>()
 		.await?;
-	Ok(DepositAddressesUpdate { added, removed: update.removed })
+	Ok(())
 }

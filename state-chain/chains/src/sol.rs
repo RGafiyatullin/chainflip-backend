@@ -1,10 +1,9 @@
 pub use cf_primitives::chains::Solana;
 use cf_primitives::{AssetAmount, ChannelId};
-use codec::{Decode, Encode, MaxEncodedLen};
-use scale_info::TypeInfo;
+
 use sol_prim::SlotNumber;
 
-use crate::{address, assets, deposit_channel, FeeRefundCalculator};
+use crate::{address, assets, FeeRefundCalculator};
 
 use super::Chain;
 
@@ -37,34 +36,13 @@ impl Chain for Solana {
 	type ChainAccount = SolAddress;
 	type EpochStartData = ();
 	type DepositFetchId = ChannelId;
-	type DepositChannelState = DepositChannelState;
+	type DepositChannelState = ();
 	type DepositDetails = ();
 	type Transaction = SolTransaction;
 	type TransactionMetadata = ();
 	type ReplayProtectionParams = ();
 	type ReplayProtection = ();
 }
-
-#[derive(
-	// XXX: Default shouldn't probably be here :S
-	Default,
-	Debug,
-	Clone,
-	Copy,
-	PartialEq,
-	Eq,
-	TypeInfo,
-	Encode,
-	Decode,
-	MaxEncodedLen,
-	serde::Serialize,
-	serde::Deserialize,
-)]
-pub struct DepositChannelState {
-	pub active_since_slot_number: SlotNumber,
-}
-
-impl deposit_channel::ChannelLifecycleHooks for DepositChannelState {}
 
 impl FeeRefundCalculator<Solana> for SolTransaction {
 	fn return_fee_refund(

@@ -39,6 +39,7 @@ impl<Api, K> AddressSignatures<Api, K> {
 	pub fn starting_with_slot(self, slot: SlotNumber) -> Self {
 		Self { starting_with_slot: Some(slot), ..self }
 	}
+	// TODO: `fn ending_with_slot(self, slot: SlotNumber) -> Self`
 	pub fn after_transaction(self, tx_id: Signature) -> Self {
 		Self { after_transaction: Some(tx_id), ..self }
 	}

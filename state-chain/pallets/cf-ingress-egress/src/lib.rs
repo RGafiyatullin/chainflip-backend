@@ -401,8 +401,7 @@ pub mod pallet {
 
 	/// Stores address ready for use.
 	#[pallet::storage]
-	// TODO: Used to be `pub(crate)`. Find out how to get that value legally.
-	pub type DepositChannelPool<T: Config<I>, I: 'static = ()> =
+	pub(crate) type DepositChannelPool<T: Config<I>, I: 'static = ()> =
 		StorageMap<_, Twox64Concat, ChannelId, DepositChannel<T::TargetChain>>;
 
 	/// Defines the minimum amount of Deposit allowed for each asset.
