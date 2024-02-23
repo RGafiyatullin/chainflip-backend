@@ -6,8 +6,8 @@ use std::{
 
 use anyhow::Result;
 use futures::{
-	stream::{Stream, StreamExt},
-	FutureExt, TryStreamExt,
+	stream::{self, Stream, StreamExt},
+	TryStreamExt,
 };
 use tokio_stream::wrappers::IntervalStream;
 
@@ -17,9 +17,10 @@ use pallet_cf_ingress_egress::DepositWitness;
 use sol_prim::SlotNumber;
 use sol_rpc::traits::CallApi as SolanaApi;
 use sol_watch::{
-	address_transactions_stream::AddressSignatures, deduplicate_stream::DeduplicateStreamExt,
+	address_transactions_stream::AddressSignatures,
+	deduplicate_stream::DeduplicateStreamExt,
 	ensure_balance_continuity::EnsureBalanceContinuityStreamExt,
-	fetch_balance::FetchBalancesStreamExt,
+	fetch_balance::{Balance, FetchBalancesStreamExt},
 };
 use state_chain_runtime::SolanaInstance;
 
@@ -34,8 +35,8 @@ use crate::{
 };
 
 use super::{
-	zip_with_latest::TryZipLatestExt, SC_BLOCK_TIME, SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE,
-	SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL,
+	zip_with_latest::TryZipLatestExt, MAX_CONCURRENT_DEPOSIT_ADDRESS_TRACKERS, SC_BLOCK_TIME,
+	SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE, SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL,
 };
 
 #[derive(Debug, Clone)]
@@ -104,7 +105,6 @@ where
 
 			async move { Some(DepositAddressesUpdate { added, removed }) }
 		})
-	// .then(|update| populate_update_with_channel_state(state_chain_client, update))
 }
 
 pub async fn track_deposit_addresses<SolanaClient, StateChainClient, ProcessCall, ProcessingFut>(
@@ -123,106 +123,128 @@ where
 		+ 'static,
 	ProcessingFut: Future<Output = ()> + Send + 'static,
 {
-	// std::mem::drop(state_chain_stream);
+	deposit_addresses_updates(state_chain_client.as_ref())
+		.scan(HashMap::<ChannelId, Arc<AtomicBool>>::new(), |kill_switches, update| {
+			// let epoch_source = epoch_source.clone();
+			let sol_client = Arc::clone(&sol_client);
 
-	utilities::task_scope::task_scope(move |scope| {
-		async move {
-			let deposit_addresses_updates = deposit_addresses_updates(state_chain_client.as_ref());
-			let mut deposit_addresses_updates = std::pin::pin!(deposit_addresses_updates);
+			for (channel_id, address) in update.removed {
+				tracing::info!(
+					"shutting down a deposit-address tracking for #{}: {}",
+					channel_id,
+					address
+				);
 
-			let mut deposit_processor_kill_switches = HashMap::new();
-
-			while let Some(update) = deposit_addresses_updates.next().await {
-				for (channel_id, address, opened_at, expires_at) in update.added {
-					tracing::info!(
-						"starting up a deposit-address tracking for #{}: {} [{}..{}]",
-						channel_id,
-						address,
-						opened_at,
-						expires_at,
-					);
-
-					let kill_switch = Arc::new(AtomicBool::default());
-					deposit_processor_kill_switches.insert(channel_id, Arc::clone(&kill_switch));
-
-					let running = track_single_deposit_address(
-						epoch_stream(epoch_source.clone()).await,
-						Arc::clone(&sol_client),
-						channel_id,
-						address,
-						opened_at,
-						expires_at,
-						kill_switch,
-						process_call.clone(),
-					);
-					scope.spawn(running);
-				}
-				for (channel_id, address) in update.removed {
-					tracing::info!(
-						"shutting down a deposit-address tracking for #{}: {}",
-						channel_id,
-						address
-					);
-
-					if let Some(kill_switch) = deposit_processor_kill_switches.remove(&channel_id) {
-						kill_switch.store(false, std::sync::atomic::Ordering::Relaxed);
-					} else {
-						tracing::warn!("Could not find a kill-switch for channel #{}", channel_id);
-					}
+				if let Some(kill_switch) = kill_switches.remove(&channel_id) {
+					kill_switch.store(false, std::sync::atomic::Ordering::Relaxed);
+				} else {
+					tracing::warn!("Could not find a kill-switch for channel #{}", channel_id);
 				}
 			}
 
-			Ok(())
-		}
-		.boxed()
-	})
-	.await
-}
+			// Scan thinks that we'd be hogging `&mut State` for longer than necessary:
+			// it's as if it isn't going to resolve the returned by this closure future before
+			// proceeding to the next item. :\ Anyways, effectively we must wrap up all our business
+			// with the `&mut State` before doing async stuff, so that the state does not get closed
+			// into the future.
+			//
+			// Hence this seemingly unnecessary intermediate step...
+			let added_streams_arguments = update
+				.added
+				.into_iter()
+				.map(|(channel_id, address, opened_at, expires_at)| {
+					let epoch_source = epoch_source.clone();
+					let sol_client = Arc::clone(&sol_client);
+					let kill_switch = Arc::new(AtomicBool::default());
 
-async fn track_single_deposit_address<EpochStream, SolanaClient, ProcessCall, ProcessingFut>(
-	epoch_stream: EpochStream,
-	sol_client: Arc<SolanaClient>,
-	channel_id: ChannelId,
-	address: SolAddress,
-	opened_at: SlotNumber,
-	_expires_at: SlotNumber,
-	kill_switch: Arc<AtomicBool>,
-	process_call: ProcessCall,
-) -> Result<()>
-where
-	EpochStream: Stream<Item = Epoch<(), ()>>,
-	SolanaClient: SolanaApi + Send + Sync + 'static,
-	ProcessCall: Fn(state_chain_runtime::RuntimeCall, EpochIndex) -> ProcessingFut
-		+ Send
-		+ Sync
-		+ Clone
-		+ 'static,
-	ProcessingFut: Future<Output = ()> + Send + 'static,
-{
-	AddressSignatures::new(Arc::clone(&sol_client), address, kill_switch)
-		.max_page_size(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
-		.poll_interval(SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL)
-		// // TODO: find a way to start from where we may have left
-		// .after_transaction(last_known_transaction)
-		.starting_with_slot(opened_at)
-		.into_stream()
-		.deduplicate(
-			SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE * 2,
-			|r| r.as_ref().ok().copied(),
-			|tx_id, _| {
-				tracing::debug!("AddressSignatures has returned a duplicate tx-id: {}", tx_id);
+					kill_switches.insert(channel_id, Arc::clone(&kill_switch));
+					(
+						channel_id,
+						address,
+						opened_at,
+						expires_at,
+						epoch_source,
+						sol_client,
+						kill_switch,
+					)
+				})
+				.collect::<Vec<_>>();
+
+			std::future::ready(Some(stream::iter(added_streams_arguments)))
+		})
+		.flatten()
+		.then(
+			|(
+				channel_id,
+				address,
+				opened_at,
+				expires_at,
+				epoch_source,
+				sol_client,
+				kill_switch,
+			)| async move {
+				let epoch_stream = epoch_stream(epoch_source).await;
+				(channel_id, address, opened_at, expires_at, epoch_stream, sol_client, kill_switch)
 			},
 		)
-		.fetch_balances(Arc::clone(&sol_client), address)
-		.map_err(anyhow::Error::from)
-		.ensure_balance_continuity(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
-		.try_zip_latest(epoch_stream)
-		.try_for_each(|(balance, epoch)| {
+		.map(
+			|(
+				channel_id,
+				address,
+				opened_at,
+				expires_at,
+				epoch_stream,
+				sol_client,
+				kill_switch,
+			)| {
+				tracing::info!(
+					"starting up a deposit-address tracking for #{}: {} [{}..{}]",
+					channel_id,
+					address,
+					opened_at,
+					expires_at,
+				);
+
+				single_deposit_address_stream(
+					channel_id,
+					address,
+					opened_at,
+					expires_at,
+					epoch_stream,
+					sol_client,
+					kill_switch,
+				)
+				.inspect_ok(move |(channel_id, address, epoch, balance)| {
+					tracing::debug!(
+						"deposit-address tracker #{} [addr: {}, lifetime: {}, balance: {:?}]",
+						channel_id,
+						address,
+						epoch.index,
+						balance
+					)
+				})
+				.inspect_err(move |reason| {
+					tracing::warn!(
+						"Failure on deposit-address tracker #{} [addr: {}; lifetime: {}..{}]: {}",
+						channel_id,
+						address,
+						opened_at,
+						expires_at,
+						reason
+					)
+				})
+				.boxed()
+			},
+		)
+		.flatten_unordered(MAX_CONCURRENT_DEPOSIT_ADDRESS_TRACKERS)
+		// The failures are inspected and reported above
+		.filter_map(|r| async move { r.ok() })
+		.for_each(|(channel_id, address, epoch, balance)| {
 			let process_call = &process_call;
 			async move {
 				if let Some(deposited_amount) = balance.deposited() {
 					tracing::info!(
-						"  deposit-address #{}: +{} lamports; [addr: {}; tx: {}]",
+						"  witnessing a deposit at #{}: +{} lamports; [addr: {}; tx: {}]",
 						channel_id,
 						deposited_amount,
 						address,
@@ -246,9 +268,44 @@ where
 					)
 					.await;
 				}
-				Ok(())
 			}
 		})
-		.await?;
+		.await;
+
 	Ok(())
+}
+
+fn single_deposit_address_stream<EpochStream, SolanaClient, EpochI, EpochHI>(
+	channel_id: ChannelId,
+	address: SolAddress,
+	opened_at: SlotNumber,
+	_expires_at: SlotNumber,
+	epoch_stream: EpochStream,
+	sol_client: Arc<SolanaClient>,
+	kill_switch: Arc<AtomicBool>,
+) -> impl Stream<Item = Result<(ChannelId, SolAddress, Epoch<EpochI, EpochHI>, Balance)>> + Send
+where
+	EpochStream: Stream<Item = Epoch<EpochI, EpochHI>> + Send + Sized,
+	SolanaClient: SolanaApi + Send + Sync + 'static,
+	Epoch<EpochI, EpochHI>: Send + Sync + Clone + 'static,
+{
+	AddressSignatures::new(Arc::clone(&sol_client), address, kill_switch)
+		.max_page_size(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
+		.poll_interval(SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL)
+		// // TODO: find a way to start from where we may have left
+		// .after_transaction(last_known_transaction)
+		.starting_with_slot(opened_at)
+		.into_stream()
+		.deduplicate(
+			SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE * 2,
+			|r| r.as_ref().ok().copied(),
+			|tx_id, _| {
+				tracing::debug!("AddressSignatures has returned a duplicate tx-id: {}", tx_id);
+			},
+		)
+		.fetch_balances(Arc::clone(&sol_client), address)
+		.map_err(anyhow::Error::from)
+		.ensure_balance_continuity(SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE)
+		.try_zip_latest(epoch_stream)
+		.map_ok(move |(balance, epoch)| (channel_id, address, epoch, balance))
 }

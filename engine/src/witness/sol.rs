@@ -28,6 +28,7 @@ const SOLANA_SIGNATURES_FOR_TRANSACTION_PAGE_SIZE: usize = 100;
 const SOLANA_SIGNATURES_FOR_TRANSACTION_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const SOLANA_CHAIN_TRACKER_SLEEP_INTERVAL: Duration = Duration::from_secs(5);
 const SC_BLOCK_TIME: Duration = Duration::from_secs(6);
+const MAX_CONCURRENT_DEPOSIT_ADDRESS_TRACKERS: usize = 1024;
 
 pub async fn start<SolanaClient, StateChainClient, StateChainStream, ProcessCall, ProcessingFut>(
 	scope: &Scope<'_, anyhow::Error>,
